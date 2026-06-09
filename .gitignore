@@ -1,6 +1,8 @@
 # Claude Code
 .claude/
 CLAUDE.md
+.agents/
+skills-lock.json
 
 # Dependencies
 node_modules/
