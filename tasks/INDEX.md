@@ -1,12 +1,19 @@
 # Task breakdown — YouTube Buddy MVP
 
-This directory decomposes [`PRD.md`](../PRD.md) into **independent work packages** that
-separate agents can pick up. Each file is self-contained: it embeds the contracts and
-spec excerpts needed to do the work, so an agent does **not** need `PRD.md` present in its
-checkout (note: `PRD.md` and `CLAUDE.md` are git-ignored and will be absent from fresh
-worktrees). Cross-links point to sibling tasks and to the canonical docs for fuller context.
+This directory decomposed [`PRD.md`](../PRD.md) into **independent work packages** that
+separate agents could pick up. The completed packages (01–04) have been removed; only the
+**unbuilt** work remains here. Each remaining file is self-contained: it embeds the contracts
+and spec excerpts needed to do the work (note: `PRD.md` and `CLAUDE.md` are git-ignored and
+will be absent from fresh worktrees).
 
-Canonical references (read for terminology and rationale, not strictly required to execute):
+> **Status (2026-06-09):** the backend (01–02) is built, deployed, and tested, and the
+> extension foundation + popup (03–04) are built. What remains is the actual sync loop:
+> **`reporter.js` (05)** and **`renderer.js` (06)**. Until those land, `manifest.json` still
+> references the two missing files, so the extension will not load in Chrome, and
+> `BACKEND_URL` in `extension/shared.js` is still the `http://localhost:8787` placeholder
+> rather than the deployed `https://backend.aidanchien18-a8d.workers.dev`.
+
+Canonical references (read for terminology and rationale):
 
 - [`PRD.md`](../PRD.md) — full spec of record.
 - [`CONTEXT.md`](../CONTEXT.md) — glossary. **Use these exact terms in code and UI copy:**
@@ -16,54 +23,51 @@ Canonical references (read for terminology and rationale, not strictly required 
 
 ## The work packages
 
-| # | File | Owns (files) | Depends on |
-|---|------|--------------|------------|
-| 01 | [Backend data model + tests](./01-backend-data-model.md) | `backend/src/index.ts`, `backend/test/index.spec.ts` | — |
-| 02 | [Backend deploy](./02-backend-deploy.md) | (no files; ops step) | 01 |
-| 03 | [Extension foundation](./03-extension-foundation.md) | `extension/manifest.json`, `extension/shared.js`, `extension/content.js` | — |
-| 04 | [Extension popup](./04-extension-popup.md) | `extension/popup.html`, `extension/popup.js` | 03 (contracts) |
-| 05 | [Extension reporter](./05-extension-reporter.md) | `extension/reporter.js` | 03 (contracts) |
-| 06 | [Extension renderer](./06-extension-renderer.md) | `extension/renderer.js` | 03 (contracts) |
+| # | Package | Owns (files) | Status |
+|---|---------|--------------|--------|
+| 01 | Backend data model + tests | `backend/src/index.ts`, `backend/test/index.spec.ts` | ✅ done (task file removed) |
+| 02 | Backend deploy | (no files; ops step) | ✅ done — deployed, smoke-tested |
+| 03 | Extension foundation | `extension/manifest.json`, `extension/shared.js`, `extension/content.js` | ✅ done (task file removed) |
+| 04 | Extension popup | `extension/popup.html`, `extension/popup.js` | ✅ done (task file removed) |
+| 05 | [Extension reporter](./05-extension-reporter.md) | `extension/reporter.js` | ⬜ **not built** |
+| 06 | [Extension renderer](./06-extension-renderer.md) | `extension/renderer.js` | ⬜ **not built** |
 
-**No two tasks edit the same file** — that is what makes them safe to run concurrently.
+**No two tasks edit the same file** — 05 and 06 own disjoint files, so they remain safe to run
+concurrently.
 
-## How to parallelize
+## Remaining work
 
-Two independent tracks. The **backend track** (01 → 02) and the **extension track**
-(03 → {04, 05, 06}) share nothing but an HTTP contract, so they run fully in parallel.
+Both remaining packages are pure consumers of the already-built foundation — they communicate
+only via the `window.YTB` global and the `ytb:*` `document` events, with no `import`s.
 
-```
-        ┌─ 01 backend data model + tests ──→ 02 deploy ─┐
-START ──┤                                                ├──→ done
-        └─ 03 extension foundation ──→ 04 popup ─────────┤
-                                   ├─→ 05 reporter ──────┤
-                                   └─→ 06 renderer ──────┘
-```
+- [05 — reporter](./05-extension-reporter.md): report this user's own Progress Records from
+  `/watch` pages, with the ad / live-stream / Shorts / embed skip-guards.
+- [06 — renderer](./06-extension-renderer.md): draw the Buddy's marker on the active video's
+  progress bar and fractional bars on feed thumbnails.
 
-- **Wave 1 (parallel):** `01` and `03`. Neither needs the other.
-  - `03` hardcodes a **placeholder backend URL** (`http://localhost:8787`) so it does not
-    wait on `02`. The real deployed URL is dropped in later (one-line change).
-- **Wave 2 (parallel):** `04`, `05`, `06` — start once `03` has landed `shared.js` +
-  `content.js` (they consume those contracts). `02` runs whenever `01` is done.
-  - If you want **all** extension agents running at once, they may start against the
-    contracts documented in [`03`](./03-extension-foundation.md#contracts) before that file
-    is merged — the contracts are frozen there precisely so this is safe.
+Before either can run end-to-end, swap `BACKEND_URL` (and the matching `host_permissions`
+entry in `manifest.json`) from the localhost placeholder to the deployed Worker URL above.
 
-## Shared contracts (frozen — defined in full in task 03)
+## Shared contracts (frozen)
 
-Every extension consumer task is written against these. Do not change them without updating
-task 03 and every consumer:
+The remaining packages are written against these. They are now **implemented in code** rather
+than described in a task file — read the source for the exact shapes:
 
-- **`window.YTB`** global (from `shared.js`): config storage, API client, formatting utils.
-- **`document` event `ytb:navigate`** (from `content.js`): fired on load and every SPA nav.
-- **`document` event `ytb:mutation`** (from `content.js`): throttled, for feed lazy-load.
-- **Backend HTTP API** (`POST`/`GET /?code=`): the wire format between `01` and the extension.
+- **`window.YTB`** global — implemented in [`extension/shared.js`](../extension/shared.js):
+  config storage, API client (`postProgress` reads the code from config; `getRecords(code)`
+  takes it), formatting utils.
+- **`document` event `ytb:navigate`** — emitted by [`extension/content.js`](../extension/content.js)
+  on load and every SPA nav; `detail = { url, videoId }`.
+- **`document` event `ytb:mutation`** — emitted (throttled) by `content.js` for feed lazy-load.
+- **Backend HTTP API** (`POST`/`GET /?code=`) — the wire format; see
+  [`backend/src/index.ts`](../backend/src/index.ts) and [`PRD.md`](../PRD.md).
 
-See [`03-extension-foundation.md`](./03-extension-foundation.md#contracts) for the exact shapes.
+`ProgressRecord` = `{ clientId, name, videoId, timestamp, duration, updatedAt }`. A record is
+the **Buddy's** iff `record.clientId !== myClientId`; the server does no filtering.
 
 ## Definition of done (whole MVP)
 
-The acceptance criteria live in each task. The end-to-end criteria from the PRD:
+The end-to-end criteria from the PRD:
 
 - Two browsers, same Friend Code, different Display Names → each sees the other's marker on
   the active video and fractional bars on thumbnails for every video the Buddy touched in
