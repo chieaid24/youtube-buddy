@@ -5,7 +5,7 @@ A Chrome extension plus Cloudflare Worker backend that lets two friends passivel
 ## Language
 
 **Friend Code**:
-A short shared string (e.g. `WOLF-42`) that pairs two users. It is both the pairing mechanism and the only access control — anyone holding the code can read and write that pair's data.
+A short shared string (e.g. `jumping-silly-deer`) that pairs two users. It is both the pairing mechanism and the only access control — anyone holding the code can read and write that pair's data.
 _Avoid_: room code, group code, secret
 
 **Progress Record**:
