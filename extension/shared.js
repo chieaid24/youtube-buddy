@@ -6,7 +6,7 @@
 // both contexts (popups and content scripts both have chrome.storage + fetch).
 //
 // Content scripts are NOT ES modules — this file communicates only via the
-// `window.YTB` global, no import/export. See ADR-0001 and tasks/03.
+// `window.YTB` global, no import/export. See ADR-0001.
 //
 // `code` ownership (decided once, depended on by tasks 04 and 05):
 //   - getRecords(code)  — code is PASSED IN (the popup already holds the code).

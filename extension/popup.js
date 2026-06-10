@@ -1,7 +1,7 @@
 // popup.js — identity, Friend Code, pairing status, and the Sharing toggle.
 // Consumes the frozen `window.YTB` contract from shared.js (task 03). The popup is
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
-// so it survives a browser restart. See tasks/04-extension-popup.md.
+// so it survives a browser restart. See CONTEXT.md for terminology.
 
 // Built-in word lists for client-side Friend Code generation. A code is one word
 // from each list joined by hyphens: "<gerund>-<adjective>-<animal>" (e.g.

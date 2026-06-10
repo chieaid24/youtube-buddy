@@ -7,7 +7,7 @@
 // Loaded as the 2nd content-script file (after shared.js, before content.js).
 // Content scripts are NOT ES modules — this file communicates only via the
 // `window.YTB` global (from shared.js) and the `ytb:navigate` event dispatched
-// by content.js. No imports. See tasks/05-extension-reporter.md and ADR-0001.
+// by content.js. No imports. See docs/adr/0001-content-script-owned-sync.md.
 //
 // content.js owns the single navigation observer; we never detect navigation
 // ourselves. The listener below is registered synchronously at top level so it

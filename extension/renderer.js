@@ -8,8 +8,8 @@
 // content.js), so `window.YTB` exists and our `ytb:*` listeners are attached
 // synchronously at top level BEFORE content.js (loaded last) fires the initial
 // ytb:navigate. Content scripts are NOT ES modules — communicate only via the
-// window.YTB global and `document` events (no import/export). See ADR-0001 and
-// tasks/06-extension-renderer.md.
+// window.YTB global and `document` events (no import/export). See ADR-0001
+// (docs/adr/0001-content-script-owned-sync.md).
 //
 // We are a pure CONSUMER of navigation/mutation: content.js owns the single
 // observer and emits ytb:navigate / ytb:mutation; we never detect either.
