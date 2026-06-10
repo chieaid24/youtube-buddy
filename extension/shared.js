@@ -21,6 +21,11 @@ const YTB = {
   // task 02 (also update the matching entry in manifest.json host_permissions).
   BACKEND_URL: "http://localhost:8787",
 
+  // A Friend Code is one Group of at most this many distinct Client IDs (you +
+  // up to 4 Buddies). Mirrors MAX_MEMBERS in the backend Worker; the server
+  // enforces it, the client uses it to detect a full Group (see groupView).
+  MAX_MEMBERS: 5,
+
   // --- storage (chrome.storage.local) ---
   // Stored keys: name (Display Name), code (Friend Code), clientId, sharing (boolean).
 
@@ -145,6 +150,60 @@ const YTB = {
    */
   normalizeCode(raw) {
     return String(raw ?? "").trim().toUpperCase();
+  },
+
+  // --- Group helpers (multiple Buddies) ---
+
+  // Five visually distinct marker colors, all clear of YouTube's red watched-bar.
+  // A Group holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
+  BUDDY_PALETTE: ["#1ec8ff", "#ff9f1c", "#57d35a", "#b14cff", "#ffd23f"],
+
+  /**
+   * Stable color for a Buddy, hashed from their Client ID — the SAME friend is
+   * the SAME color on every video, thumbnail, and the popup roster, regardless
+   * of who else is in the Group. With only 5 colors two Buddies can collide;
+   * tooltips and the popup roster still disambiguate (accepted tradeoff).
+   * @param {string} clientId
+   * @returns {string} a hex color from BUDDY_PALETTE
+   */
+  buddyColor(clientId) {
+    const palette = YTB.BUDDY_PALETTE;
+    const s = String(clientId);
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return palette[((h % palette.length) + palette.length) % palette.length];
+  },
+
+  /**
+   * Reduce a flat records array (mine AND the Buddies') into a Group view from
+   * my perspective. A Buddy is any record with a foreign clientId; the Group is
+   * capped at MAX_MEMBERS distinct Client IDs.
+   * @param {Array<{clientId: string, name: string, updatedAt: number}>} records
+   * @param {string} myClientId
+   * @returns {{buddies: Array<object>, iAmMember: boolean, locked: boolean}}
+   *   buddies — one latest record per distinct Buddy, newest-first.
+   *   iAmMember — I already have a record under the code.
+   *   locked — the Group is full of OTHERS and I am not one of them (would be
+   *            the rejected 6th): render nothing, show "Group full".
+   */
+  groupView(records, myClientId) {
+    const latestByBuddy = new Map(); // clientId -> latest record (any video)
+    let iAmMember = false;
+    for (const r of records) {
+      if (!r || !r.clientId) continue;
+      if (r.clientId === myClientId) {
+        iAmMember = true;
+        continue;
+      }
+      const prev = latestByBuddy.get(r.clientId);
+      if (!prev || r.updatedAt > prev.updatedAt) latestByBuddy.set(r.clientId, r);
+    }
+    const buddies = Array.from(latestByBuddy.values()).sort(
+      (a, b) => b.updatedAt - a.updatedAt
+    );
+    // 5 distinct others with no record of my own = a full Group I'd be the 6th of.
+    const locked = !iAmMember && buddies.length >= YTB.MAX_MEMBERS;
+    return { buddies, iAmMember, locked };
   },
 };
 
