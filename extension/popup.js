@@ -65,6 +65,7 @@ const el = {
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
+  roster: document.getElementById("roster"),
   sharing: document.getElementById("sharing"),
   backendUrl: document.getElementById("backend-url"),
 };
@@ -129,33 +130,69 @@ function generateCode() {
   return YTB.normalizeCode(`${verb}-${adjective}-${animal}`);
 }
 
-// Pairing status: Unpaired (no code) / Waiting for buddy (code, no foreign record) /
-// Paired (a record from another Client ID exists → show Buddy name + last-seen).
+// Group status, from my perspective (a Friend Code is one Group of up to
+// YTB.MAX_MEMBERS people):
+//   Unpaired      — no code.
+//   Waiting       — code set, but no Buddy has a record yet.
+//   In group      — 1+ Buddies; list each with their color swatch + last-seen.
+//   Group full    — 5 others already, I'm not one of them (the locked-out 6th).
 async function refreshStatus(code) {
   if (!code) {
     setStatus("unpaired", "Unpaired", "Enter or generate a Friend Code to pair.");
+    renderRoster([]);
     return;
   }
 
   const records = await YTB.getRecords(code);
-  const buddyRecords = records.filter((r) => r.clientId !== myClientId);
+  const { buddies, locked } = YTB.groupView(records, myClientId);
 
-  if (buddyRecords.length === 0) {
-    setStatus("waiting", "Waiting for buddy", "");
+  if (locked) {
+    setStatus("full", "Group full", `This code already has ${YTB.MAX_MEMBERS} members.`);
+    renderRoster([]);
     return;
   }
 
-  const buddy = buddyRecords.reduce((a, b) =>
-    b.updatedAt > a.updatedAt ? b : a
-  );
-  const who = buddy.name ? buddy.name : "your Buddy";
-  setStatus("paired", "Paired", `${who} · last seen ${formatLastSeen(buddy.updatedAt)}`);
+  if (buddies.length === 0) {
+    setStatus("waiting", "Waiting for buddy", "");
+    renderRoster([]);
+    return;
+  }
+
+  const noun = buddies.length === 1 ? "buddy" : "buddies";
+  setStatus("ingroup", "In group", `${buddies.length} ${noun}`);
+  renderRoster(buddies);
 }
 
 function setStatus(state, text, sub) {
   el.status.className = `status is-${state}`;
   el.statusText.textContent = text;
   el.statusSub.textContent = sub;
+}
+
+// Render one row per Buddy: [color swatch] name · last-seen. The swatch color
+// matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
+// as the color legend. Newest-active Buddy first (groupView already sorts).
+function renderRoster(buddies) {
+  el.roster.textContent = "";
+  for (const b of buddies) {
+    const row = document.createElement("div");
+    row.className = "buddy";
+
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = YTB.buddyColor(b.clientId);
+
+    const name = document.createElement("span");
+    name.className = "buddy-name";
+    name.textContent = b.name ? b.name : "Buddy";
+
+    const seen = document.createElement("span");
+    seen.className = "buddy-seen";
+    seen.textContent = formatLastSeen(b.updatedAt);
+
+    row.append(swatch, name, seen);
+    el.roster.appendChild(row);
+  }
 }
 
 // Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is for
