@@ -59,14 +59,27 @@ const CODE_ANIMALS = [
 ];
 
 const el = {
+  nameField: document.getElementById("name-field"),
   name: document.getElementById("name"),
+  nameValue: document.getElementById("name-value"),
+  nameEdit: document.getElementById("name-edit"),
+  nameSave: document.getElementById("name-save"),
+  codeField: document.getElementById("code-field"),
   code: document.getElementById("code"),
+  codeValue: document.getElementById("code-value"),
+  codeEdit: document.getElementById("code-edit"),
+  codeSave: document.getElementById("code-save"),
   generate: document.getElementById("generate"),
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
   sharing: document.getElementById("sharing"),
   backendUrl: document.getElementById("backend-url"),
+  confirmOverlay: document.getElementById("confirm-overlay"),
+  confirmTitle: document.getElementById("confirm-title"),
+  confirmBody: document.getElementById("confirm-body"),
+  confirmCancel: document.getElementById("confirm-cancel"),
+  confirmDisconnect: document.getElementById("confirm-disconnect"),
 };
 
 let myClientId = "";
@@ -82,7 +95,14 @@ async function init() {
   const config = await YTB.getConfig();
   el.name.value = config.name || "";
   el.code.value = config.code || "";
+  el.nameValue.textContent = config.name || "";
+  el.codeValue.textContent = config.code || "";
   el.sharing.checked = config.sharing;
+
+  // A field starts locked iff it already holds a non-empty committed value, so a
+  // fresh install (both blank) opens straight into edit mode (onboarding unchanged).
+  setFieldLocked(el.nameField, !!config.name);
+  setFieldLocked(el.codeField, !!config.code);
 
   wireHandlers();
   await refreshStatus(config.code);
@@ -95,23 +115,60 @@ function wireHandlers() {
     YTB.setConfig({ name: el.name.value });
   });
 
-  // Persist the (normalized) code on every keystroke so a quick close keeps it,
-  // but only re-fetch pairing status on change/Enter to avoid spamming the backend.
+  // Persist the (normalized) code on every keystroke so a quick close keeps it.
+  // Pairing status is only re-fetched on commit (commitCode), not per keystroke.
   el.code.addEventListener("input", () => {
     YTB.setConfig({ code: YTB.normalizeCode(el.code.value) });
   });
-  el.code.addEventListener("change", () => {
-    const code = YTB.normalizeCode(el.code.value);
-    el.code.value = code;
-    YTB.setConfig({ code });
-    refreshStatus(code);
+
+  // --- commit: Save click, Enter, or blur turns an editable value into a locked
+  // one. Blur is skipped when focus moves to a sibling control (Generate keeps
+  // editing; Save handles its own commit) so neither prematurely locks the field.
+  el.nameSave.addEventListener("click", commitName);
+  el.name.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commitName();
+  });
+  el.name.addEventListener("blur", (e) => {
+    if (e.relatedTarget === el.nameSave) return;
+    commitName();
   });
 
+  el.codeSave.addEventListener("click", commitCode);
+  el.code.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commitCode();
+  });
+  el.code.addEventListener("blur", (e) => {
+    if (e.relatedTarget === el.generate || e.relatedTarget === el.codeSave) return;
+    commitCode();
+  });
+
+  // --- edit: Name is harmless (cosmetic) → unlock immediately. Code edit is the
+  // "leaving your buddy" moment → always confirm first (the field is only locked
+  // when a code is set, so there is always something to disconnect from).
+  el.nameEdit.addEventListener("click", () => {
+    setFieldLocked(el.nameField, false);
+    el.name.focus();
+  });
+  el.codeEdit.addEventListener("click", openDisconnectConfirm);
+
   el.generate.addEventListener("click", () => {
+    // Fill + persist a fresh code but stay in edit mode (no lock) — the user
+    // still confirms with Save. generateCode() is owned by the generation step.
     const code = generateCode();
     el.code.value = code;
     YTB.setConfig({ code });
-    refreshStatus(code);
+    el.code.focus();
+  });
+
+  // --- disconnect confirmation dialog.
+  el.confirmCancel.addEventListener("click", hideConfirm);
+  el.confirmDisconnect.addEventListener("click", disconnect);
+  // Dismiss (cancel) on backdrop click or Escape, so the dialog is never a trap.
+  el.confirmOverlay.addEventListener("click", (e) => {
+    if (e.target === el.confirmOverlay) hideConfirm();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el.confirmOverlay.hidden) hideConfirm();
   });
 
   // The reporter (task 05) reads this flag; the popup only writes it. Off stops our
@@ -119,6 +176,88 @@ function wireHandlers() {
   el.sharing.addEventListener("change", () => {
     YTB.setConfig({ sharing: el.sharing.checked });
   });
+}
+
+/** Toggle a field between locked (value + Edit) and editable (input + Save). */
+function setFieldLocked(field, locked) {
+  field.classList.toggle("is-locked", locked);
+}
+
+// Commit the Display Name: trim, persist, mirror into the locked view, and lock
+// only when non-empty (a blank name has nothing to lock, so it stays editable).
+function commitName() {
+  const name = el.name.value.trim();
+  el.name.value = name;
+  el.nameValue.textContent = name;
+  YTB.setConfig({ name });
+  setFieldLocked(el.nameField, name.length > 0);
+}
+
+// Commit the Friend Code: normalize, persist, refresh pairing status, and lock
+// only when non-empty. Reached from a fresh/empty edit state (editing an existing
+// code always goes through disconnect first), so it never bypasses the confirm.
+function commitCode() {
+  const code = YTB.normalizeCode(el.code.value);
+  el.code.value = code;
+  el.codeValue.textContent = code;
+  YTB.setConfig({ code });
+  setFieldLocked(el.codeField, code.length > 0);
+  refreshStatus(code);
+}
+
+// Open the disconnect confirmation for the currently-locked Friend Code. Copy
+// adapts to whether a buddy is actually connected (see CONTEXT.md "Paired").
+async function openDisconnectConfirm() {
+  const { code } = await YTB.getConfig();
+  const names = await buddyNames(code);
+  if (names.length > 0) {
+    const label = names.length === 1 ? "buddy" : "buddies";
+    el.confirmTitle.textContent = "Are you sure you want to go?";
+    el.confirmBody.textContent = `This will disconnect you from your ${label}: ${names.join(
+      ", "
+    )}.`;
+  } else {
+    el.confirmTitle.textContent = "Change your Friend Code?";
+    el.confirmBody.textContent = "No buddy has connected to this code yet.";
+  }
+  showConfirm();
+}
+
+// Buddy Display Names under `code`, deduped by Client ID (one person watching
+// several videos appears once); an unnamed buddy falls back to "your Buddy".
+async function buddyNames(code) {
+  if (!code) return [];
+  const records = await YTB.getRecords(code);
+  const latestByClient = new Map();
+  for (const r of records) {
+    if (!r || r.clientId === myClientId) continue;
+    const prev = latestByClient.get(r.clientId);
+    if (!prev || r.updatedAt > prev.updatedAt) latestByClient.set(r.clientId, r);
+  }
+  return Array.from(latestByClient.values(), (r) =>
+    r.name && r.name.trim() ? r.name.trim() : "your Buddy"
+  );
+}
+
+// Confirmed disconnect: client-only. Clear the code locally → reporter stops
+// POSTing and the renderer stops drawing (both bail on an empty code); our old
+// records under the old code expire via the backend's 14-day TTL.
+function disconnect() {
+  hideConfirm();
+  el.code.value = "";
+  el.codeValue.textContent = "";
+  YTB.setConfig({ code: "" });
+  setFieldLocked(el.codeField, false);
+  el.code.focus();
+  refreshStatus("");
+}
+
+function showConfirm() {
+  el.confirmOverlay.hidden = false;
+}
+
+function hideConfirm() {
+  el.confirmOverlay.hidden = true;
 }
 
 function generateCode() {

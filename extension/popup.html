@@ -57,12 +57,43 @@
       #code {
         text-transform: uppercase;
       }
-      .code-row {
+      .code-row,
+      .edit-row {
         display: flex;
         gap: 6px;
       }
-      .code-row input {
+      .code-row input,
+      .edit-row input {
         flex: 1;
+      }
+      /* Locked vs editable: a field shows ONE of these. `.is-locked` on the
+         `.field` (set in popup.js) swaps which child is visible. A field is
+         locked iff it holds a non-empty committed value. */
+      .field.is-locked .field-edit {
+        display: none;
+      }
+      .field:not(.is-locked) .field-locked {
+        display: none;
+      }
+      .field-locked {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .field-locked .locked-value {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 7px 9px;
+        font-size: 13px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fafafa;
+      }
+      #code-value {
+        text-transform: uppercase;
       }
       button {
         padding: 7px 10px;
@@ -176,19 +207,81 @@
         word-break: break-all;
         color: var(--muted);
       }
+      /* Inline disconnect confirmation — a styled in-popup dialog (not the
+         native confirm) so the buddy list renders on-brand. */
+      .confirm-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .confirm-overlay[hidden] {
+        display: none;
+      }
+      .confirm-box {
+        max-width: 100%;
+        padding: 14px;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+      }
+      .confirm-title {
+        margin: 0 0 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .confirm-body {
+        margin: 0 0 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .confirm-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      button.danger {
+        color: #fff;
+        background: #c0392b;
+        border-color: #c0392b;
+      }
+      button.danger:hover {
+        background: #a93226;
+      }
     </style>
   </head>
   <body>
     <h1>YouTube Buddy</h1>
 
-    <div class="field">
+    <div class="field" id="name-field">
       <label class="lbl" for="name">Display Name</label>
-      <input id="name" type="text" placeholder="Your name" autocomplete="off" />
+      <div class="field-locked">
+        <span class="locked-value" id="name-value"></span>
+        <button id="name-edit" type="button">Edit</button>
+      </div>
+      <div class="field-edit edit-row">
+        <input
+          id="name"
+          type="text"
+          placeholder='Buddy "Buddy" McGee'
+          autocomplete="off"
+        />
+        <button id="name-save" type="button">Save</button>
+      </div>
     </div>
 
-    <div class="field">
+    <div class="field" id="code-field">
       <label class="lbl" for="code">Friend Code</label>
-      <div class="code-row">
+      <div class="field-locked">
+        <span class="locked-value" id="code-value"></span>
+        <button id="code-edit" type="button">Edit</button>
+      </div>
+      <div class="field-edit code-row">
         <input
           id="code"
           type="text"
@@ -197,6 +290,7 @@
           spellcheck="false"
         />
         <button id="generate" type="button">Generate</button>
+        <button id="code-save" type="button">Save</button>
       </div>
     </div>
 
@@ -220,6 +314,24 @@
     <footer>
       Backend: <span id="backend-url" class="url"></span>
     </footer>
+
+    <div id="confirm-overlay" class="confirm-overlay" hidden>
+      <div
+        class="confirm-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+      >
+        <p class="confirm-title" id="confirm-title"></p>
+        <p class="confirm-body" id="confirm-body"></p>
+        <div class="confirm-actions">
+          <button id="confirm-cancel" type="button">Cancel</button>
+          <button id="confirm-disconnect" type="button" class="danger">
+            Disconnect
+          </button>
+        </div>
+      </div>
+    </div>
 
     <script src="shared.js"></script>
     <script src="popup.js"></script>
