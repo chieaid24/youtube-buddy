@@ -3,11 +3,59 @@
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
 // so it survives a browser restart. See tasks/04-extension-popup.md.
 
-// Small built-in word list for client-side Friend Code generation (e.g. WOLF-42).
-const CODE_WORDS = [
-  "WOLF", "BEAR", "LYNX", "HAWK", "OTTER", "FOX", "OWL", "SEAL",
-  "MOTH", "CRAB", "NEWT", "TOAD", "WREN", "IBIS", "PUMA", "KOI",
-  "ELK", "DEER", "MOLE", "SWAN",
+// Built-in word lists for client-side Friend Code generation. A code is one word
+// from each list joined by hyphens: "<gerund>-<adjective>-<animal>" (e.g.
+// JUMPING-SILLY-DEER after normalizeCode uppercases it). The three lists below are
+// 100 words each, so the code space is 100 * 100 * 100 = 1,000,000 combinations —
+// large enough that two independently-generated codes almost never collide.
+const CODE_VERBS = [
+  "jumping", "running", "dancing", "singing", "hopping", "gliding", "soaring",
+  "diving", "sprinting", "leaping", "dashing", "rolling", "spinning", "twirling",
+  "floating", "drifting", "climbing", "crawling", "marching", "prancing",
+  "galloping", "bouncing", "swaying", "swimming", "sailing", "racing", "zooming",
+  "skipping", "strolling", "wandering", "roaming", "darting", "swooping",
+  "charging", "romping", "trotting", "bounding", "vaulting", "swirling",
+  "whirling", "flipping", "twisting", "turning", "shaking", "wiggling",
+  "jiggling", "giggling", "laughing", "smiling", "grinning", "beaming",
+  "glowing", "shining", "sparkling", "glittering", "blinking", "winking",
+  "nodding", "waving", "clapping", "stomping", "tapping", "humming",
+  "whistling", "chirping", "buzzing", "snoozing", "dreaming", "yawning",
+  "stretching", "wobbling", "tumbling", "juggling", "hiking", "jogging",
+  "rowing", "paddling", "surfing", "skating", "sliding", "coasting", "cruising",
+  "hovering", "fluttering", "flapping", "pouncing", "scampering", "scurrying",
+  "sneaking", "creeping", "strutting", "waddling", "shuffling", "munching",
+  "nibbling", "snacking", "splashing", "wading", "prowling", "frolicking",
+];
+
+const CODE_ADJECTIVES = [
+  "silly", "happy", "sleepy", "grumpy", "sneaky", "fuzzy", "fluffy", "bouncy",
+  "cheery", "jolly", "zippy", "perky", "spunky", "cranky", "dizzy", "wobbly",
+  "snazzy", "jazzy", "nifty", "quirky", "wacky", "zany", "goofy", "clumsy",
+  "cuddly", "chubby", "tiny", "mighty", "brave", "bold", "shy", "calm",
+  "mellow", "jumpy", "nervous", "curious", "clever", "witty", "wise", "dapper",
+  "fancy", "shiny", "glossy", "sparkly", "dusty", "misty", "frosty", "sunny",
+  "stormy", "breezy", "chilly", "toasty", "cozy", "snug", "plump", "slim",
+  "swift", "speedy", "nimble", "lanky", "stubby", "spotty", "stripy", "patchy",
+  "scruffy", "shaggy", "bristly", "prickly", "silky", "velvety", "squishy",
+  "bumpy", "lumpy", "rugged", "rusty", "golden", "silver", "amber", "crimson",
+  "violet", "teal", "minty", "peachy", "lemony", "cherry", "honey", "mossy",
+  "leafy", "rocky", "sandy", "muddy", "swampy", "cosmic", "lunar", "solar",
+  "starry", "royal", "noble", "humble", "merry",
+];
+
+const CODE_ANIMALS = [
+  "deer", "wolf", "bear", "lynx", "hawk", "otter", "fox", "owl", "seal", "moth",
+  "crab", "newt", "toad", "wren", "ibis", "puma", "koi", "elk", "mole", "swan",
+  "hare", "lion", "tiger", "panda", "koala", "sloth", "llama", "camel", "moose",
+  "bison", "horse", "zebra", "goat", "sheep", "pony", "piglet", "calf", "lamb",
+  "fawn", "cub", "kitten", "puppy", "ferret", "weasel", "badger", "beaver",
+  "raccoon", "skunk", "possum", "hedgehog", "squirrel", "chipmunk", "rabbit",
+  "bunny", "marmot", "gopher", "vole", "shrew", "bat", "falcon", "eagle",
+  "osprey", "heron", "egret", "stork", "crane", "robin", "sparrow", "finch",
+  "magpie", "raven", "crow", "dove", "pigeon", "parrot", "toucan", "puffin",
+  "penguin", "pelican", "flamingo", "peacock", "turkey", "rooster", "duck",
+  "goose", "quail", "turtle", "tortoise", "gecko", "iguana", "lizard", "cobra",
+  "viper", "python", "salmon", "trout", "perch", "minnow", "guppy", "dolphin",
 ];
 
 const el = {
@@ -74,9 +122,11 @@ function wireHandlers() {
 }
 
 function generateCode() {
-  const word = CODE_WORDS[Math.floor(Math.random() * CODE_WORDS.length)];
-  const num = String(Math.floor(Math.random() * 100)).padStart(2, "0");
-  return YTB.normalizeCode(`${word}-${num}`);
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  const verb = pick(CODE_VERBS);
+  const adjective = pick(CODE_ADJECTIVES);
+  const animal = pick(CODE_ANIMALS);
+  return YTB.normalizeCode(`${verb}-${adjective}-${animal}`);
 }
 
 // Pairing status: Unpaired (no code) / Waiting for buddy (code, no foreign record) /
