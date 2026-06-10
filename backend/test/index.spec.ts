@@ -95,6 +95,41 @@ describe("POST /?code=", () => {
 	});
 });
 
+describe("Group cap (POST)", () => {
+	const members = ["m1", "m2", "m3", "m4", "m5"];
+
+	it("admits up to 5 distinct Client IDs under one code", async () => {
+		const code = "cap-five";
+		for (const clientId of members) {
+			const res = await post(code, body({ clientId, videoId: "v" }));
+			expect(res.status).toBe(200);
+		}
+	});
+
+	it("rejects a 6th distinct Client ID with 409 group full", async () => {
+		const code = "cap-sixth";
+		for (const clientId of members) {
+			await post(code, body({ clientId, videoId: "v" }));
+		}
+		const res = await post(code, body({ clientId: "m6", videoId: "v" }));
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: "group full" });
+		// The rejected member left no record behind.
+		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
+	});
+
+	it("still accepts a returning member's new video when the group is full", async () => {
+		const code = "cap-returning";
+		for (const clientId of members) {
+			await post(code, body({ clientId, videoId: "v1" }));
+		}
+		// m1 is already a member; a new video must go through even at capacity.
+		const res = await post(code, body({ clientId: "m1", videoId: "v2" }));
+		expect(res.status).toBe(200);
+		expect(await env.PROGRESS.get(`${code}:m1:v2`)).not.toBeNull();
+	});
+});
+
 describe("GET /?code=", () => {
 	it("returns a flat array of all live records for the code, and nothing from other codes", async () => {
 		const codeA = "get-code-a";
