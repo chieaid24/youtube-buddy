@@ -15,6 +15,10 @@ interface ProgressBody {
 // bounds the GET prefix scan.
 const TTL_SECONDS = 14 * 24 * 3600;
 
+// A Friend Code is one Group of at most this many distinct Client IDs (you +
+// up to 4 Buddies). Enforced best-effort on POST — see the cap check below.
+const MAX_MEMBERS = 5;
+
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -42,8 +46,25 @@ export default {
         return json({ error }, 400);
       }
 
+      // Best-effort Group cap: a Friend Code holds at most MAX_MEMBERS distinct
+      // Client IDs. The current members are derived from existing key names
+      // (`${code}:${clientId}:${videoId}`) with no value reads, and a brand-new
+      // Client ID is rejected once the Group is full. Returning members — and
+      // their new videos — always go through. KV is eventually consistent with
+      // no transactions, so a simultaneous-join race (or a >1000-key code whose
+      // listing truncates) can momentarily admit a 6th; acceptable for a
+      // friends-only weak-secret app.
+      const prefix = `${code}:`;
+      const existing = await env.PROGRESS.list({ prefix });
+      const members = new Set(
+        existing.keys.map((k) => k.name.slice(prefix.length).split(":")[0])
+      );
+      if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+        return json({ error: "group full" }, 409);
+      }
+
       // updatedAt is server-authoritative — never trust the client's value.
-      const key = `${code}:${body.clientId}:${body.videoId}`;
+      const key = `${prefix}${body.clientId}:${body.videoId}`;
       const record = {
         clientId: body.clientId,
         name: body.name,

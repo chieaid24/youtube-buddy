@@ -1,8 +1,9 @@
 // extension/renderer.js
 //
-// The renderer: draws the Buddy's Progress Records — a marker on the active
-// video's player progress bar, and fractional bars on thumbnails across the
-// home/recommended/search/listing surfaces. Display-only (no click-to-seek).
+// The renderer: draws the Buddies' Progress Records — a colored marker per Buddy
+// on the active video's player progress bar, and a segmented progress bar on
+// thumbnails across the home/recommended/search/listing surfaces. Display-only
+// (no click-to-seek).
 //
 // Loaded as the 3rd content-script file (after shared.js + reporter.js, before
 // content.js), so `window.YTB` exists and our `ytb:*` listeners are attached
@@ -14,40 +15,42 @@
 // We are a pure CONSUMER of navigation/mutation: content.js owns the single
 // observer and emits ytb:navigate / ytb:mutation; we never detect either.
 //
-// "Buddy" filter: a record is the Buddy's iff record.clientId !== myClientId.
-// Reads happen regardless of the Sharing toggle — Sharing only gates POSTs.
+// "Buddy" filter: a record is a Buddy's iff record.clientId !== myClientId. A
+// Friend Code is one Group of up to YTB.MAX_MEMBERS people; when this install is
+// the locked-out 6th (Group full), we draw nothing. Reads happen regardless of
+// the Sharing toggle — Sharing only gates POSTs.
 
 (function () {
   "use strict";
 
   // --- constants ---
-  // YouTube's own "already watched" bar is red; the Buddy bar must be visibly
-  // different so users don't confuse it with their own history. Bright cyan.
-  const BUDDY_COLOR = "#1ec8ff";
+  // Each Buddy gets a stable color from YTB.buddyColor (set inline per element);
+  // the CSS defaults below only matter before a color is assigned.
 
   const MARKER_CLASS = "ytb-watch-marker";
   const TOOLTIP_CLASS = "ytb-watch-tooltip";
-  const THUMB_BAR_CLASS = "ytb-thumb-bar";
+  const THUMB_BAR_CLASS = "ytb-thumb-bar"; // segmented-bar container
+  const THUMB_SEG_CLASS = "ytb-thumb-seg"; // one colored segment per Buddy
   const STYLE_ID = "ytb-renderer-style";
 
   // --- state ---
   let myClientId = null; // memoized; my own records are filtered out
-  let buddyByVideoId = new Map(); // videoId -> most-recent Buddy ProgressRecord
+  let buddyByVideoId = new Map(); // videoId -> Buddy ProgressRecord[] (latest per Buddy)
   let currentVideoId = null; // active /watch video, or null off a watch page
   let refreshToken = 0; // guards against out-of-order async refreshes
 
   injectStyle();
 
   // ---------------------------------------------------------------------------
-  // Data: fetch + cache the Buddy's records.
+  // Data: fetch + cache the Buddies' records.
   // ---------------------------------------------------------------------------
 
   /**
-   * GET every record under the configured Friend Code, keep only the Buddy's
-   * (foreign clientId), and index them by videoId (most-recent updatedAt wins).
-   * Bails to an empty cache when there is no code (Unpaired — nothing to draw).
-   * Server-side TTL already drops records older than 14 days, so no age filter
-   * is needed here.
+   * GET every record under the configured Friend Code and index the Buddies'
+   * (foreign clientId) by videoId — one latest record per Buddy per video. Bails
+   * to an empty cache when there is no code (Unpaired) or when this install is
+   * the locked-out 6th member (Group full — draw nothing). Server-side TTL
+   * already drops records older than 14 days, so no age filter is needed here.
    */
   async function refresh() {
     const { code } = await YTB.getConfig();
@@ -57,69 +60,107 @@
     }
     myClientId = myClientId || (await YTB.ensureClientId());
     const all = await YTB.getRecords(code);
-    const next = new Map();
+
+    // Locked out of a full Group: I'm not a member and 5 others already are.
+    if (YTB.groupView(all, myClientId).locked) {
+      buddyByVideoId = new Map();
+      return;
+    }
+
+    // videoId -> (clientId -> latest record), then flattened to arrays.
+    const byVideo = new Map();
     for (const r of all) {
       if (!r || r.clientId === myClientId || !r.videoId) continue;
-      const prev = next.get(r.videoId);
-      if (!prev || r.updatedAt > prev.updatedAt) next.set(r.videoId, r);
+      let perBuddy = byVideo.get(r.videoId);
+      if (!perBuddy) {
+        perBuddy = new Map();
+        byVideo.set(r.videoId, perBuddy);
+      }
+      const prev = perBuddy.get(r.clientId);
+      if (!prev || r.updatedAt > prev.updatedAt) perBuddy.set(r.clientId, r);
+    }
+    const next = new Map();
+    for (const [videoId, perBuddy] of byVideo) {
+      next.set(videoId, Array.from(perBuddy.values()));
     }
     buddyByVideoId = next;
   }
 
   // ---------------------------------------------------------------------------
-  // Watch page: marker on the player progress bar.
+  // Watch page: one colored marker per Buddy on the player progress bar.
   // ---------------------------------------------------------------------------
 
   /**
-   * Draw (or refresh) the Buddy marker on `.ytp-progress-bar` for `videoId`.
-   * No-op when there's no Buddy record for the video or the bar isn't built yet
-   * (the player initializes async — ytb:mutation re-invokes us until it is).
-   * Idempotent: reuses the single marker element if already present.
+   * Draw (or refresh) a marker per Buddy on `.ytp-progress-bar` for `videoId`,
+   * each at the Buddy's position in that Buddy's color, with a hover tooltip.
+   * No-op when the bar isn't built yet (the player initializes async —
+   * ytb:mutation re-invokes us until it is). Keyed by clientId so markers
+   * survive re-renders (no flicker mid-hover); Buddies that left are removed.
+   * Overlapping positions are allowed to overlap.
    * @param {string|null} videoId
    */
   function renderWatchMarker(videoId) {
     const bar = document.querySelector(".ytp-progress-bar");
     if (!bar) return; // player not ready yet — a later ytb:mutation retries
-    const record = videoId ? buddyByVideoId.get(videoId) : null;
-    const fraction = record ? positionFraction(record) : null;
-    if (fraction === null) {
-      removeWatchMarker();
-      return;
-    }
 
-    let marker = bar.querySelector(":scope > ." + MARKER_CLASS);
-    if (!marker) {
-      // The bar must establish a positioning context for the absolute marker.
-      if (getComputedStyle(bar).position === "static") {
-        bar.style.position = "relative";
+    const records = videoId ? buddyByVideoId.get(videoId) : null;
+    const desired = new Map(); // clientId -> { fraction, record }
+    if (records) {
+      for (const r of records) {
+        const fraction = positionFraction(r);
+        if (fraction !== null) desired.set(r.clientId, { fraction, record: r });
       }
-      marker = document.createElement("div");
-      marker.className = MARKER_CLASS;
-      const tooltip = document.createElement("div");
-      tooltip.className = TOOLTIP_CLASS;
-      marker.appendChild(tooltip);
-      bar.appendChild(marker);
     }
-    marker.style.left = (fraction * 100).toFixed(3) + "%";
-    const who = record.name ? record.name : "Buddy";
-    marker.querySelector("." + TOOLTIP_CLASS).textContent =
-      who + " · " + YTB.formatTime(record.timestamp);
-  }
 
-  /** Remove any Buddy marker(s) (e.g. on leaving a watch page). */
-  function removeWatchMarker() {
-    document.querySelectorAll("." + MARKER_CLASS).forEach((n) => n.remove());
+    // Reconcile existing markers by clientId: keep the ones still wanted, drop
+    // the rest. Index them rather than querying per id, so an unusual clientId
+    // can never form a bad attribute selector.
+    const existing = new Map();
+    for (const marker of bar.querySelectorAll(":scope > ." + MARKER_CLASS)) {
+      const cid = marker.dataset.ytbCid;
+      if (desired.has(cid)) existing.set(cid, marker);
+      else marker.remove();
+    }
+    if (desired.size === 0) return;
+
+    // The bar must establish a positioning context for the absolute markers.
+    if (getComputedStyle(bar).position === "static") {
+      bar.style.position = "relative";
+    }
+
+    for (const [cid, { fraction, record }] of desired) {
+      let marker = existing.get(cid);
+      if (!marker) {
+        marker = document.createElement("div");
+        marker.className = MARKER_CLASS;
+        marker.dataset.ytbCid = cid;
+        const tooltip = document.createElement("div");
+        tooltip.className = TOOLTIP_CLASS;
+        marker.appendChild(tooltip);
+        bar.appendChild(marker);
+      }
+      marker.style.left = (fraction * 100).toFixed(3) + "%";
+      marker.style.background = YTB.buddyColor(cid);
+      const who = record.name ? record.name : "Buddy";
+      marker.querySelector("." + TOOLTIP_CLASS).textContent =
+        who + " · " + YTB.formatTime(record.timestamp);
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // Thumbnails: fractional bottom bar on every matching tile.
+  // Thumbnails: a single segmented bar per tile, one colored band per Buddy.
+  // Bands are sorted by position; each Buddy owns [previous Buddy's pos .. own
+  // pos] in their color. So with Alice @ 30% and Bob @ 70%, 0–30% is Alice's
+  // color and 30–70% is Bob's, and the fill stops at the furthest Buddy.
   // ---------------------------------------------------------------------------
 
   /**
-   * Overlay a fractional bar on every thumbnail tile whose video matches a
-   * Buddy record. Idempotent + recycle-safe: YouTube reuses tile DOM nodes for
-   * different videos as you scroll, so each pass re-keys the bar to the tile's
-   * CURRENT videoId and drops a stale bar when the tile no longer matches.
+   * Overlay the segmented Buddy bar on every thumbnail tile whose video matches.
+   * Idempotent + recycle-safe: YouTube reuses tile DOM nodes for different
+   * videos as you scroll, so each pass re-keys the bar to the tile's CURRENT
+   * videoId and only rebuilds its bands when the video or the positions change
+   * (a signature guard) — frequent ytb:mutation passes never tear down a
+   * tooltip mid-hover.
    */
   function renderThumbnails() {
     const anchors = document.querySelectorAll('a[href*="/watch?v="]');
@@ -131,27 +172,64 @@
       if (!anchor.querySelector("img")) continue;
 
       const videoId = videoIdFromHref(anchor.getAttribute("href"));
-      const record = videoId ? buddyByVideoId.get(videoId) : null;
-      const fraction = record ? positionFraction(record) : null;
-      const existing = anchor.querySelector(":scope > ." + THUMB_BAR_CLASS);
+      const records = videoId ? buddyByVideoId.get(videoId) : null;
 
-      if (fraction === null) {
-        if (existing) existing.remove();
+      // One band per Buddy with a computable position, sorted ascending. The
+      // clientId tiebreak keeps equal-position bands deterministic.
+      const segments = [];
+      if (records) {
+        for (const r of records) {
+          const fraction = positionFraction(r);
+          if (fraction !== null) {
+            segments.push({ cid: r.clientId, fraction, record: r });
+          }
+        }
+        segments.sort(
+          (a, b) => a.fraction - b.fraction || (a.cid < b.cid ? -1 : 1)
+        );
+      }
+
+      let container = anchor.querySelector(":scope > ." + THUMB_BAR_CLASS);
+
+      if (segments.length === 0) {
+        if (container) container.remove();
         delete anchor.dataset.ytbVid;
         continue;
       }
 
-      let bar = existing;
-      if (!bar) {
+      // Rebuild bands only when the video or its positions changed.
+      const sig =
+        videoId +
+        "|" +
+        segments.map((s) => s.cid + ":" + s.fraction.toFixed(3)).join(",");
+      if (container && container.dataset.ytbSig === sig) continue;
+
+      if (!container) {
         // The anchor must establish a positioning context for the absolute bar.
         if (getComputedStyle(anchor).position === "static") {
           anchor.style.position = "relative";
         }
-        bar = document.createElement("div");
-        bar.className = THUMB_BAR_CLASS;
-        anchor.appendChild(bar);
+        container = document.createElement("div");
+        container.className = THUMB_BAR_CLASS;
+        anchor.appendChild(container);
       }
-      bar.style.width = (fraction * 100).toFixed(3) + "%";
+      container.textContent = ""; // clear old bands before rebuilding
+      let prev = 0;
+      for (const s of segments) {
+        const seg = document.createElement("div");
+        seg.className = THUMB_SEG_CLASS;
+        seg.style.left = (prev * 100).toFixed(3) + "%";
+        seg.style.width = ((s.fraction - prev) * 100).toFixed(3) + "%";
+        seg.style.background = YTB.buddyColor(s.cid);
+        const tooltip = document.createElement("div");
+        tooltip.className = TOOLTIP_CLASS;
+        const who = s.record.name ? s.record.name : "Buddy";
+        tooltip.textContent = who + " · " + YTB.formatTime(s.record.timestamp);
+        seg.appendChild(tooltip);
+        container.appendChild(seg);
+        prev = s.fraction;
+      }
+      container.dataset.ytbSig = sig;
       anchor.dataset.ytbVid = videoId;
     }
   }
@@ -187,6 +265,7 @@
   /** Inject the renderer's CSS once (no separate stylesheet file). */
   function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
+    const fallback = YTB.BUDDY_PALETTE[0]; // before a per-Buddy color is set
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
@@ -196,7 +275,7 @@
         bottom: 0;
         width: 3px;
         margin-left: -1px;
-        background: ${BUDDY_COLOR};
+        background: ${fallback};
         z-index: 40;
         cursor: default;
       }
@@ -215,19 +294,28 @@
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.1s;
+        z-index: 1;
       }
-      .${MARKER_CLASS}:hover .${TOOLTIP_CLASS} {
+      .${MARKER_CLASS}:hover .${TOOLTIP_CLASS},
+      .${THUMB_SEG_CLASS}:hover .${TOOLTIP_CLASS} {
         opacity: 1;
       }
       .${THUMB_BAR_CLASS} {
         position: absolute;
         left: 0;
         bottom: 0;
+        width: 100%;
         height: 4px;
-        max-width: 100%;
-        background: ${BUDDY_COLOR};
         pointer-events: none;
         z-index: 2000;
+      }
+      .${THUMB_SEG_CLASS} {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        background: ${fallback};
+        pointer-events: auto;
+        cursor: default;
       }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -250,7 +338,7 @@
 
   document.addEventListener("ytb:mutation", () => {
     // The feed lazy-loaded more tiles (and/or the player finished building).
-    // Use the cached records — no re-GET. Re-apply the marker too, since the
+    // Use the cached records — no re-GET. Re-apply the markers too, since the
     // progress bar may have only just appeared after the last navigate.
     renderWatchMarker(currentVideoId);
     renderThumbnails();

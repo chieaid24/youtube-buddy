@@ -72,6 +72,7 @@ const el = {
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
+  roster: document.getElementById("roster"),
   sharing: document.getElementById("sharing"),
   backendUrl: document.getElementById("backend-url"),
   // Disconnect confirmation dialog.
@@ -287,19 +288,14 @@ async function clearCodeAndChoose() {
   showView("chooser");
 }
 
-// Buddy Display Names under `code`, deduped by Client ID (one person watching
-// several videos appears once); an unnamed buddy falls back to "your Buddy".
+// Buddy Display Names under `code` for the confirmation, via the shared groupView
+// (same dedup-by-Client-ID the roster uses); an unnamed buddy falls back to
+// "your Buddy". Group-full lockout is irrelevant here — I am already a member.
 async function buddyNames(code) {
   if (!code) return [];
-  const records = await YTB.getRecords(code);
-  const latestByClient = new Map();
-  for (const r of records) {
-    if (!r || r.clientId === myClientId) continue;
-    const prev = latestByClient.get(r.clientId);
-    if (!prev || r.updatedAt > prev.updatedAt) latestByClient.set(r.clientId, r);
-  }
-  return Array.from(latestByClient.values(), (r) =>
-    r.name && r.name.trim() ? r.name.trim() : "your Buddy"
+  const { buddies } = YTB.groupView(await YTB.getRecords(code), myClientId);
+  return buddies.map((b) =>
+    b.name && b.name.trim() ? b.name.trim() : "your Buddy"
   );
 }
 
@@ -335,33 +331,69 @@ function showConnected(code, codeOrigin) {
   showView("connected");
 }
 
-// Pairing status: Waiting for buddy (code, no foreign record) / Paired (a record
-// from another Client ID exists → show Buddy name + last-seen).
+// Group status, from my perspective (a Friend Code is one Group of up to
+// YTB.MAX_MEMBERS people):
+//   Unpaired      — no code.
+//   Waiting       — code set, but no Buddy has a record yet.
+//   In group      — 1+ Buddies; list each with their color swatch + last-seen.
+//   Group full    — 5 others already, I'm not one of them (the locked-out 6th).
 async function refreshStatus(code) {
   if (!code) {
-    setStatus("waiting", "Waiting for buddy", "");
+    setStatus("unpaired", "Unpaired", "Enter or generate a Friend Code to pair.");
+    renderRoster([]);
     return;
   }
 
   const records = await YTB.getRecords(code);
-  const buddyRecords = records.filter((r) => r.clientId !== myClientId);
+  const { buddies, locked } = YTB.groupView(records, myClientId);
 
-  if (buddyRecords.length === 0) {
-    setStatus("waiting", "Waiting for buddy", "");
+  if (locked) {
+    setStatus("full", "Group full", `This code already has ${YTB.MAX_MEMBERS} members.`);
+    renderRoster([]);
     return;
   }
 
-  const buddy = buddyRecords.reduce((a, b) =>
-    b.updatedAt > a.updatedAt ? b : a
-  );
-  const who = buddy.name ? buddy.name : "your Buddy";
-  setStatus("paired", "Paired", `${who} · last seen ${formatLastSeen(buddy.updatedAt)}`);
+  if (buddies.length === 0) {
+    setStatus("waiting", "Waiting for buddy", "");
+    renderRoster([]);
+    return;
+  }
+
+  const noun = buddies.length === 1 ? "buddy" : "buddies";
+  setStatus("ingroup", "In group", `${buddies.length} ${noun}`);
+  renderRoster(buddies);
 }
 
 function setStatus(state, text, sub) {
   el.status.className = `status is-${state}`;
   el.statusText.textContent = text;
   el.statusSub.textContent = sub;
+}
+
+// Render one row per Buddy: [color swatch] name · last-seen. The swatch color
+// matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
+// as the color legend. Newest-active Buddy first (groupView already sorts).
+function renderRoster(buddies) {
+  el.roster.textContent = "";
+  for (const b of buddies) {
+    const row = document.createElement("div");
+    row.className = "buddy";
+
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = YTB.buddyColor(b.clientId);
+
+    const name = document.createElement("span");
+    name.className = "buddy-name";
+    name.textContent = b.name ? b.name : "Buddy";
+
+    const seen = document.createElement("span");
+    seen.className = "buddy-seen";
+    seen.textContent = formatLastSeen(b.updatedAt);
+
+    row.append(swatch, name, seen);
+    el.roster.appendChild(row);
+  }
 }
 
 // Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is for
