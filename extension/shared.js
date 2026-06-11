@@ -27,37 +27,42 @@ const YTB = {
   MAX_MEMBERS: 5,
 
   // --- storage (chrome.storage.local) ---
-  // Stored keys: name (Display Name), code (Friend Code), clientId, sharing (boolean).
+  // Stored keys: name (Display Name), code (Friend Code), codeOrigin
+  // ("created" | "joined" — how the active code was set; drives the popup's
+  // Re-roll affordance), clientId, sharing (boolean).
 
   /**
    * Read the full config, applying defaults for unset keys.
    * `clientId` is "" until ensureClientId() has minted one — call that when you
    * need a guaranteed id.
-   * @returns {Promise<{name: string, code: string, clientId: string, sharing: boolean}>}
+   * @returns {Promise<{name: string, code: string, codeOrigin: string, clientId: string, sharing: boolean}>}
    */
   async getConfig() {
     const stored = await chrome.storage.local.get([
       "name",
       "code",
+      "codeOrigin",
       "clientId",
       "sharing",
     ]);
     return {
       name: stored.name ?? "",
       code: stored.code ?? "",
+      codeOrigin: stored.codeOrigin ?? "",
       clientId: stored.clientId ?? "",
       sharing: stored.sharing ?? true,
     };
   },
 
   /**
-   * Merge-write a subset of { name, code, sharing } into chrome.storage.local.
-   * `clientId` is intentionally NOT writable here — it is owned by ensureClientId.
-   * @param {{name?: string, code?: string, sharing?: boolean}} partial
+   * Merge-write a subset of { name, code, codeOrigin, sharing } into
+   * chrome.storage.local. `clientId` is intentionally NOT writable here — it is
+   * owned by ensureClientId.
+   * @param {{name?: string, code?: string, codeOrigin?: string, sharing?: boolean}} partial
    */
   async setConfig(partial) {
     const next = {};
-    for (const key of ["name", "code", "sharing"]) {
+    for (const key of ["name", "code", "codeOrigin", "sharing"]) {
       if (key in partial) next[key] = partial[key];
     }
     await chrome.storage.local.set(next);
@@ -144,12 +149,13 @@ const YTB = {
   },
 
   /**
-   * Trim + uppercase a Friend Code so "wolf-42" and "WOLF-42" pair.
+   * Trim + lowercase a Friend Code so "Wolf-Fox" and "wolf-fox" pair. Codes are
+   * generated lowercase; this also normalizes whatever a Buddy types on Join.
    * @param {string} raw
    * @returns {string}
    */
   normalizeCode(raw) {
-    return String(raw ?? "").trim().toUpperCase();
+    return String(raw ?? "").trim().toLowerCase();
   },
 
   // --- Group helpers (multiple Buddies) ---

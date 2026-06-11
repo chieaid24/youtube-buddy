@@ -4,64 +4,66 @@
 // so it survives a browser restart. See CONTEXT.md for terminology.
 
 // Built-in word lists for client-side Friend Code generation. A code is one word
-// from each list joined by hyphens: "<gerund>-<adjective>-<animal>" (e.g.
-// JUMPING-SILLY-DEER after normalizeCode uppercases it). The three lists below are
-// 100 words each, so the code space is 100 * 100 * 100 = 1,000,000 combinations —
-// large enough that two independently-generated codes almost never collide.
+// from each list joined by hyphens: "<verb>-<adjective>-<animal>" (e.g.
+// "run-silly-fox"). Every word is <= 6 letters so codes stay short and easy to
+// read out and re-type; verbs mix short base forms and gerunds. The lists below
+// are large enough (~76 * ~85 * ~86 ≈ 555k combinations) that two independently
+// generated codes almost never collide.
 const CODE_VERBS = [
-  "jumping", "running", "dancing", "singing", "hopping", "gliding", "soaring",
-  "diving", "sprinting", "leaping", "dashing", "rolling", "spinning", "twirling",
-  "floating", "drifting", "climbing", "crawling", "marching", "prancing",
-  "galloping", "bouncing", "swaying", "swimming", "sailing", "racing", "zooming",
-  "skipping", "strolling", "wandering", "roaming", "darting", "swooping",
-  "charging", "romping", "trotting", "bounding", "vaulting", "swirling",
-  "whirling", "flipping", "twisting", "turning", "shaking", "wiggling",
-  "jiggling", "giggling", "laughing", "smiling", "grinning", "beaming",
-  "glowing", "shining", "sparkling", "glittering", "blinking", "winking",
-  "nodding", "waving", "clapping", "stomping", "tapping", "humming",
-  "whistling", "chirping", "buzzing", "snoozing", "dreaming", "yawning",
-  "stretching", "wobbling", "tumbling", "juggling", "hiking", "jogging",
-  "rowing", "paddling", "surfing", "skating", "sliding", "coasting", "cruising",
-  "hovering", "fluttering", "flapping", "pouncing", "scampering", "scurrying",
-  "sneaking", "creeping", "strutting", "waddling", "shuffling", "munching",
-  "nibbling", "snacking", "splashing", "wading", "prowling", "frolicking",
+  "run", "hop", "jump", "swim", "leap", "dash", "race", "spin", "roll", "dive",
+  "sing", "dance", "skip", "jog", "climb", "crawl", "glide", "soar", "hike",
+  "row", "surf", "skate", "slide", "float", "drift", "sail", "zoom", "march",
+  "prance", "romp", "trot", "bound", "vault", "swirl", "twist", "shake", "flip",
+  "wave", "clap", "stomp", "hum", "buzz", "snore", "dream", "yawn", "wobble",
+  "tumble", "juggle", "paddle", "coast", "hover", "pounce", "sneak", "creep",
+  "strut", "waddle", "wade", "prowl", "dart", "swoop", "charge", "sway",
+  "wiggle", "giggle", "laugh", "smile", "grin", "glow", "shine", "blink",
+  "wink", "munch", "splash", "bounce", "gallop",
 ];
 
 const CODE_ADJECTIVES = [
-  "silly", "happy", "sleepy", "grumpy", "sneaky", "fuzzy", "fluffy", "bouncy",
-  "cheery", "jolly", "zippy", "perky", "spunky", "cranky", "dizzy", "wobbly",
-  "snazzy", "jazzy", "nifty", "quirky", "wacky", "zany", "goofy", "clumsy",
-  "cuddly", "chubby", "tiny", "mighty", "brave", "bold", "shy", "calm",
-  "mellow", "jumpy", "nervous", "curious", "clever", "witty", "wise", "dapper",
-  "fancy", "shiny", "glossy", "sparkly", "dusty", "misty", "frosty", "sunny",
-  "stormy", "breezy", "chilly", "toasty", "cozy", "snug", "plump", "slim",
-  "swift", "speedy", "nimble", "lanky", "stubby", "spotty", "stripy", "patchy",
-  "scruffy", "shaggy", "bristly", "prickly", "silky", "velvety", "squishy",
-  "bumpy", "lumpy", "rugged", "rusty", "golden", "silver", "amber", "crimson",
-  "violet", "teal", "minty", "peachy", "lemony", "cherry", "honey", "mossy",
-  "leafy", "rocky", "sandy", "muddy", "swampy", "cosmic", "lunar", "solar",
-  "starry", "royal", "noble", "humble", "merry",
+  "silly", "happy", "fuzzy", "jolly", "zippy", "perky", "dizzy", "nifty",
+  "wacky", "zany", "goofy", "tiny", "brave", "bold", "calm", "jumpy", "wise",
+  "fancy", "shiny", "dusty", "misty", "sunny", "cozy", "snug", "plump", "slim",
+  "swift", "lanky", "silky", "bumpy", "lumpy", "rusty", "amber", "teal",
+  "minty", "honey", "mossy", "leafy", "rocky", "sandy", "muddy", "lunar",
+  "solar", "royal", "noble", "merry", "sleepy", "grumpy", "sneaky", "fluffy",
+  "bouncy", "cheery", "spunky", "cranky", "wobbly", "snazzy", "quirky",
+  "clumsy", "cuddly", "chubby", "mighty", "mellow", "clever", "dapper",
+  "glossy", "frosty", "stormy", "breezy", "chilly", "toasty", "nimble",
+  "stubby", "spotty", "stripy", "patchy", "shaggy", "rugged", "golden",
+  "silver", "violet", "peachy", "cherry", "swampy", "cosmic", "starry",
+  "humble",
 ];
 
 const CODE_ANIMALS = [
   "deer", "wolf", "bear", "lynx", "hawk", "otter", "fox", "owl", "seal", "moth",
   "crab", "newt", "toad", "wren", "ibis", "puma", "koi", "elk", "mole", "swan",
   "hare", "lion", "tiger", "panda", "koala", "sloth", "llama", "camel", "moose",
-  "bison", "horse", "zebra", "goat", "sheep", "pony", "piglet", "calf", "lamb",
-  "fawn", "cub", "kitten", "puppy", "ferret", "weasel", "badger", "beaver",
-  "raccoon", "skunk", "possum", "hedgehog", "squirrel", "chipmunk", "rabbit",
+  "bison", "horse", "zebra", "goat", "sheep", "pony", "calf", "lamb", "fawn",
+  "cub", "puppy", "ferret", "badger", "beaver", "skunk", "possum", "rabbit",
   "bunny", "marmot", "gopher", "vole", "shrew", "bat", "falcon", "eagle",
-  "osprey", "heron", "egret", "stork", "crane", "robin", "sparrow", "finch",
-  "magpie", "raven", "crow", "dove", "pigeon", "parrot", "toucan", "puffin",
-  "penguin", "pelican", "flamingo", "peacock", "turkey", "rooster", "duck",
-  "goose", "quail", "turtle", "tortoise", "gecko", "iguana", "lizard", "cobra",
-  "viper", "python", "salmon", "trout", "perch", "minnow", "guppy", "dolphin",
+  "heron", "egret", "stork", "crane", "robin", "finch", "magpie", "raven",
+  "crow", "dove", "pigeon", "parrot", "toucan", "puffin", "turkey", "duck",
+  "goose", "quail", "turtle", "gecko", "iguana", "lizard", "cobra", "viper",
+  "python", "salmon", "trout", "perch", "minnow", "guppy", "kitten",
 ];
 
 const el = {
   name: document.getElementById("name"),
+  // Friend Code views (mutually exclusive — only one is shown at a time).
+  viewChooser: document.getElementById("view-chooser"),
+  viewJoin: document.getElementById("view-join"),
+  viewConnected: document.getElementById("view-connected"),
+  chooseCreate: document.getElementById("choose-create"),
+  chooseJoin: document.getElementById("choose-join"),
+  chooserCancel: document.getElementById("chooser-cancel"),
+  joinInput: document.getElementById("join-input"),
+  joinSubmit: document.getElementById("join-submit"),
+  joinBack: document.getElementById("join-back"),
   code: document.getElementById("code"),
-  generate: document.getElementById("generate"),
+  reroll: document.getElementById("reroll"),
+  changeCode: document.getElementById("change-code"),
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
@@ -82,11 +84,18 @@ async function init() {
 
   const config = await YTB.getConfig();
   el.name.value = config.name || "";
-  el.code.value = config.code || "";
   el.sharing.checked = config.sharing;
 
   wireHandlers();
-  await refreshStatus(config.code);
+
+  // Route to the right view: an active code → Connected (refresh status with a
+  // real GET); otherwise the chooser (true first run, nothing to Cancel back to).
+  if (config.code) {
+    showConnected(config.code, config.codeOrigin);
+    await refreshStatus(config.code);
+  } else {
+    showView("chooser");
+  }
 }
 
 function wireHandlers() {
@@ -96,24 +105,41 @@ function wireHandlers() {
     YTB.setConfig({ name: el.name.value });
   });
 
-  // Persist the (normalized) code on every keystroke so a quick close keeps it,
-  // but only re-fetch pairing status on change/Enter to avoid spamming the backend.
-  el.code.addEventListener("input", () => {
-    YTB.setConfig({ code: YTB.normalizeCode(el.code.value) });
-  });
-  el.code.addEventListener("change", () => {
-    const code = YTB.normalizeCode(el.code.value);
-    el.code.value = code;
-    YTB.setConfig({ code });
-    refreshStatus(code);
+  // Chooser → Create: mint + commit a fresh code immediately (no confirm step).
+  el.chooseCreate.addEventListener("click", () => createAndCommit());
+
+  // Chooser → Join: switch to the free-text entry view.
+  el.chooseJoin.addEventListener("click", () => {
+    el.joinInput.value = "";
+    showView("join");
+    el.joinInput.focus();
   });
 
-  el.generate.addEventListener("click", () => {
-    const code = generateCode();
-    el.code.value = code;
-    YTB.setConfig({ code });
-    refreshStatus(code);
+  // Chooser → Cancel: only reachable when a code already exists (via "Change
+  // code"); return to Connected without touching the active code.
+  el.chooserCancel.addEventListener("click", async () => {
+    const { code, codeOrigin } = await YTB.getConfig();
+    if (!code) return; // No active code — nothing to cancel back to.
+    showConnected(code, codeOrigin);
+    await refreshStatus(code);
   });
+
+  // Join → submit: normalize (trim + lowercase) and commit verbatim. Pure match —
+  // no word-list validation; pairing succeeds only if it matches a real code.
+  el.joinSubmit.addEventListener("click", () => joinAndCommit());
+  el.joinInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") joinAndCommit();
+  });
+
+  // Join → Back: abandon entry, return to the chooser (active code untouched).
+  el.joinBack.addEventListener("click", () => showView("chooser"));
+
+  // Connected → Re-roll: only shown for created codes; mint + commit a new one.
+  el.reroll.addEventListener("click", () => createAndCommit());
+
+  // Connected → Change code: reopen the chooser. The active code stays committed
+  // until a new one replaces it, so an accidental tap never drops pairing.
+  el.changeCode.addEventListener("click", () => showView("chooser"));
 
   // The reporter (task 05) reads this flag; the popup only writes it. Off stops our
   // POSTs but the renderer keeps showing the Buddy's markers.
@@ -122,12 +148,54 @@ function wireHandlers() {
   });
 }
 
+// Create flow: generate a code, commit it, land on Connected. A brand-new random
+// code can't be paired yet, so we set status to "Waiting for buddy" WITHOUT a GET.
+async function createAndCommit() {
+  const code = generateCode();
+  await YTB.setConfig({ code, codeOrigin: "created" });
+  showConnected(code, "created");
+  setStatus("waiting", "Waiting for buddy", "");
+}
+
+// Join flow: commit the typed code (normalized) and refresh status with a real
+// GET — that GET is the actual "did it match?" check.
+async function joinAndCommit() {
+  const code = YTB.normalizeCode(el.joinInput.value);
+  if (!code) return; // Empty — stay on the entry view.
+  await YTB.setConfig({ code, codeOrigin: "joined" });
+  showConnected(code, "joined");
+  await refreshStatus(code);
+}
+
 function generateCode() {
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   const verb = pick(CODE_VERBS);
   const adjective = pick(CODE_ADJECTIVES);
   const animal = pick(CODE_ANIMALS);
   return YTB.normalizeCode(`${verb}-${adjective}-${animal}`);
+}
+
+// --- view switching ----------------------------------------------------------
+
+// Show exactly one of the three Friend Code views. The Cancel link in the chooser
+// only makes sense when an active code exists (reached via "Change code").
+function showView(name) {
+  el.viewChooser.hidden = name !== "chooser";
+  el.viewJoin.hidden = name !== "join";
+  el.viewConnected.hidden = name !== "connected";
+  if (name === "chooser") {
+    YTB.getConfig().then(({ code }) => {
+      el.chooserCancel.hidden = !code;
+    });
+  }
+}
+
+// Render the Connected view for an active code. Re-roll is offered only for codes
+// we created — re-rolling a joined code would silently un-pair from the Buddy.
+function showConnected(code, codeOrigin) {
+  el.code.value = code;
+  el.reroll.hidden = codeOrigin !== "created";
+  showView("connected");
 }
 
 // Group status, from my perspective (a Friend Code is one Group of up to

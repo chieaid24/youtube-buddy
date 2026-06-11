@@ -5,7 +5,7 @@ A Chrome extension plus Cloudflare Worker backend that lets a small Group of fri
 ## Language
 
 **Friend Code**:
-A short shared string (e.g. `jumping-silly-deer`) that forms a Group. It is both the joining mechanism and the only access control — anyone holding the code can read and write that Group's data.
+A short shared string (e.g. `run-silly-fox`) that forms a Group. It is both the joining mechanism and the only access control — anyone holding the code can read and write that Group's data.
 _Avoid_: room code, group code, secret (the people form a *Group*, but the string itself is always the *Friend Code*)
 
 **Group**:
