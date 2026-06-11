@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>YouTube Buddy</title>
+    <style>
+      :root {
+        --fg: #0f0f0f;
+        --muted: #606060;
+        --line: #e5e5e5;
+        --accent: #065fd4;
+        --bg: #ffffff;
+        --paired: #2ba640;
+        --waiting: #c79100;
+        --unpaired: #909090;
+        --full: #444444;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 14px 14px 12px;
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Arial, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .field {
+        margin-bottom: 12px;
+      }
+      label.lbl {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 7px 9px;
+        font-size: 13px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        outline: none;
+      }
+      input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+      #code,
+      #join-input {
+        text-transform: lowercase;
+      }
+      #code[readonly] {
+        background: #fafafa;
+        color: var(--fg);
+        cursor: default;
+      }
+      .code-row,
+      .edit-row {
+        display: flex;
+        gap: 6px;
+      }
+      .code-row input,
+      .edit-row input {
+        flex: 1;
+      }
+      /* Locked vs editable Display Name: the field shows ONE of these. `.is-locked`
+         on the `.field` (set in popup.js) swaps which child is visible. The name
+         is locked iff it holds a non-empty committed value. */
+      .field.is-locked .field-edit {
+        display: none;
+      }
+      .field:not(.is-locked) .field-locked {
+        display: none;
+      }
+      .field-locked {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .field-locked .locked-value {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 7px 9px;
+        font-size: 13px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fafafa;
+      }
+      button {
+        padding: 7px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--fg);
+        background: #f2f2f2;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      button:hover {
+        background: #e8e8e8;
+      }
+      /* Chooser: two equal-width primary actions side by side. */
+      .chooser {
+        display: flex;
+        gap: 6px;
+      }
+      .chooser button {
+        flex: 1;
+      }
+      button.primary {
+        color: #fff;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      button.primary:hover {
+        background: #0556bd;
+      }
+      /* Text-only affordances (Change code / Back / Cancel). */
+      button.link {
+        margin-top: 8px;
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: normal;
+      }
+      button.link:hover {
+        background: none;
+        text-decoration: underline;
+      }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fafafa;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+        background: var(--unpaired);
+      }
+      .status.is-paired .dot,
+      .status.is-ingroup .dot {
+        background: var(--paired);
+      }
+      .status.is-waiting .dot {
+        background: var(--waiting);
+      }
+      .status.is-unpaired .dot {
+        background: var(--unpaired);
+      }
+      .status.is-full .dot {
+        background: var(--full);
+      }
+      #status-text {
+        font-weight: 600;
+      }
+      #status-sub {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .roster {
+        margin: 8px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .roster:empty {
+        display: none;
+      }
+      .buddy {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+      .buddy .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        flex: 0 0 auto;
+      }
+      .buddy .buddy-name {
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .buddy .buddy-seen {
+        margin-left: auto;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 14px 0 12px;
+      }
+      .toggle-row .name {
+        font-weight: 600;
+      }
+      .toggle-row .hint {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      /* Sharing switch — a real checkbox styled as a toggle */
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 38px;
+        height: 22px;
+        flex: 0 0 auto;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        inset: 0;
+        background: #cccccc;
+        border-radius: 22px;
+        transition: background 0.15s;
+      }
+      .slider::before {
+        content: "";
+        position: absolute;
+        height: 16px;
+        width: 16px;
+        left: 3px;
+        top: 3px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.15s;
+      }
+      .switch input:checked + .slider {
+        background: var(--accent);
+      }
+      .switch input:checked + .slider::before {
+        transform: translateX(16px);
+      }
+      .switch input:focus-visible + .slider {
+        box-shadow: 0 0 0 2px rgba(6, 95, 212, 0.4);
+      }
+      footer {
+        margin-top: 4px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      footer .url {
+        word-break: break-all;
+        color: var(--muted);
+      }
+      /* Inline disconnect confirmation — a styled in-popup dialog (not the
+         native confirm) so the buddy list renders on-brand. */
+      .confirm-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .confirm-overlay[hidden] {
+        display: none;
+      }
+      .confirm-box {
+        max-width: 100%;
+        padding: 14px;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+      }
+      .confirm-title {
+        margin: 0 0 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .confirm-body {
+        margin: 0 0 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .confirm-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      button.danger {
+        color: #fff;
+        background: #c0392b;
+        border-color: #c0392b;
+      }
+      button.danger:hover {
+        background: #a93226;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>YouTube Buddy</h1>
+
+    <div class="field" id="name-field">
+      <label class="lbl" for="name">Display Name</label>
+      <!-- Locked once set; the Edit button reopens the input (cosmetic, unguarded). -->
+      <div class="field-locked">
+        <span class="locked-value" id="name-value"></span>
+        <button id="name-edit" type="button">Edit</button>
+      </div>
+      <div class="field-edit edit-row">
+        <input
+          id="name"
+          type="text"
+          placeholder='Buddy "Buddy" McGee'
+          autocomplete="off"
+        />
+        <button id="name-save" type="button">Save</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="lbl">Friend Code</label>
+
+      <!-- Chooser: shown when there is no code yet, or after "Change code". -->
+      <div id="view-chooser">
+        <div class="chooser">
+          <button id="choose-create" type="button" class="primary">
+            Create a code
+          </button>
+          <button id="choose-join" type="button">Join a friend</button>
+        </div>
+        <button id="chooser-cancel" type="button" class="link" hidden>
+          Cancel
+        </button>
+      </div>
+
+      <!-- Join: type a Buddy's code (free text, must match a real code). -->
+      <div id="view-join" hidden>
+        <div class="code-row">
+          <input
+            id="join-input"
+            type="text"
+            placeholder="friend's code"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="join-submit" type="button">Join</button>
+        </div>
+        <button id="join-back" type="button" class="link">Back</button>
+      </div>
+
+      <!-- Connected: the single active code + pairing status. -->
+      <div id="view-connected" hidden>
+        <div class="code-row">
+          <input id="code" type="text" readonly tabindex="-1" />
+          <button id="reroll" type="button" hidden>Re-roll</button>
+        </div>
+        <div id="status" class="status is-unpaired">
+          <span class="dot"></span>
+          <span id="status-text">Unpaired</span>
+        </div>
+        <p id="status-sub"></p>
+        <div id="roster" class="roster"></div>
+        <button id="change-code" type="button" class="link">Change code</button>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="name">Sharing</div>
+        <div class="hint">Share your watch progress with your Buddy</div>
+      </div>
+      <label class="switch">
+        <input id="sharing" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <footer>
+      Backend: <span id="backend-url" class="url"></span>
+    </footer>
+
+    <div id="confirm-overlay" class="confirm-overlay" hidden>
+      <div
+        class="confirm-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+      >
+        <p class="confirm-title" id="confirm-title"></p>
+        <p class="confirm-body" id="confirm-body"></p>
+        <div class="confirm-actions">
+          <button id="confirm-cancel" type="button">Cancel</button>
+          <button id="confirm-disconnect" type="button" class="danger">
+            Disconnect
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="shared.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
