@@ -4,77 +4,77 @@
 // so it survives a browser restart. See CONTEXT.md for terminology.
 
 // Built-in word lists for client-side Friend Code generation. A code is one word
-// from each list joined by hyphens: "<gerund>-<adjective>-<animal>" (e.g.
-// JUMPING-SILLY-DEER after normalizeCode uppercases it). The three lists below are
-// 100 words each, so the code space is 100 * 100 * 100 = 1,000,000 combinations —
-// large enough that two independently-generated codes almost never collide.
+// from each list joined by hyphens: "<verb>-<adjective>-<animal>" (e.g.
+// "run-silly-fox"). Every word is <= 6 letters so codes stay short and easy to
+// read out and re-type; verbs mix short base forms and gerunds. The lists below
+// are large enough (~76 * ~85 * ~86 ≈ 555k combinations) that two independently
+// generated codes almost never collide.
 const CODE_VERBS = [
-  "jumping", "running", "dancing", "singing", "hopping", "gliding", "soaring",
-  "diving", "sprinting", "leaping", "dashing", "rolling", "spinning", "twirling",
-  "floating", "drifting", "climbing", "crawling", "marching", "prancing",
-  "galloping", "bouncing", "swaying", "swimming", "sailing", "racing", "zooming",
-  "skipping", "strolling", "wandering", "roaming", "darting", "swooping",
-  "charging", "romping", "trotting", "bounding", "vaulting", "swirling",
-  "whirling", "flipping", "twisting", "turning", "shaking", "wiggling",
-  "jiggling", "giggling", "laughing", "smiling", "grinning", "beaming",
-  "glowing", "shining", "sparkling", "glittering", "blinking", "winking",
-  "nodding", "waving", "clapping", "stomping", "tapping", "humming",
-  "whistling", "chirping", "buzzing", "snoozing", "dreaming", "yawning",
-  "stretching", "wobbling", "tumbling", "juggling", "hiking", "jogging",
-  "rowing", "paddling", "surfing", "skating", "sliding", "coasting", "cruising",
-  "hovering", "fluttering", "flapping", "pouncing", "scampering", "scurrying",
-  "sneaking", "creeping", "strutting", "waddling", "shuffling", "munching",
-  "nibbling", "snacking", "splashing", "wading", "prowling", "frolicking",
+  "run", "hop", "jump", "swim", "leap", "dash", "race", "spin", "roll", "dive",
+  "sing", "dance", "skip", "jog", "climb", "crawl", "glide", "soar", "hike",
+  "row", "surf", "skate", "slide", "float", "drift", "sail", "zoom", "march",
+  "prance", "romp", "trot", "bound", "vault", "swirl", "twist", "shake", "flip",
+  "wave", "clap", "stomp", "hum", "buzz", "snore", "dream", "yawn", "wobble",
+  "tumble", "juggle", "paddle", "coast", "hover", "pounce", "sneak", "creep",
+  "strut", "waddle", "wade", "prowl", "dart", "swoop", "charge", "sway",
+  "wiggle", "giggle", "laugh", "smile", "grin", "glow", "shine", "blink",
+  "wink", "munch", "splash", "bounce", "gallop",
 ];
 
 const CODE_ADJECTIVES = [
-  "silly", "happy", "sleepy", "grumpy", "sneaky", "fuzzy", "fluffy", "bouncy",
-  "cheery", "jolly", "zippy", "perky", "spunky", "cranky", "dizzy", "wobbly",
-  "snazzy", "jazzy", "nifty", "quirky", "wacky", "zany", "goofy", "clumsy",
-  "cuddly", "chubby", "tiny", "mighty", "brave", "bold", "shy", "calm",
-  "mellow", "jumpy", "nervous", "curious", "clever", "witty", "wise", "dapper",
-  "fancy", "shiny", "glossy", "sparkly", "dusty", "misty", "frosty", "sunny",
-  "stormy", "breezy", "chilly", "toasty", "cozy", "snug", "plump", "slim",
-  "swift", "speedy", "nimble", "lanky", "stubby", "spotty", "stripy", "patchy",
-  "scruffy", "shaggy", "bristly", "prickly", "silky", "velvety", "squishy",
-  "bumpy", "lumpy", "rugged", "rusty", "golden", "silver", "amber", "crimson",
-  "violet", "teal", "minty", "peachy", "lemony", "cherry", "honey", "mossy",
-  "leafy", "rocky", "sandy", "muddy", "swampy", "cosmic", "lunar", "solar",
-  "starry", "royal", "noble", "humble", "merry",
+  "silly", "happy", "fuzzy", "jolly", "zippy", "perky", "dizzy", "nifty",
+  "wacky", "zany", "goofy", "tiny", "brave", "bold", "calm", "jumpy", "wise",
+  "fancy", "shiny", "dusty", "misty", "sunny", "cozy", "snug", "plump", "slim",
+  "swift", "lanky", "silky", "bumpy", "lumpy", "rusty", "amber", "teal",
+  "minty", "honey", "mossy", "leafy", "rocky", "sandy", "muddy", "lunar",
+  "solar", "royal", "noble", "merry", "sleepy", "grumpy", "sneaky", "fluffy",
+  "bouncy", "cheery", "spunky", "cranky", "wobbly", "snazzy", "quirky",
+  "clumsy", "cuddly", "chubby", "mighty", "mellow", "clever", "dapper",
+  "glossy", "frosty", "stormy", "breezy", "chilly", "toasty", "nimble",
+  "stubby", "spotty", "stripy", "patchy", "shaggy", "rugged", "golden",
+  "silver", "violet", "peachy", "cherry", "swampy", "cosmic", "starry",
+  "humble",
 ];
 
 const CODE_ANIMALS = [
   "deer", "wolf", "bear", "lynx", "hawk", "otter", "fox", "owl", "seal", "moth",
   "crab", "newt", "toad", "wren", "ibis", "puma", "koi", "elk", "mole", "swan",
   "hare", "lion", "tiger", "panda", "koala", "sloth", "llama", "camel", "moose",
-  "bison", "horse", "zebra", "goat", "sheep", "pony", "piglet", "calf", "lamb",
-  "fawn", "cub", "kitten", "puppy", "ferret", "weasel", "badger", "beaver",
-  "raccoon", "skunk", "possum", "hedgehog", "squirrel", "chipmunk", "rabbit",
+  "bison", "horse", "zebra", "goat", "sheep", "pony", "calf", "lamb", "fawn",
+  "cub", "puppy", "ferret", "badger", "beaver", "skunk", "possum", "rabbit",
   "bunny", "marmot", "gopher", "vole", "shrew", "bat", "falcon", "eagle",
-  "osprey", "heron", "egret", "stork", "crane", "robin", "sparrow", "finch",
-  "magpie", "raven", "crow", "dove", "pigeon", "parrot", "toucan", "puffin",
-  "penguin", "pelican", "flamingo", "peacock", "turkey", "rooster", "duck",
-  "goose", "quail", "turtle", "tortoise", "gecko", "iguana", "lizard", "cobra",
-  "viper", "python", "salmon", "trout", "perch", "minnow", "guppy", "dolphin",
+  "heron", "egret", "stork", "crane", "robin", "finch", "magpie", "raven",
+  "crow", "dove", "pigeon", "parrot", "toucan", "puffin", "turkey", "duck",
+  "goose", "quail", "turtle", "gecko", "iguana", "lizard", "cobra", "viper",
+  "python", "salmon", "trout", "perch", "minnow", "guppy", "kitten",
 ];
 
 const el = {
+  // Display Name (locked once set; Edit reopens the input).
   nameField: document.getElementById("name-field"),
   name: document.getElementById("name"),
   nameValue: document.getElementById("name-value"),
   nameEdit: document.getElementById("name-edit"),
   nameSave: document.getElementById("name-save"),
-  codeField: document.getElementById("code-field"),
+  // Friend Code views (mutually exclusive — only one is shown at a time).
+  viewChooser: document.getElementById("view-chooser"),
+  viewJoin: document.getElementById("view-join"),
+  viewConnected: document.getElementById("view-connected"),
+  chooseCreate: document.getElementById("choose-create"),
+  chooseJoin: document.getElementById("choose-join"),
+  chooserCancel: document.getElementById("chooser-cancel"),
+  joinInput: document.getElementById("join-input"),
+  joinSubmit: document.getElementById("join-submit"),
+  joinBack: document.getElementById("join-back"),
   code: document.getElementById("code"),
-  codeValue: document.getElementById("code-value"),
-  codeEdit: document.getElementById("code-edit"),
-  codeSave: document.getElementById("code-save"),
-  generate: document.getElementById("generate"),
+  reroll: document.getElementById("reroll"),
+  changeCode: document.getElementById("change-code"),
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
   sharing: document.getElementById("sharing"),
   backendUrl: document.getElementById("backend-url"),
+  // Disconnect confirmation dialog.
   confirmOverlay: document.getElementById("confirm-overlay"),
   confirmTitle: document.getElementById("confirm-title"),
   confirmBody: document.getElementById("confirm-body"),
@@ -83,6 +83,10 @@ const el = {
 };
 
 let myClientId = "";
+
+// The action to run if the open disconnect dialog is confirmed (set per-open;
+// cleared on cancel/confirm). Lets one dialog serve both Change code and Re-roll.
+let pendingDisconnect = null;
 
 init();
 
@@ -94,18 +98,23 @@ async function init() {
 
   const config = await YTB.getConfig();
   el.name.value = config.name || "";
-  el.code.value = config.code || "";
   el.nameValue.textContent = config.name || "";
-  el.codeValue.textContent = config.code || "";
   el.sharing.checked = config.sharing;
 
-  // A field starts locked iff it already holds a non-empty committed value, so a
-  // fresh install (both blank) opens straight into edit mode (onboarding unchanged).
+  // The Display Name starts locked iff it already holds a non-empty committed
+  // value, so a fresh install (blank name) opens in edit mode (onboarding unchanged).
   setFieldLocked(el.nameField, !!config.name);
-  setFieldLocked(el.codeField, !!config.code);
 
   wireHandlers();
-  await refreshStatus(config.code);
+
+  // Route to the right view: an active code → Connected (refresh status with a
+  // real GET); otherwise the chooser (true first run, nothing to Cancel back to).
+  if (config.code) {
+    showConnected(config.code, config.codeOrigin);
+    await refreshStatus(config.code);
+  } else {
+    showView("chooser");
+  }
 }
 
 function wireHandlers() {
@@ -115,15 +124,8 @@ function wireHandlers() {
     YTB.setConfig({ name: el.name.value });
   });
 
-  // Persist the (normalized) code on every keystroke so a quick close keeps it.
-  // Pairing status is only re-fetched on commit (commitCode), not per keystroke.
-  el.code.addEventListener("input", () => {
-    YTB.setConfig({ code: YTB.normalizeCode(el.code.value) });
-  });
-
-  // --- commit: Save click, Enter, or blur turns an editable value into a locked
-  // one. Blur is skipped when focus moves to a sibling control (Generate keeps
-  // editing; Save handles its own commit) so neither prematurely locks the field.
+  // Name commit: Save click, Enter, or blur turns the editable name into a locked
+  // value. Blur is skipped when focus moves to Save (which commits on its own click).
   el.nameSave.addEventListener("click", commitName);
   el.name.addEventListener("keydown", (e) => {
     if (e.key === "Enter") commitName();
@@ -133,37 +135,62 @@ function wireHandlers() {
     commitName();
   });
 
-  el.codeSave.addEventListener("click", commitCode);
-  el.code.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") commitCode();
-  });
-  el.code.addEventListener("blur", (e) => {
-    if (e.relatedTarget === el.generate || e.relatedTarget === el.codeSave) return;
-    commitCode();
-  });
-
-  // --- edit: Name is harmless (cosmetic) → unlock immediately. Code edit is the
-  // "leaving your buddy" moment → always confirm first (the field is only locked
-  // when a code is set, so there is always something to disconnect from).
+  // Name Edit is unguarded (cosmetic) → reopen the input immediately.
   el.nameEdit.addEventListener("click", () => {
     setFieldLocked(el.nameField, false);
     el.name.focus();
   });
-  el.codeEdit.addEventListener("click", openDisconnectConfirm);
 
-  el.generate.addEventListener("click", () => {
-    // Fill + persist a fresh code but stay in edit mode (no lock) — the user
-    // still confirms with Save. generateCode() is owned by the generation step.
-    const code = generateCode();
-    el.code.value = code;
-    YTB.setConfig({ code });
-    el.code.focus();
+  // Chooser → Create: mint + commit a fresh code immediately (no confirm step).
+  el.chooseCreate.addEventListener("click", () => createAndCommit());
+
+  // Chooser → Join: switch to the free-text entry view.
+  el.chooseJoin.addEventListener("click", () => {
+    el.joinInput.value = "";
+    showView("join");
+    el.joinInput.focus();
   });
 
-  // --- disconnect confirmation dialog.
+  // Chooser → Cancel: only reachable when a code already exists (via "Change
+  // code"); return to Connected without touching the active code.
+  el.chooserCancel.addEventListener("click", async () => {
+    const { code, codeOrigin } = await YTB.getConfig();
+    if (!code) return; // No active code — nothing to cancel back to.
+    showConnected(code, codeOrigin);
+    await refreshStatus(code);
+  });
+
+  // Join → submit: normalize (trim + lowercase) and commit verbatim. Pure match —
+  // no word-list validation; pairing succeeds only if it matches a real code.
+  el.joinSubmit.addEventListener("click", () => joinAndCommit());
+  el.joinInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") joinAndCommit();
+  });
+
+  // Join → Back: abandon entry, return to the chooser (active code untouched).
+  el.joinBack.addEventListener("click", () => showView("chooser"));
+
+  // Connected → Re-roll: replacing the code drops the current pairing, so confirm
+  // first when actually paired; an unpaired re-roll has nothing to disconnect.
+  el.reroll.addEventListener("click", () => {
+    confirmDisconnectThen(createAndCommit, /* skipWhenUnpaired */ true);
+  });
+
+  // Connected → Change code: the explicit "leave this code" action. Always
+  // confirm (copy adapts to whether a buddy is connected); on confirm, drop the
+  // code and reopen the chooser.
+  el.changeCode.addEventListener("click", () => {
+    confirmDisconnectThen(clearCodeAndChoose, /* skipWhenUnpaired */ false);
+  });
+
+  // Disconnect dialog: Cancel/backdrop/Escape dismiss; Disconnect runs the pending
+  // action. The dialog is never a trap.
   el.confirmCancel.addEventListener("click", hideConfirm);
-  el.confirmDisconnect.addEventListener("click", disconnect);
-  // Dismiss (cancel) on backdrop click or Escape, so the dialog is never a trap.
+  el.confirmDisconnect.addEventListener("click", () => {
+    const proceed = pendingDisconnect;
+    hideConfirm();
+    if (proceed) proceed();
+  });
   el.confirmOverlay.addEventListener("click", (e) => {
     if (e.target === el.confirmOverlay) hideConfirm();
   });
@@ -177,6 +204,8 @@ function wireHandlers() {
     YTB.setConfig({ sharing: el.sharing.checked });
   });
 }
+
+// --- Display Name lock/edit ---------------------------------------------------
 
 /** Toggle a field between locked (value + Edit) and editable (input + Save). */
 function setFieldLocked(field, locked) {
@@ -193,23 +222,48 @@ function commitName() {
   setFieldLocked(el.nameField, name.length > 0);
 }
 
-// Commit the Friend Code: normalize, persist, refresh pairing status, and lock
-// only when non-empty. Reached from a fresh/empty edit state (editing an existing
-// code always goes through disconnect first), so it never bypasses the confirm.
-function commitCode() {
-  const code = YTB.normalizeCode(el.code.value);
-  el.code.value = code;
-  el.codeValue.textContent = code;
-  YTB.setConfig({ code });
-  setFieldLocked(el.codeField, code.length > 0);
-  refreshStatus(code);
+// --- Friend Code flows (create / join) ---------------------------------------
+
+// Create flow: generate a code, commit it, land on Connected. A brand-new random
+// code can't be paired yet, so we set status to "Waiting for buddy" WITHOUT a GET.
+async function createAndCommit() {
+  const code = generateCode();
+  await YTB.setConfig({ code, codeOrigin: "created" });
+  showConnected(code, "created");
+  setStatus("waiting", "Waiting for buddy", "");
 }
 
-// Open the disconnect confirmation for the currently-locked Friend Code. Copy
-// adapts to whether a buddy is actually connected (see CONTEXT.md "Paired").
-async function openDisconnectConfirm() {
+// Join flow: commit the typed code (normalized) and refresh status with a real
+// GET — that GET is the actual "did it match?" check.
+async function joinAndCommit() {
+  const code = YTB.normalizeCode(el.joinInput.value);
+  if (!code) return; // Empty — stay on the entry view.
+  await YTB.setConfig({ code, codeOrigin: "joined" });
+  showConnected(code, "joined");
+  await refreshStatus(code);
+}
+
+function generateCode() {
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  const verb = pick(CODE_VERBS);
+  const adjective = pick(CODE_ADJECTIVES);
+  const animal = pick(CODE_ANIMALS);
+  return YTB.normalizeCode(`${verb}-${adjective}-${animal}`);
+}
+
+// --- disconnect confirmation -------------------------------------------------
+
+// Confirm leaving the current code before `onProceed`. Copy adapts to whether a
+// buddy is actually connected. With skipWhenUnpaired, an unpaired code (nobody to
+// disconnect from) runs onProceed straight away — used by Re-roll so swapping an
+// unjoined code stays friction-free.
+async function confirmDisconnectThen(onProceed, skipWhenUnpaired) {
   const { code } = await YTB.getConfig();
   const names = await buddyNames(code);
+  if (skipWhenUnpaired && names.length === 0) {
+    onProceed();
+    return;
+  }
   if (names.length > 0) {
     const label = names.length === 1 ? "buddy" : "buddies";
     el.confirmTitle.textContent = "Are you sure you want to go?";
@@ -220,7 +274,17 @@ async function openDisconnectConfirm() {
     el.confirmTitle.textContent = "Change your Friend Code?";
     el.confirmBody.textContent = "No buddy has connected to this code yet.";
   }
+  pendingDisconnect = onProceed;
   showConfirm();
+}
+
+// Confirmed disconnect via Change code: client-only. Clear the code locally →
+// reporter stops POSTing and the renderer stops drawing (both bail on an empty
+// code); old records under the old code expire via the backend's 14-day TTL.
+async function clearCodeAndChoose() {
+  await YTB.setConfig({ code: "", codeOrigin: "" });
+  el.code.value = "";
+  showView("chooser");
 }
 
 // Buddy Display Names under `code`, deduped by Client ID (one person watching
@@ -239,40 +303,43 @@ async function buddyNames(code) {
   );
 }
 
-// Confirmed disconnect: client-only. Clear the code locally → reporter stops
-// POSTing and the renderer stops drawing (both bail on an empty code); our old
-// records under the old code expire via the backend's 14-day TTL.
-function disconnect() {
-  hideConfirm();
-  el.code.value = "";
-  el.codeValue.textContent = "";
-  YTB.setConfig({ code: "" });
-  setFieldLocked(el.codeField, false);
-  el.code.focus();
-  refreshStatus("");
-}
-
 function showConfirm() {
   el.confirmOverlay.hidden = false;
 }
 
 function hideConfirm() {
   el.confirmOverlay.hidden = true;
+  pendingDisconnect = null;
 }
 
-function generateCode() {
-  const pick = (list) => list[Math.floor(Math.random() * list.length)];
-  const verb = pick(CODE_VERBS);
-  const adjective = pick(CODE_ADJECTIVES);
-  const animal = pick(CODE_ANIMALS);
-  return YTB.normalizeCode(`${verb}-${adjective}-${animal}`);
+// --- view switching ----------------------------------------------------------
+
+// Show exactly one of the three Friend Code views. The Cancel link in the chooser
+// only makes sense when an active code exists (reached via "Change code").
+function showView(name) {
+  el.viewChooser.hidden = name !== "chooser";
+  el.viewJoin.hidden = name !== "join";
+  el.viewConnected.hidden = name !== "connected";
+  if (name === "chooser") {
+    YTB.getConfig().then(({ code }) => {
+      el.chooserCancel.hidden = !code;
+    });
+  }
 }
 
-// Pairing status: Unpaired (no code) / Waiting for buddy (code, no foreign record) /
-// Paired (a record from another Client ID exists → show Buddy name + last-seen).
+// Render the Connected view for an active code. Re-roll is offered only for codes
+// we created — re-rolling a joined code would silently un-pair from the Buddy.
+function showConnected(code, codeOrigin) {
+  el.code.value = code;
+  el.reroll.hidden = codeOrigin !== "created";
+  showView("connected");
+}
+
+// Pairing status: Waiting for buddy (code, no foreign record) / Paired (a record
+// from another Client ID exists → show Buddy name + last-seen).
 async function refreshStatus(code) {
   if (!code) {
-    setStatus("unpaired", "Unpaired", "Enter or generate a Friend Code to pair.");
+    setStatus("waiting", "Waiting for buddy", "");
     return;
   }
 

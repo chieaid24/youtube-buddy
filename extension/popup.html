@@ -54,8 +54,14 @@
       input[type="text"]:focus {
         border-color: var(--accent);
       }
-      #code {
-        text-transform: uppercase;
+      #code,
+      #join-input {
+        text-transform: lowercase;
+      }
+      #code[readonly] {
+        background: #fafafa;
+        color: var(--fg);
+        cursor: default;
       }
       .code-row,
       .edit-row {
@@ -66,9 +72,9 @@
       .edit-row input {
         flex: 1;
       }
-      /* Locked vs editable: a field shows ONE of these. `.is-locked` on the
-         `.field` (set in popup.js) swaps which child is visible. A field is
-         locked iff it holds a non-empty committed value. */
+      /* Locked vs editable Display Name: the field shows ONE of these. `.is-locked`
+         on the `.field` (set in popup.js) swaps which child is visible. The name
+         is locked iff it holds a non-empty committed value. */
       .field.is-locked .field-edit {
         display: none;
       }
@@ -92,9 +98,6 @@
         border-radius: 6px;
         background: #fafafa;
       }
-      #code-value {
-        text-transform: uppercase;
-      }
       button {
         padding: 7px 10px;
         font-size: 12px;
@@ -108,6 +111,38 @@
       }
       button:hover {
         background: #e8e8e8;
+      }
+      /* Chooser: two equal-width primary actions side by side. */
+      .chooser {
+        display: flex;
+        gap: 6px;
+      }
+      .chooser button {
+        flex: 1;
+      }
+      button.primary {
+        color: #fff;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      button.primary:hover {
+        background: #0556bd;
+      }
+      /* Text-only affordances (Change code / Back / Cancel). */
+      button.link {
+        margin-top: 8px;
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: normal;
+      }
+      button.link:hover {
+        background: none;
+        text-decoration: underline;
       }
       .status {
         display: flex;
@@ -260,6 +295,7 @@
 
     <div class="field" id="name-field">
       <label class="lbl" for="name">Display Name</label>
+      <!-- Locked once set; the Edit button reopens the input (cosmetic, unguarded). -->
       <div class="field-locked">
         <span class="locked-value" id="name-value"></span>
         <button id="name-edit" type="button">Edit</button>
@@ -275,30 +311,51 @@
       </div>
     </div>
 
-    <div class="field" id="code-field">
-      <label class="lbl" for="code">Friend Code</label>
-      <div class="field-locked">
-        <span class="locked-value" id="code-value"></span>
-        <button id="code-edit" type="button">Edit</button>
-      </div>
-      <div class="field-edit code-row">
-        <input
-          id="code"
-          type="text"
-          placeholder="Enter code"
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <button id="generate" type="button">Generate</button>
-        <button id="code-save" type="button">Save</button>
-      </div>
-    </div>
+    <div class="field">
+      <label class="lbl">Friend Code</label>
 
-    <div id="status" class="status is-unpaired">
-      <span class="dot"></span>
-      <span id="status-text">Unpaired</span>
+      <!-- Chooser: shown when there is no code yet, or after "Change code". -->
+      <div id="view-chooser">
+        <div class="chooser">
+          <button id="choose-create" type="button" class="primary">
+            Create a code
+          </button>
+          <button id="choose-join" type="button">Join a friend</button>
+        </div>
+        <button id="chooser-cancel" type="button" class="link" hidden>
+          Cancel
+        </button>
+      </div>
+
+      <!-- Join: type a Buddy's code (free text, must match a real code). -->
+      <div id="view-join" hidden>
+        <div class="code-row">
+          <input
+            id="join-input"
+            type="text"
+            placeholder="friend's code"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="join-submit" type="button">Join</button>
+        </div>
+        <button id="join-back" type="button" class="link">Back</button>
+      </div>
+
+      <!-- Connected: the single active code + pairing status. -->
+      <div id="view-connected" hidden>
+        <div class="code-row">
+          <input id="code" type="text" readonly tabindex="-1" />
+          <button id="reroll" type="button" hidden>Re-roll</button>
+        </div>
+        <div id="status" class="status is-unpaired">
+          <span class="dot"></span>
+          <span id="status-text">Unpaired</span>
+        </div>
+        <p id="status-sub"></p>
+        <button id="change-code" type="button" class="link">Change code</button>
+      </div>
     </div>
-    <p id="status-sub"></p>
 
     <div class="toggle-row">
       <div>
