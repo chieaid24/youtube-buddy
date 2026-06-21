@@ -67,7 +67,7 @@ export default {
       const key = `${prefix}${body.clientId}:${body.videoId}`;
       const record = {
         clientId: body.clientId,
-        name: body.name,
+        name: body.name ?? "",
         videoId: body.videoId,
         timestamp: body.timestamp,
         duration: body.duration,
@@ -95,8 +95,12 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 // Returns an error message for an invalid POST body, or null if it is valid.
+// `name` is intentionally NOT required: Display Name is optional (a blank name
+// still shares; consumers render a stable "<Adjective> Buddy" fallback derived
+// from clientId — see YTB.buddyName). Missing/empty name is coerced to "" on
+// store.
 function validate(body: Partial<ProgressBody>): string | null {
-  for (const field of ["clientId", "name", "videoId"] as const) {
+  for (const field of ["clientId", "videoId"] as const) {
     if (typeof body[field] !== "string" || body[field] === "") {
       return `missing or invalid field: ${field}`;
     }

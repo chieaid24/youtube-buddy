@@ -141,7 +141,7 @@
       }
       marker.style.left = (fraction * 100).toFixed(3) + "%";
       marker.style.background = YTB.buddyColor(cid);
-      const who = record.name ? record.name : "Buddy";
+      const who = YTB.buddyName(record.clientId, record.name);
       marker.querySelector("." + TOOLTIP_CLASS).textContent =
         who + " · " + YTB.formatTime(record.timestamp);
     }
@@ -223,7 +223,7 @@
         seg.style.background = YTB.buddyColor(s.cid);
         const tooltip = document.createElement("div");
         tooltip.className = TOOLTIP_CLASS;
-        const who = s.record.name ? s.record.name : "Buddy";
+        const who = YTB.buddyName(s.record.clientId, s.record.name);
         tooltip.textContent = who + " · " + YTB.formatTime(s.record.timestamp);
         seg.appendChild(tooltip);
         container.appendChild(seg);

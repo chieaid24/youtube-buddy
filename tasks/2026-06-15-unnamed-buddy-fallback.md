@@ -1,5 +1,7 @@
 # Task: Make Display Name truly optional — unnamed Buddies render a stable "Adjective Buddy"
 
+> Status: **DONE** 2026-06-21. Backend `name` optional + `YTB.buddyName()` helper wired at all 4 foreign-name render sites.
+
 ## Problem
 
 - The popup treats Display Name as **cosmetic**, but the backend makes it **mandatory**: `validate()` (`backend/src/index.ts:100`) rejects `name === ""` with `400 "missing or invalid field: name"`. The reporter swallows failed POSTs (`reporter.js:78`), so an unnamed user **silently never shares and never appears to others** — not even as "Buddy".
@@ -50,8 +52,17 @@ Replace inline `record.name ? record.name : "Buddy"` with `YTB.buddyName(record.
 
 ## Verification
 
-- [ ] `npm test` green (updated empty-name test in backend)
-- [ ] Manual: two clients, one blank name, Sharing on → blank client's POST returns `200`
-- [ ] Other client sees stable `"<Adjective> Buddy"` on marker tooltip, thumbnail-segment tooltip, and popup roster
-- [ ] Adjective identical across surfaces and across renders; color + adjective both stable per Buddy
-- [ ] Named Buddy still shows their real name (regression check)
+- [x] `npm test` green — 16 tests (added empty-name + missing-name → 200 cases)
+- [~] Manual: two clients, one blank name, Sharing on → blank client's POST returns `200` — *backend test proves the 200; live two-client run not automatable in this job*
+- [~] Other client sees stable `"<Adjective> Buddy"` on marker tooltip, thumbnail-segment tooltip, and popup roster — *code-reviewed: all 4 sites call `YTB.buddyName(clientId, name)`*
+- [x] Adjective identical across surfaces and across renders; color + adjective both stable per Buddy — deterministic `hashClientId` (shared by `buddyColor`/`buddyName`)
+- [x] Named Buddy still shows their real name — `buddyName` returns the trimmed name when non-empty
+
+## Review
+
+- `backend/src/index.ts` — dropped `name` from the nonempty-required loop (`clientId`/`videoId` still required); store coerces `name: body.name ?? ""`.
+- `extension/shared.js` — added `ADJECTIVES` (16) + `buddyName(clientId, name)`; factored the char-hash into `hashClientId(clientId)` reused by both `buddyColor` and `buddyName` (unrequested-but-implied refactor; zero behavior change to `buddyColor`).
+- Wired `YTB.buddyName` at `renderer.js` marker + thumbnail tooltips and `popup.js` roster + disconnect-confirm.
+- `backend/test/index.spec.ts` — +2 tests (empty/missing name → 200, stored `""`).
+- Verified: `node --check` on all 3 JS files clean; `npm test` 16/16 green.
+- Note: `share/extension/` left frozen per the spec.

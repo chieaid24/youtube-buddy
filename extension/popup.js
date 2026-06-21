@@ -289,14 +289,13 @@ async function clearCodeAndChoose() {
 }
 
 // Buddy Display Names under `code` for the confirmation, via the shared groupView
-// (same dedup-by-Client-ID the roster uses); an unnamed buddy falls back to
-// "your Buddy". Group-full lockout is irrelevant here — I am already a member.
+// (same dedup-by-Client-ID the roster uses); an unnamed buddy falls back to a
+// stable "<Adjective> Buddy" (YTB.buddyName), matching the roster and on-page
+// tooltips. Group-full lockout is irrelevant here — I am already a member.
 async function buddyNames(code) {
   if (!code) return [];
   const { buddies } = YTB.groupView(await YTB.getRecords(code), myClientId);
-  return buddies.map((b) =>
-    b.name && b.name.trim() ? b.name.trim() : "your Buddy"
-  );
+  return buddies.map((b) => YTB.buddyName(b.clientId, b.name));
 }
 
 function showConfirm() {
@@ -385,7 +384,7 @@ function renderRoster(buddies) {
 
     const name = document.createElement("span");
     name.className = "buddy-name";
-    name.textContent = b.name ? b.name : "Buddy";
+    name.textContent = YTB.buddyName(b.clientId, b.name);
 
     const seen = document.createElement("span");
     seen.className = "buddy-seen";

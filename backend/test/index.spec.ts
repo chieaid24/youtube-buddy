@@ -78,6 +78,30 @@ describe("POST /?code=", () => {
 		expect((await res.json()).error).toMatch(/duration/);
 	});
 
+	it("accepts an empty name, storing it as \"\" (Display Name is optional)", async () => {
+		const code = "post-empty-name";
+		const res = await post(code, body({ name: "" }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+
+		const record = JSON.parse(
+			(await env.PROGRESS.get(`${code}:a1b2c3d4:abc123`))!
+		);
+		expect(record.name).toBe("");
+	});
+
+	it("accepts a missing name, coercing it to \"\" on store", async () => {
+		const code = "post-missing-name";
+		const { name, ...withoutName } = body();
+		const res = await post(code, withoutName);
+		expect(res.status).toBe(200);
+
+		const record = JSON.parse(
+			(await env.PROGRESS.get(`${code}:a1b2c3d4:abc123`))!
+		);
+		expect(record.name).toBe("");
+	});
+
 	it("rejects a body with a non-numeric timestamp with 400", async () => {
 		const code = "post-bad-timestamp";
 		const res = await post(code, body({ timestamp: "nope" }));

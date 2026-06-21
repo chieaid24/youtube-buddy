@@ -164,6 +164,28 @@ const YTB = {
   // A Group holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
   BUDDY_PALETTE: ["#1ec8ff", "#ff9f1c", "#57d35a", "#b14cff", "#ffd23f"],
 
+  // Playful adjectives for unnamed Buddies (see buddyName). 16 entries: with a
+  // 5-color palette, gcd(16, 5) === 1 keeps the adjective independent of the
+  // color, so two unnamed Buddies rarely share BOTH.
+  ADJECTIVES: [
+    "Silly", "Scary", "Sleepy", "Sneaky", "Grumpy", "Goofy", "Wild", "Brave",
+    "Cheeky", "Jolly", "Mighty", "Sloppy", "Spooky", "Zesty", "Snazzy", "Wobbly",
+  ],
+
+  /**
+   * Stable 32-bit hash of a Client ID. The SAME id always hashes the same, so
+   * everything keyed off a Buddy (their color, their fallback name) stays
+   * stable across videos, thumbnails, the popup, and every viewer.
+   * @param {string} clientId
+   * @returns {number}
+   */
+  hashClientId(clientId) {
+    const s = String(clientId);
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return h;
+  },
+
   /**
    * Stable color for a Buddy, hashed from their Client ID — the SAME friend is
    * the SAME color on every video, thumbnail, and the popup roster, regardless
@@ -174,10 +196,26 @@ const YTB = {
    */
   buddyColor(clientId) {
     const palette = YTB.BUDDY_PALETTE;
-    const s = String(clientId);
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    const h = YTB.hashClientId(clientId);
     return palette[((h % palette.length) + palette.length) % palette.length];
+  },
+
+  /**
+   * Display label for a Buddy. Returns their trimmed Display Name when set, else
+   * a stable "<Adjective> Buddy" derived from their Client ID — same adjective
+   * on every surface and for every viewer (Display Name is optional, so unnamed
+   * Buddies still get a friendly, consistent token). Applies to FOREIGN records
+   * only; you never render yourself as a Buddy.
+   * @param {string} clientId
+   * @param {string} [name]
+   * @returns {string}
+   */
+  buddyName(clientId, name) {
+    const trimmed = String(name ?? "").trim();
+    if (trimmed) return trimmed;
+    const adjs = YTB.ADJECTIVES;
+    const h = YTB.hashClientId(clientId);
+    return `${adjs[((h % adjs.length) + adjs.length) % adjs.length]} Buddy`;
   },
 
   /**
