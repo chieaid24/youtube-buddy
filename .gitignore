@@ -1,6 +1,11 @@
 # Claude Code
 .claude/
 CLAUDE.md
+.claudeignore
+
+# Codex (AGENTS.md is a local symlink to CLAUDE.md — same source of truth, not tracked)
+AGENTS.md
+.agents/
 
 # Dependencies
 node_modules/
