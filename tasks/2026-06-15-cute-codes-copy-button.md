@@ -1,5 +1,7 @@
 # Cute Friend Codes + Copy Button (replace reroll)
 
+> Status: **DONE** 2026-06-21. 2-word codes (`adjective-animal`, plural), `<span>` pretty label, inline copy button with check-swap; reroll deleted; tolerant `normalizeCode`.
+
 ## Summary
 
 Rewrite the Friend Code system: new 2-word cute codes (`adj-animal` plural), pretty display ("The Silly Otters"), inline copy button replaces reroll.
@@ -47,12 +49,20 @@ Codes are still opaque strings in KV keys.
 
 ## Acceptance criteria
 
-- [ ] Generated codes display as "The {Adj} {Animals}" in popup
-- [ ] Copy button copies pretty form to clipboard
-- [ ] Copy icon swaps to checkmark, reverts after 1.5s
-- [ ] Buddy can join by pasting "The Silly Otters" OR typing "silly-otters"
-- [ ] No reroll button anywhere
-- [ ] Change code → Create a code mints fresh code (existing behavior preserved)
-- [ ] Copy button visible for both created and joined codes
-- [ ] Word lists ~120×120, all cute/funny, animals pre-pluralized
-- [ ] Existing tests still pass (backend unchanged)
+- [x] Generated codes display as "The {Adj} {Animals}" in popup — `el.code.textContent = prettyCode(code)`
+- [x] Copy button copies pretty form to clipboard — `navigator.clipboard.writeText(prettyCode(code))`
+- [x] Copy icon swaps to checkmark, reverts after 1.5s — `.copied` class toggle, `setTimeout(…, 1500)`
+- [x] Buddy can join by pasting "The Silly Otters" OR typing "silly-otters" — verified: both normalize to `silly-otters` (round-trip test passed)
+- [x] No reroll button anywhere — `#reroll` markup + `el.reroll` + listener all removed
+- [x] Change code → Create a code mints fresh code — `createAndCommit`/`generateCode` preserved
+- [x] Copy button visible for both created and joined codes — always rendered in Connected view (no origin gate)
+- [x] Word lists 120×120, all cute/funny, animals pre-pluralized — verified unique, no dups
+- [x] Existing tests still pass — backend untouched (16 green)
+
+## Review
+
+- `extension/popup.js` — deleted `CODE_VERBS`; rewrote `CODE_ADJECTIVES`/`CODE_ANIMALS` (120 each, animals plural); `generateCode()` → `adjective-animal`; added `prettyCode(slug)`; replaced reroll listener with copy-button logic; `el.reroll`→`el.copyCode`; `showConnected`/`clearCodeAndChoose` use `el.code.textContent`.
+- `extension/popup.html` — `<input id="code" readonly>` → `<span id="code">`; `<button id="reroll">` → `<button id="copy-code">` with inline clipboard + check SVGs; CSS for the span label + copy-button swap.
+- `extension/shared.js` — `normalizeCode` now strips leading "the ", maps whitespace→hyphens, collapses/trims hyphens (tolerant of pretty + slug forms).
+- Verified: `node --check` clean; no stale refs; 120/120 unique lists; normalize/pretty round-trip passes.
+- Note: kept "Friend Code" terminology — the room-rename is the last task in this batch.

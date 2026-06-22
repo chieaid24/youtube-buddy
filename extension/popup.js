@@ -3,50 +3,39 @@
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
 // so it survives a browser restart. See CONTEXT.md for terminology.
 
-// Built-in word lists for client-side Friend Code generation. A code is one word
-// from each list joined by hyphens: "<verb>-<adjective>-<animal>" (e.g.
-// "run-silly-fox"). Every word is <= 6 letters so codes stay short and easy to
-// read out and re-type; verbs mix short base forms and gerunds. The lists below
-// are large enough (~76 * ~85 * ~86 ≈ 555k combinations) that two independently
-// generated codes almost never collide.
-const CODE_VERBS = [
-  "run", "hop", "jump", "swim", "leap", "dash", "race", "spin", "roll", "dive",
-  "sing", "dance", "skip", "jog", "climb", "crawl", "glide", "soar", "hike",
-  "row", "surf", "skate", "slide", "float", "drift", "sail", "zoom", "march",
-  "prance", "romp", "trot", "bound", "vault", "swirl", "twist", "shake", "flip",
-  "wave", "clap", "stomp", "hum", "buzz", "snore", "dream", "yawn", "wobble",
-  "tumble", "juggle", "paddle", "coast", "hover", "pounce", "sneak", "creep",
-  "strut", "waddle", "wade", "prowl", "dart", "swoop", "charge", "sway",
-  "wiggle", "giggle", "laugh", "smile", "grin", "glow", "shine", "blink",
-  "wink", "munch", "splash", "bounce", "gallop",
-];
-
+// Built-in word lists for client-side Friend Code generation. A code is a two-word
+// "<adjective>-<animal>" slug (e.g. "silly-otters"), shown to users in its pretty
+// form "The Silly Otters" (see prettyCode). The animal word is stored already
+// plural. With ~120 * ~120 ≈ 14k+ combinations two independently generated codes
+// almost never collide.
 const CODE_ADJECTIVES = [
-  "silly", "happy", "fuzzy", "jolly", "zippy", "perky", "dizzy", "nifty",
-  "wacky", "zany", "goofy", "tiny", "brave", "bold", "calm", "jumpy", "wise",
-  "fancy", "shiny", "dusty", "misty", "sunny", "cozy", "snug", "plump", "slim",
-  "swift", "lanky", "silky", "bumpy", "lumpy", "rusty", "amber", "teal",
-  "minty", "honey", "mossy", "leafy", "rocky", "sandy", "muddy", "lunar",
-  "solar", "royal", "noble", "merry", "sleepy", "grumpy", "sneaky", "fluffy",
-  "bouncy", "cheery", "spunky", "cranky", "wobbly", "snazzy", "quirky",
-  "clumsy", "cuddly", "chubby", "mighty", "mellow", "clever", "dapper",
-  "glossy", "frosty", "stormy", "breezy", "chilly", "toasty", "nimble",
-  "stubby", "spotty", "stripy", "patchy", "shaggy", "rugged", "golden",
-  "silver", "violet", "peachy", "cherry", "swampy", "cosmic", "starry",
-  "humble",
+  "silly", "happy", "snuggly", "wobbly", "sneaky", "goofy", "jolly", "fuzzy", "derpy", "sleepy",
+  "grumpy", "bouncy", "squishy", "dapper", "giggly", "wiggly", "cuddly", "perky", "plucky", "chirpy",
+  "cheeky", "bubbly", "peppy", "spunky", "cozy", "mellow", "dreamy", "fluffy", "nimble", "zippy",
+  "snazzy", "jaunty", "merry", "quirky", "zesty", "breezy", "sunny", "chunky", "dinky", "teeny",
+  "tiny", "mini", "dorky", "nerdy", "cosmic", "groovy", "funky", "snappy", "spicy", "mighty",
+  "tubby", "pudgy", "chubby", "doughy", "sugary", "sweet", "snug", "comfy", "toasty", "plushy",
+  "velvety", "silky", "downy", "snoozy", "drowsy", "lively", "frisky", "dandy", "jazzy", "spiffy",
+  "nifty", "cute", "precious", "darling", "winsome", "chipper", "genial", "jovial", "blithe", "gleeful",
+  "beaming", "radiant", "sparkly", "twinkly", "shiny", "glossy", "dappled", "spotty", "stripy", "patchy",
+  "scruffy", "shaggy", "woolly", "furry", "feathery", "whiskery", "floppy", "droopy", "wonky", "lumpy",
+  "bumpy", "jumpy", "hoppy", "skippy", "dashing", "gallant", "noble", "regal", "fancy", "posh",
+  "swanky", "classy", "cheery", "sprightly", "chummy", "friendly", "kindly", "gentle", "tender", "caring",
 ];
 
 const CODE_ANIMALS = [
-  "deer", "wolf", "bear", "lynx", "hawk", "otter", "fox", "owl", "seal", "moth",
-  "crab", "newt", "toad", "wren", "ibis", "puma", "koi", "elk", "mole", "swan",
-  "hare", "lion", "tiger", "panda", "koala", "sloth", "llama", "camel", "moose",
-  "bison", "horse", "zebra", "goat", "sheep", "pony", "calf", "lamb", "fawn",
-  "cub", "puppy", "ferret", "badger", "beaver", "skunk", "possum", "rabbit",
-  "bunny", "marmot", "gopher", "vole", "shrew", "bat", "falcon", "eagle",
-  "heron", "egret", "stork", "crane", "robin", "finch", "magpie", "raven",
-  "crow", "dove", "pigeon", "parrot", "toucan", "puffin", "turkey", "duck",
-  "goose", "quail", "turtle", "gecko", "iguana", "lizard", "cobra", "viper",
-  "python", "salmon", "trout", "perch", "minnow", "guppy", "kitten",
+  "otters", "foxes", "pandas", "penguins", "llamas", "geese", "wolves", "mice", "bunnies", "kittens",
+  "puppies", "ducks", "ducklings", "owls", "hedgehogs", "raccoons", "koalas", "sloths", "quokkas", "capybaras",
+  "hamsters", "gerbils", "chinchillas", "ferrets", "squirrels", "chipmunks", "beavers", "badgers", "moles", "shrews",
+  "bats", "hares", "rabbits", "lambs", "piglets", "calves", "foals", "ponies", "donkeys", "goats",
+  "sheep", "alpacas", "camels", "yaks", "bison", "moose", "elks", "deer", "fawns", "reindeer",
+  "caribou", "antelopes", "gazelles", "zebras", "giraffes", "elephants", "rhinos", "hippos", "lions", "tigers",
+  "leopards", "cheetahs", "jaguars", "lynxes", "bobcats", "cougars", "pumas", "bears", "wombats", "dingoes",
+  "kangaroos", "wallabies", "platypuses", "echidnas", "possums", "lemurs", "monkeys", "baboons", "gibbons", "orangutans",
+  "gorillas", "chimps", "meerkats", "mongooses", "armadillos", "anteaters", "porcupines", "skunks", "opossums", "weasels",
+  "minks", "stoats", "martens", "seals", "walruses", "dolphins", "whales", "narwhals", "orcas", "manatees",
+  "dugongs", "turtles", "tortoises", "frogs", "toads", "newts", "salamanders", "geckos", "iguanas", "chameleons",
+  "lizards", "snakes", "crabs", "lobsters", "shrimps", "octopuses", "squids", "jellyfish", "seahorses", "starfish",
 ];
 
 const el = {
@@ -67,7 +56,7 @@ const el = {
   joinSubmit: document.getElementById("join-submit"),
   joinBack: document.getElementById("join-back"),
   code: document.getElementById("code"),
-  reroll: document.getElementById("reroll"),
+  copyCode: document.getElementById("copy-code"),
   changeCode: document.getElementById("change-code"),
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
@@ -171,10 +160,19 @@ function wireHandlers() {
   // Join → Back: abandon entry, return to the chooser (active code untouched).
   el.joinBack.addEventListener("click", () => showView("chooser"));
 
-  // Connected → Re-roll: replacing the code drops the current pairing, so confirm
-  // first when actually paired; an unpaired re-roll has nothing to disconnect.
-  el.reroll.addEventListener("click", () => {
-    confirmDisconnectThen(createAndCommit, /* skipWhenUnpaired */ true);
+  // Connected → Copy: copy the pretty form ("The Silly Otters") to the clipboard;
+  // the clipboard icon flips to a checkmark for 1.5s as feedback. Shown for both
+  // created and joined codes.
+  el.copyCode.addEventListener("click", async () => {
+    const { code } = await YTB.getConfig();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(prettyCode(code));
+    } catch {
+      return; // Clipboard blocked — no feedback, no crash.
+    }
+    el.copyCode.classList.add("copied");
+    setTimeout(() => el.copyCode.classList.remove("copied"), 1500);
   });
 
   // Connected → Change code: the explicit "leave this code" action. Always
@@ -246,10 +244,20 @@ async function joinAndCommit() {
 
 function generateCode() {
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
-  const verb = pick(CODE_VERBS);
   const adjective = pick(CODE_ADJECTIVES);
   const animal = pick(CODE_ANIMALS);
-  return YTB.normalizeCode(`${verb}-${adjective}-${animal}`);
+  return YTB.normalizeCode(`${adjective}-${animal}`);
+}
+
+// "silly-otters" → "The Silly Otters": title-case each hyphenated word and
+// prepend "The ". The inverse (pretty → slug) is YTB.normalizeCode, so a Buddy
+// can paste either form on Join.
+function prettyCode(slug) {
+  const words = String(slug)
+    .split("-")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1));
+  return "The " + words.join(" ");
 }
 
 // --- disconnect confirmation -------------------------------------------------
@@ -284,7 +292,7 @@ async function confirmDisconnectThen(onProceed, skipWhenUnpaired) {
 // code); old records under the old code expire via the backend's 14-day TTL.
 async function clearCodeAndChoose() {
   await YTB.setConfig({ code: "", codeOrigin: "" });
-  el.code.value = "";
+  el.code.textContent = "";
   showView("chooser");
 }
 
@@ -322,11 +330,10 @@ function showView(name) {
   }
 }
 
-// Render the Connected view for an active code. Re-roll is offered only for codes
-// we created — re-rolling a joined code would silently un-pair from the Buddy.
+// Render the Connected view for an active code, showing its pretty label. The
+// copy button is always available (created or joined).
 function showConnected(code, codeOrigin) {
-  el.code.value = code;
-  el.reroll.hidden = codeOrigin !== "created";
+  el.code.textContent = prettyCode(code);
   showView("connected");
 }
 

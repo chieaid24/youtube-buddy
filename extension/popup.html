@@ -55,14 +55,23 @@
       input[type="text"]:focus {
         border-color: var(--accent);
       }
-      #code,
       #join-input {
         text-transform: lowercase;
       }
-      #code[readonly] {
+      /* The active code shows as a read-only pretty label ("The Silly Otters"),
+         so it is a styled <span>, not an input. */
+      .code-row #code {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 7px 9px;
+        font-size: 13px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
         background: #fafafa;
         color: var(--fg);
-        cursor: default;
       }
       .code-row,
       .edit-row {
@@ -72,6 +81,29 @@
       .code-row input,
       .edit-row input {
         flex: 1;
+      }
+      /* Copy button: clipboard icon swaps to a checkmark for 1.5s after a copy. */
+      #copy-code {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        padding: 7px;
+        color: var(--muted);
+      }
+      #copy-code svg {
+        width: 16px;
+        height: 16px;
+      }
+      #copy-code .icon-check {
+        display: none;
+      }
+      #copy-code.copied .icon-copy {
+        display: none;
+      }
+      #copy-code.copied .icon-check {
+        display: inline;
+        color: var(--paired);
       }
       /* Locked vs editable Display Name: the field shows ONE of these. `.is-locked`
          on the `.field` (set in popup.js) swaps which child is visible. The name
@@ -382,8 +414,16 @@
       <!-- Connected: the single active code + pairing status. -->
       <div id="view-connected" hidden>
         <div class="code-row">
-          <input id="code" type="text" readonly tabindex="-1" />
-          <button id="reroll" type="button" hidden>Re-roll</button>
+          <span id="code"></span>
+          <button id="copy-code" type="button" aria-label="Copy code" title="Copy">
+            <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </button>
         </div>
         <div id="status" class="status is-unpaired">
           <span class="dot"></span>

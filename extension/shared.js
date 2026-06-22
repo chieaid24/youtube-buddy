@@ -149,13 +149,21 @@ const YTB = {
   },
 
   /**
-   * Trim + lowercase a Friend Code so "Wolf-Fox" and "wolf-fox" pair. Codes are
-   * generated lowercase; this also normalizes whatever a Buddy types on Join.
+   * Normalize a Friend Code to its canonical slug so the pretty label and the
+   * typed/pasted form both pair. Lowercases, drops a leading "the ", turns runs
+   * of whitespace into single hyphens, and collapses/trims stray hyphens. So
+   * "The Silly Otters", "silly otters", and "silly-otters" all → "silly-otters".
    * @param {string} raw
    * @returns {string}
    */
   normalizeCode(raw) {
-    return String(raw ?? "").trim().toLowerCase();
+    return String(raw ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/^the\s+/, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
   },
 
   // --- Group helpers (multiple Buddies) ---
