@@ -5,7 +5,7 @@ Order chosen to minimize `popup.js`/`shared.js` conflict churn; rename last so i
 - [x] 1. unnamed-buddy-fallback — backend name optional + `buddyName()` helper ✅ merged
 - [x] 2. cute-codes-copy-button — 2-word codes, pretty display, copy button ✅ merged
 - [x] 3. display-name-blur-save — drop Save, pencil edit icon ✅ merged
-- [ ] 4. themeable-buddy-color-palettes — `PALETTES` map + picker
+- [x] 4. themeable-buddy-color-palettes — `PALETTES` map + picker ✅ merged
 - [ ] 5. sharing-status-dot — dot toggle, generalize confirm dialog
 - [ ] 6. group-presence-membership — presence endpoints, `presence.js`, poll/toast
 - [ ] 7. rename-friend-code-to-room-code — ubiquitous-language pivot (LAST)

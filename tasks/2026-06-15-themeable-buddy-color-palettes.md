@@ -1,5 +1,7 @@
 # Task: Themeable, high-visibility buddy color palettes
 
+> Status: **DONE** 2026-06-21. `PALETTES` map (default/tropical/cool/pastel), popup picker + live swatch preview, instant recolor via cached `_activePalette` + `chrome.storage.onChanged`.
+
 ## Problem
 
 Current buddy colors (`shared.js:165`, 5 fixed hex) wash out against YouTube's dark player, red watched-bar, and bright thumbnails — hard to see. Want (a) a redesigned **high-contrast default** every user gets out of the box, and (b) optional **named palette themes** a user can switch to for personal taste.
@@ -44,8 +46,16 @@ Current buddy colors (`shared.js:165`, 5 fixed hex) wash out against YouTube's d
 
 ## Acceptance criteria
 
-1. Fresh install → buddies render in the new high-contrast default; clearly visible on dark player, red-bar region, and bright thumbnails.
-2. Popup palette `<select>` lists 4 palettes; swatch strip previews the highlighted one.
-3. Selecting a palette recolors markers + thumbnail segments + popup roster swatches **instantly** in an open YouTube tab (no reload).
-4. Same friend keeps a stable color within a given palette across videos/thumbnails/popup.
-5. Choice persists across restart (`chrome.storage.local`). No backend calls added.
+1. [x] Fresh install → new high-contrast `default` (6 saturated hues, all clear of red) — `palette` defaults to `"default"`.
+2. [x] Popup `<select>` lists 4 palettes; swatch strip previews the highlighted one — `renderSwatchStrip`.
+3. [x] Selecting recolors markers + thumbnail segments + roster swatches instantly, no reload — *renderer re-renders on `chrome.storage.onChanged.palette`; popup re-renders roster + preview on change* (code-reviewed; no live-browser harness in this job).
+4. [x] Same friend keeps a stable color within a palette — deterministic `hashClientId % palette.length`.
+5. [x] Persists across restart (`chrome.storage.local`); no backend calls added — `setConfig({ palette })`, backend untouched.
+
+## Review
+
+- `extension/shared.js` — replaced `BUDDY_PALETTE` with `PALETTES` (default/tropical/cool/pastel, ≥5 colors each, no pure red); added `_activePalette` cache + `paletteColors(name)`; `buddyColor(clientId, paletteName?)` now indexes the active/overridden palette (still sync, still hash-stable). `getConfig`/`setConfig` gained the `palette` key (default `"default"`).
+- `extension/renderer.js` — fallback color → `PALETTES.default[0]`; seeds `_activePalette` from config on load and recolors live on `chrome.storage.onChanged` (re-renders cached records, no re-GET).
+- `extension/popup.js` — `el.palette`/`el.swatchStrip`; seeds cache + picker + preview on init; change handler persists + recolors roster (`currentRosterBuddies`) and preview with no reload; added `renderSwatchStrip`.
+- `extension/popup.html` — `Buddy Colors` `<select>` + `#swatch-strip` field above Sharing; `select` + `.swatch-strip` CSS.
+- Verified: `node --check` clean across all 3 JS files; no `BUDDY_PALETTE` references remain; palettes ≥5/no-dups/no-pure-red; backend untouched (16 tests still green).

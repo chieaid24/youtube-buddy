@@ -29,13 +29,14 @@ const YTB = {
   // --- storage (chrome.storage.local) ---
   // Stored keys: name (Display Name), code (Friend Code), codeOrigin
   // ("created" | "joined" — how the active code was set; drives the popup's
-  // Re-roll affordance), clientId, sharing (boolean).
+  // Re-roll affordance), clientId, sharing (boolean), palette (buddy color
+  // theme name; local render preference, default "default").
 
   /**
    * Read the full config, applying defaults for unset keys.
    * `clientId` is "" until ensureClientId() has minted one — call that when you
    * need a guaranteed id.
-   * @returns {Promise<{name: string, code: string, codeOrigin: string, clientId: string, sharing: boolean}>}
+   * @returns {Promise<{name: string, code: string, codeOrigin: string, clientId: string, sharing: boolean, palette: string}>}
    */
   async getConfig() {
     const stored = await chrome.storage.local.get([
@@ -44,6 +45,7 @@ const YTB = {
       "codeOrigin",
       "clientId",
       "sharing",
+      "palette",
     ]);
     return {
       name: stored.name ?? "",
@@ -51,18 +53,19 @@ const YTB = {
       codeOrigin: stored.codeOrigin ?? "",
       clientId: stored.clientId ?? "",
       sharing: stored.sharing ?? true,
+      palette: stored.palette ?? "default",
     };
   },
 
   /**
-   * Merge-write a subset of { name, code, codeOrigin, sharing } into
+   * Merge-write a subset of { name, code, codeOrigin, sharing, palette } into
    * chrome.storage.local. `clientId` is intentionally NOT writable here — it is
    * owned by ensureClientId.
-   * @param {{name?: string, code?: string, codeOrigin?: string, sharing?: boolean}} partial
+   * @param {{name?: string, code?: string, codeOrigin?: string, sharing?: boolean, palette?: string}} partial
    */
   async setConfig(partial) {
     const next = {};
-    for (const key of ["name", "code", "codeOrigin", "sharing"]) {
+    for (const key of ["name", "code", "codeOrigin", "sharing", "palette"]) {
       if (key in partial) next[key] = partial[key];
     }
     await chrome.storage.local.set(next);
@@ -168,13 +171,31 @@ const YTB = {
 
   // --- Group helpers (multiple Buddies) ---
 
-  // Five visually distinct marker colors, all clear of YouTube's red watched-bar.
-  // A Group holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
-  BUDDY_PALETTE: ["#1ec8ff", "#ff9f1c", "#57d35a", "#b14cff", "#ffd23f"],
+  // Marker color palettes. Each is >= 5 visually distinct colors, all clear of
+  // YouTube's red watched-bar. `default` is tuned for high contrast on the dark
+  // player and bright thumbnails (every user gets it out of the box); the rest
+  // are opt-in themes, a purely LOCAL render preference (config `palette`). A
+  // Group holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
+  PALETTES: {
+    default: ["#00d2ff", "#ffc400", "#8c5bff", "#00e08a", "#ff7a00", "#ff3df5"],
+    tropical: ["#ff8c42", "#ffd23f", "#2ec4b6", "#06d6a0", "#ff5db1", "#9b5de5"],
+    cool: ["#56cfe1", "#4ea8de", "#5e60ce", "#7400b8", "#64dfdf", "#80ffdb"],
+    pastel: ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#bdb2ff", "#ffc6ff"],
+  },
 
-  // Playful adjectives for unnamed Buddies (see buddyName). 16 entries: with a
-  // 5-color palette, gcd(16, 5) === 1 keeps the adjective independent of the
-  // color, so two unnamed Buddies rarely share BOTH.
+  // Cached active palette NAME for the synchronous buddyColor(). Each context
+  // (popup, content script) seeds this from config on load and refreshes it on a
+  // chrome.storage change; a stale read just costs one render in the old palette.
+  _activePalette: "default",
+
+  // Resolve a palette name to its color array, falling back to `default`.
+  paletteColors(name) {
+    return YTB.PALETTES[name] || YTB.PALETTES.default;
+  },
+
+  // Playful adjectives for unnamed Buddies (see buddyName). 16 entries spread
+  // unnamed Buddies across the small set ever on screen, and stay independent of
+  // the color palette so two unnamed Buddies rarely share BOTH adjective + color.
   ADJECTIVES: [
     "Silly", "Scary", "Sleepy", "Sneaky", "Grumpy", "Goofy", "Wild", "Brave",
     "Cheeky", "Jolly", "Mighty", "Sloppy", "Spooky", "Zesty", "Snazzy", "Wobbly",
@@ -195,15 +216,19 @@ const YTB = {
   },
 
   /**
-   * Stable color for a Buddy, hashed from their Client ID — the SAME friend is
-   * the SAME color on every video, thumbnail, and the popup roster, regardless
-   * of who else is in the Group. With only 5 colors two Buddies can collide;
-   * tooltips and the popup roster still disambiguate (accepted tradeoff).
+   * Stable color for a Buddy, hashed from their Client ID — within a palette the
+   * SAME friend is the SAME color on every video, thumbnail, and the popup
+   * roster, regardless of who else is in the Group. Pass `paletteName` to force a
+   * palette (e.g. the popup's live preview); omit it to read the cached active
+   * palette (YTB._activePalette). Switching palette recolors everyone but keeps
+   * each Buddy's slot. More Buddies than palette entries can collide; tooltips
+   * and the popup roster still disambiguate (accepted tradeoff).
    * @param {string} clientId
-   * @returns {string} a hex color from BUDDY_PALETTE
+   * @param {string} [paletteName]
+   * @returns {string} a hex color
    */
-  buddyColor(clientId) {
-    const palette = YTB.BUDDY_PALETTE;
+  buddyColor(clientId, paletteName) {
+    const palette = YTB.paletteColors(paletteName || YTB._activePalette);
     const h = YTB.hashClientId(clientId);
     return palette[((h % palette.length) + palette.length) % palette.length];
   },

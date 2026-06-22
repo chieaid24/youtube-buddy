@@ -265,7 +265,7 @@
   /** Inject the renderer's CSS once (no separate stylesheet file). */
   function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
-    const fallback = YTB.BUDDY_PALETTE[0]; // before a per-Buddy color is set
+    const fallback = YTB.PALETTES.default[0]; // before a per-Buddy color is set
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
@@ -340,6 +340,21 @@
     // The feed lazy-loaded more tiles (and/or the player finished building).
     // Use the cached records — no re-GET. Re-apply the markers too, since the
     // progress bar may have only just appeared after the last navigate.
+    renderWatchMarker(currentVideoId);
+    renderThumbnails();
+  });
+
+  // Buddy color palette: seed the synchronous cache from config, and recolor this
+  // tab live when the popup changes the palette (no reload, no re-GET — re-render
+  // the cached records in the new colors).
+  YTB.getConfig().then((c) => {
+    YTB._activePalette = c.palette;
+    renderWatchMarker(currentVideoId);
+    renderThumbnails();
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.palette) return;
+    YTB._activePalette = changes.palette.newValue || "default";
     renderWatchMarker(currentVideoId);
     renderThumbnails();
   });

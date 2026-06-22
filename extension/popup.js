@@ -61,6 +61,8 @@ const el = {
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
   roster: document.getElementById("roster"),
+  palette: document.getElementById("palette"),
+  swatchStrip: document.getElementById("swatch-strip"),
   sharing: document.getElementById("sharing"),
   backendUrl: document.getElementById("backend-url"),
   // Disconnect confirmation dialog.
@@ -77,6 +79,10 @@ let myClientId = "";
 // cleared on cancel/confirm). Lets one dialog serve both Change code and Re-roll.
 let pendingDisconnect = null;
 
+// Last-rendered roster, so a palette change can recolor the swatches without a
+// re-GET (renderRoster rebuilds them through the new active palette).
+let currentRosterBuddies = [];
+
 init();
 
 async function init() {
@@ -89,6 +95,12 @@ async function init() {
   el.name.value = config.name || "";
   el.nameValue.textContent = config.name || "";
   el.sharing.checked = config.sharing;
+
+  // Buddy color palette: seed the synchronous cache (so roster swatches color
+  // correctly on first render), reflect the choice in the picker, and preview it.
+  YTB._activePalette = config.palette;
+  el.palette.value = config.palette;
+  renderSwatchStrip(config.palette);
 
   // The Display Name starts locked iff it already holds a non-empty committed
   // value, so a fresh install (blank name) opens in edit mode (onboarding unchanged).
@@ -196,6 +208,17 @@ function wireHandlers() {
   // POSTs but the renderer keeps showing the Buddy's markers.
   el.sharing.addEventListener("change", () => {
     YTB.setConfig({ sharing: el.sharing.checked });
+  });
+
+  // Buddy color palette: persist the choice (open YouTube tabs recolor live via
+  // chrome.storage.onChanged), update the cache + preview, and recolor the roster
+  // swatches here — all with no reload.
+  el.palette.addEventListener("change", () => {
+    const palette = el.palette.value;
+    YTB.setConfig({ palette });
+    YTB._activePalette = palette;
+    renderSwatchStrip(palette);
+    renderRoster(currentRosterBuddies);
   });
 }
 
@@ -375,6 +398,7 @@ function setStatus(state, text, sub) {
 // matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
 // as the color legend. Newest-active Buddy first (groupView already sorts).
 function renderRoster(buddies) {
+  currentRosterBuddies = buddies;
   el.roster.textContent = "";
   for (const b of buddies) {
     const row = document.createElement("div");
@@ -394,6 +418,18 @@ function renderRoster(buddies) {
 
     row.append(swatch, name, seen);
     el.roster.appendChild(row);
+  }
+}
+
+// Preview the palette under the picker: one swatch per color in `name`'s array,
+// in the same order buddyColor indexes them.
+function renderSwatchStrip(name) {
+  el.swatchStrip.textContent = "";
+  for (const color of YTB.paletteColors(name)) {
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = color;
+    el.swatchStrip.appendChild(swatch);
   }
 }
 
