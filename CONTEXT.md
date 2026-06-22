@@ -1,23 +1,23 @@
 # YouTube Buddy
 
-A Chrome extension plus Cloudflare Worker backend that lets a small Group of friends (up to five) passively share YouTube watch progress — each sees where the others left off, both on the active video's progress bar and on thumbnails.
+A Chrome extension plus Cloudflare Worker backend that lets a small Room of friends (up to five) passively share YouTube watch progress — each sees where the others left off, both on the active video's progress bar and on thumbnails.
 
 ## Language
 
-**Friend Code**:
-A short shared string (e.g. `run-silly-fox`) that forms a Group. It is both the joining mechanism and the only access control — anyone holding the code can read and write that Group's data.
-_Avoid_: room code, group code, secret (the people form a *Group*, but the string itself is always the *Friend Code*)
+**Room Code**:
+A short shared string (e.g. `silly-otters`, shown as "The Silly Otters") that forms a Room. It is both the joining mechanism and the only access control — anyone holding the code can read and write that Room's data.
+_Avoid_: friend code, group code, secret (the people form a *Room*, but the string itself is always the *Room Code*)
 
-**Group**:
-The set of people sharing one Friend Code — at most five (you plus up to four Buddies). The backend enforces the cap best-effort; a sixth person is locked out.
-_Avoid_: room, channel, party
+**Room**:
+The set of people sharing one Room Code — at most five (you plus up to four Buddies). The backend enforces the cap best-effort; a sixth person is locked out.
+_Avoid_: group, channel, party
 
 **Progress Record**:
 One user's last-known position in one specific video. A user has many Progress Records (one per video watched); old ones expire rather than living forever.
 _Avoid_: progress entry, watch state, sync record
 
 **Client ID**:
-A random stable identifier generated once per browser installation. It is what identifies a user within a Group; two users can share a Display Name without colliding.
+A random stable identifier generated once per browser installation. It is what identifies a user within a Room; two users can share a Display Name without colliding.
 _Avoid_: user id, username
 
 **Display Name**:
@@ -25,11 +25,11 @@ The human-readable label a user types for themselves (e.g. "aidan"), shown besid
 _Avoid_: name (alone, in code), handle
 
 **Buddy** (pl. **Buddies**):
-Any other person in your Group — there can be up to four. Their Progress Records get rendered in your browser, each in a stable per-Buddy color (so the same friend is the same color everywhere).
+Any other person in your Room — there can be up to four. Their Progress Records get rendered in your browser, each in a stable per-Buddy color (so the same friend is the same color everywhere).
 _Avoid_: friend, peer, partner (in code and UI copy; "friend" is fine in prose)
 
-**Group states** (Unpaired / Waiting / In group / Group full):
-Your membership in a Group, from your perspective. *Unpaired* — no code. *Waiting* — code set, but no Buddy has a record yet. *In group* — at least one Buddy's record exists (the popup lists each Buddy with their color swatch + last-seen). *Group full* — five other Client IDs already exist under the code and you are not one of them, so you are the locked-out sixth: nothing renders.
+**Room states** (Unpaired / Waiting / In room / Room full):
+Your membership in a Room, from your perspective. *Unpaired* — no code. *Waiting* — code set, but no Buddy has joined or recorded yet. *In room* — at least one Buddy is present, via a presence row or a Progress Record (the popup lists each Buddy with their color swatch + last-seen). *Room full* — five other Client IDs already exist under the code and you are not one of them, so you are the locked-out sixth: nothing renders.
 _Avoid_: paired, connected, linked
 
 **Sharing**:

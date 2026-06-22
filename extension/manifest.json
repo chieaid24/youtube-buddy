@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Buddy",
   "version": "0.1.0",
-  "description": "Passively share YouTube watch progress with a Buddy via a Friend Code.",
+  "description": "Passively share YouTube watch progress with a Buddy via a Room Code.",
   "permissions": ["storage"],
   "host_permissions": [
     "*://*.youtube.com/*",

@@ -131,7 +131,7 @@ describe("POST /?code=", () => {
 	});
 });
 
-describe("Group cap (POST)", () => {
+describe("Room cap (POST)", () => {
 	const members = ["m1", "m2", "m3", "m4", "m5"];
 
 	it("admits up to 5 distinct Client IDs under one code", async () => {
@@ -142,19 +142,19 @@ describe("Group cap (POST)", () => {
 		}
 	});
 
-	it("rejects a 6th distinct Client ID with 409 group full", async () => {
+	it("rejects a 6th distinct Client ID with 409 room full", async () => {
 		const code = "cap-sixth";
 		for (const clientId of members) {
 			await post(code, body({ clientId, videoId: "v" }));
 		}
 		const res = await post(code, body({ clientId: "m6", videoId: "v" }));
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: "group full" });
+		expect(await res.json()).toEqual({ error: "room full" });
 		// The rejected member left no record behind.
 		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
 	});
 
-	it("still accepts a returning member's new video when the group is full", async () => {
+	it("still accepts a returning member's new video when the room is full", async () => {
 		const code = "cap-returning";
 		for (const clientId of members) {
 			await post(code, body({ clientId, videoId: "v1" }));
@@ -244,10 +244,10 @@ describe("DELETE /presence?code=", () => {
 	});
 });
 
-describe("Group cap counts presence rows", () => {
+describe("Room cap counts presence rows", () => {
 	const members = ["m1", "m2", "m3", "m4", "m5"];
 
-	it("rejects a 6th distinct presence member with 409 group full", async () => {
+	it("rejects a 6th distinct presence member with 409 room full", async () => {
 		const code = "cap-presence-six";
 		for (const clientId of members) {
 			const res = await postPresence(code, { clientId });
@@ -255,7 +255,7 @@ describe("Group cap counts presence rows", () => {
 		}
 		const res = await postPresence(code, { clientId: "m6" });
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: "group full" });
+		expect(await res.json()).toEqual({ error: "room full" });
 		expect(await env.PROGRESS.get(`${code}:presence:m6`)).toBeNull();
 	});
 
@@ -266,7 +266,7 @@ describe("Group cap counts presence rows", () => {
 		}
 		const res = await post(code, body({ clientId: "m6", videoId: "v" }));
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: "group full" });
+		expect(await res.json()).toEqual({ error: "room full" });
 		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
 	});
 

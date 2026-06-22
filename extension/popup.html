@@ -186,7 +186,7 @@
       button.primary:hover {
         background: #0556bd;
       }
-      /* Text-only affordances (Change code / Back / Cancel). */
+      /* Text-only affordances (Leave room / Back / Cancel). */
       button.link {
         margin-top: 8px;
         padding: 0;
@@ -213,7 +213,7 @@
       }
       /* The dot's color tracks the pairing state via --dot-color. */
       .status.is-paired,
-      .status.is-ingroup {
+      .status.is-inroom {
         --dot-color: var(--paired);
       }
       .status.is-waiting {
@@ -239,7 +239,7 @@
       }
       /* The dot is also the Sharing toggle: a small glyph centered in a ~28px
          focusable hit area (replaces the old Sharing switch). Passive (disabled)
-         in the Group-full state. */
+         in the Room-full state. */
       .sharing-dot {
         display: inline-flex;
         align-items: center;
@@ -423,15 +423,15 @@
     </div>
 
     <div class="field">
-      <label class="lbl">Friend Code</label>
+      <label class="lbl">Room Code</label>
 
-      <!-- Chooser: shown when there is no code yet, or after "Change code". -->
+      <!-- Chooser: shown when there is no code yet, or after "Leave room". -->
       <div id="view-chooser">
         <div class="chooser">
           <button id="choose-create" type="button" class="primary">
-            Create a code
+            Create a room
           </button>
-          <button id="choose-join" type="button">Join a friend</button>
+          <button id="choose-join" type="button">Join a room</button>
         </div>
         <button id="chooser-cancel" type="button" class="link" hidden>
           Cancel
@@ -444,7 +444,7 @@
           <input
             id="join-input"
             type="text"
-            placeholder="friend's code"
+            placeholder="room code"
             autocomplete="off"
             spellcheck="false"
           />
@@ -475,7 +475,7 @@
         </div>
         <p id="status-sub"></p>
         <div id="roster" class="roster"></div>
-        <button id="change-code" type="button" class="link">Change code</button>
+        <button id="leave-room" type="button" class="link">Leave room</button>
       </div>
     </div>
 
@@ -505,8 +505,9 @@
         <p class="confirm-body" id="confirm-body"></p>
         <div class="confirm-actions">
           <button id="confirm-cancel" type="button">Cancel</button>
+          <!-- Label + variant are set per-open by openConfirm (Leave / Stop sharing). -->
           <button id="confirm-disconnect" type="button" class="danger">
-            Disconnect
+            Leave
           </button>
         </div>
       </div>

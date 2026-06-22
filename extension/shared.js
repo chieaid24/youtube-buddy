@@ -12,7 +12,7 @@
 //   - getRecords(code)  — code is PASSED IN (the popup already holds the code).
 //   - postProgress(...) — code is READ FROM CONFIG (the reporter just wants to
 //                         "send my current position"; it never carries the code).
-// Friend Codes are stored already-normalized (popup calls normalizeCode before
+// Room Codes are stored already-normalized (popup calls normalizeCode before
 // setConfig), so the API client passes the code through verbatim.
 
 const YTB = {
@@ -21,13 +21,13 @@ const YTB = {
   // task 02 (also update the matching entry in manifest.json host_permissions).
   BACKEND_URL: "http://localhost:8787",
 
-  // A Friend Code is one Group of at most this many distinct Client IDs (you +
+  // A Room Code is one Room of at most this many distinct Client IDs (you +
   // up to 4 Buddies). Mirrors MAX_MEMBERS in the backend Worker; the server
-  // enforces it, the client uses it to detect a full Group (see groupView).
+  // enforces it, the client uses it to detect a full Room (see roomView).
   MAX_MEMBERS: 5,
 
   // --- storage (chrome.storage.local) ---
-  // Stored keys: name (Display Name), code (Friend Code), codeOrigin
+  // Stored keys: name (Display Name), code (Room Code), codeOrigin
   // ("created" | "joined" — how the active code was set; drives the popup's
   // Re-roll affordance), clientId, sharing (boolean), palette (buddy color
   // theme name; local render preference, default "default").
@@ -89,7 +89,7 @@ const YTB = {
   // --- API client (talks to BACKEND_URL; wire format defined in task 01) ---
 
   /**
-   * POST this user's current Progress Record. Reads the Friend Code from config.
+   * POST this user's current Progress Record. Reads the Room Code from config.
    * Body is exactly the 5 fields below (no updatedAt — the server sets it).
    * Tolerates failure silently per the PRD's "minimal error handling": resolves
    * to { ok: true } on success, or false on missing code / network / non-2xx.
@@ -119,7 +119,7 @@ const YTB = {
    * AND the Buddies' — the server does no filtering; consumers split by comparing
    * clientId). The server returns `{ progress, presence }`; on any failure this
    * resolves to empty arrays so callers never have to null-check.
-   * @param {string} code Friend Code (already normalized).
+   * @param {string} code Room Code (already normalized).
    * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>}>}
    */
   async getRecords(code) {
@@ -144,7 +144,7 @@ const YTB = {
    * of the Sharing toggle. Idempotent upsert (the server refreshes updatedAt +
    * TTL), so it doubles as a keep-alive and a backfill for pre-presence installs.
    * Best-effort: resolves { ok: true } on success, false otherwise.
-   * @param {string} code Friend Code (already normalized).
+   * @param {string} code Room Code (already normalized).
    * @returns {Promise<{ok: true}|false>}
    */
   async assertPresence(code) {
@@ -169,7 +169,7 @@ const YTB = {
   /**
    * Remove my presence row from `code` (leave the room). Idempotent on the
    * server. Best-effort — on failure the row just TTLs out in 14 days.
-   * @param {string} code Friend Code (already normalized).
+   * @param {string} code Room Code (already normalized).
    * @param {string} clientId
    * @returns {Promise<{ok: true}|false>}
    */
@@ -209,7 +209,7 @@ const YTB = {
   },
 
   /**
-   * Normalize a Friend Code to its canonical slug so the pretty label and the
+   * Normalize a Room Code to its canonical slug so the pretty label and the
    * typed/pasted form both pair. Lowercases, drops a leading "the ", turns runs
    * of whitespace into single hyphens, and collapses/trims stray hyphens. So
    * "The Silly Otters", "silly otters", and "silly-otters" all → "silly-otters".
@@ -226,13 +226,13 @@ const YTB = {
       .replace(/^-+|-+$/g, "");
   },
 
-  // --- Group helpers (multiple Buddies) ---
+  // --- Room helpers (multiple Buddies) ---
 
   // Marker color palettes. Each is >= 5 visually distinct colors, all clear of
   // YouTube's red watched-bar. `default` is tuned for high contrast on the dark
   // player and bright thumbnails (every user gets it out of the box); the rest
   // are opt-in themes, a purely LOCAL render preference (config `palette`). A
-  // Group holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
+  // Room holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
   PALETTES: {
     default: ["#00d2ff", "#ffc400", "#8c5bff", "#00e08a", "#ff7a00", "#ff3df5"],
     tropical: ["#ff8c42", "#ffd23f", "#2ec4b6", "#06d6a0", "#ff5db1", "#9b5de5"],
@@ -275,7 +275,7 @@ const YTB = {
   /**
    * Stable color for a Buddy, hashed from their Client ID — within a palette the
    * SAME friend is the SAME color on every video, thumbnail, and the popup
-   * roster, regardless of who else is in the Group. Pass `paletteName` to force a
+   * roster, regardless of who else is in the Room. Pass `paletteName` to force a
    * palette (e.g. the popup's live preview); omit it to read the cached active
    * palette (YTB._activePalette). Switching palette recolors everyone but keeps
    * each Buddy's slot. More Buddies than palette entries can collide; tooltips
@@ -310,19 +310,19 @@ const YTB = {
 
   /**
    * Reduce the structured `{ progress, presence }` records (mine AND the
-   * Buddies') into a Group view from my perspective. A Buddy is any FOREIGN
+   * Buddies') into a Room view from my perspective. A Buddy is any FOREIGN
    * clientId appearing in EITHER set: their latest Progress Record (carries a
    * position) is preferred, else their presence row ("joined", no position). The
-   * Group is capped at MAX_MEMBERS distinct Client IDs across both sets.
+   * Room is capped at MAX_MEMBERS distinct Client IDs across both sets.
    * @param {{progress: Array<object>, presence: Array<object>}} records
    * @param {string} myClientId
    * @returns {{buddies: Array<object>, iAmMember: boolean, locked: boolean}}
    *   buddies — one entry per distinct foreign Buddy, newest-first by updatedAt.
    *   iAmMember — I appear in either set under the code.
-   *   locked — the Group is full of OTHERS and I am not one of them (would be the
-   *            rejected 6th): render nothing, show "Group full".
+   *   locked — the Room is full of OTHERS and I am not one of them (would be the
+   *            rejected 6th): render nothing, show "Room full".
    */
-  groupView(records, myClientId) {
+  roomView(records, myClientId) {
     const progress = (records && records.progress) || [];
     const presence = (records && records.presence) || [];
 
@@ -369,7 +369,7 @@ const YTB = {
     }
     buddies.sort((a, b) => b.updatedAt - a.updatedAt);
 
-    // Distinct OTHERS; 5 of them with no membership of my own = a full Group I'd
+    // Distinct OTHERS; 5 of them with no membership of my own = a full Room I'd
     // be the locked-out 6th of.
     let foreignCount = 0;
     for (const id of memberIds) if (id !== myClientId) foreignCount++;

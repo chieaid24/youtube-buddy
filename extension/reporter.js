@@ -74,7 +74,7 @@
     if (!config.sharing || !config.code) return; // Sharing off, or unpaired.
 
     const clientId = await YTB.ensureClientId();
-    // postProgress reads the Friend Code from config itself; we pass only the
+    // postProgress reads the Room Code from config itself; we pass only the
     // 5 record fields. A failed POST resolves falsy and is swallowed.
     await YTB.postProgress({
       clientId,

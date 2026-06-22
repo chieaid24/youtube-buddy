@@ -16,8 +16,8 @@
 // observer and emits ytb:navigate / ytb:mutation; we never detect either.
 //
 // "Buddy" filter: a record is a Buddy's iff record.clientId !== myClientId. A
-// Friend Code is one Group of up to YTB.MAX_MEMBERS people; when this install is
-// the locked-out 6th (Group full), we draw nothing. Reads happen regardless of
+// Room Code is one Room of up to YTB.MAX_MEMBERS people; when this install is
+// the locked-out 6th (Room full), we draw nothing. Reads happen regardless of
 // the Sharing toggle — Sharing only gates POSTs.
 
 (function () {
@@ -51,10 +51,10 @@
   // ---------------------------------------------------------------------------
 
   /**
-   * GET every record under the configured Friend Code and index the Buddies'
+   * GET every record under the configured Room Code and index the Buddies'
    * (foreign clientId) by videoId — one latest record per Buddy per video. Bails
    * to an empty cache when there is no code (Unpaired) or when this install is
-   * the locked-out 6th member (Group full — draw nothing). Server-side TTL
+   * the locked-out 6th member (Room full — draw nothing). Server-side TTL
    * already drops records older than 14 days, so no age filter is needed here.
    */
   async function refresh() {
@@ -66,13 +66,13 @@
     }
     myClientId = myClientId || (await YTB.ensureClientId());
     const records = await YTB.getRecords(code);
-    const view = YTB.groupView(records, myClientId);
+    const view = YTB.roomView(records, myClientId);
 
     // Toast new arrivals (presence OR progress). Diff against last refresh; the
     // first read just seeds the baseline so existing Buddies never "join".
     notePresence(view.buddies);
 
-    // Locked out of a full Group: I'm not a member and 5 others already are.
+    // Locked out of a full Room: I'm not a member and 5 others already are.
     if (view.locked) {
       buddyByVideoId = new Map();
       return;

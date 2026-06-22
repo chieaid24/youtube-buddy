@@ -1,6 +1,6 @@
 // extension/presence.js
 //
-// Presence asserter: announces "I'm here" under the active Friend Code while the
+// Presence asserter: announces "I'm here" under the active Room Code while the
 // user is anywhere on YouTube — independent of watching and of the Sharing
 // toggle. This is what makes a member appear to others the instant they have a
 // code set, not only once they POST a Progress Record (the reporter's job).

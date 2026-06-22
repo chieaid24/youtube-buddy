@@ -20,7 +20,7 @@ interface PresenceBody {
 // bounds the GET prefix scan. Presence Records share the same TTL.
 const TTL_SECONDS = 14 * 24 * 3600;
 
-// A Friend Code is one Group of at most this many distinct Client IDs (you +
+// A Room Code is one Room of at most this many distinct Client IDs (you +
 // up to 4 Buddies). Enforced best-effort on POST — see the cap check below.
 const MAX_MEMBERS = 5;
 
@@ -55,11 +55,11 @@ export default {
         return json({ error: "missing or invalid field: clientId" }, 400);
       }
 
-      // A presence row reserves a Group slot just like a progress row — see the
+      // A presence row reserves a Room slot just like a progress row — see the
       // cap-check note in currentMembers.
       const members = await currentMembers(env, prefix);
       if (!members.has(body.clientId) && members.size >= MAX_MEMBERS) {
-        return json({ error: "group full" }, 409);
+        return json({ error: "room full" }, 409);
       }
 
       // updatedAt is server-authoritative; name is optional (coerced to "").
@@ -94,13 +94,13 @@ export default {
         return json({ error }, 400);
       }
 
-      // Best-effort Group cap: a Friend Code holds at most MAX_MEMBERS distinct
+      // Best-effort Room cap: a Room Code holds at most MAX_MEMBERS distinct
       // Client IDs, counting both progress and presence rows. A brand-new
-      // Client ID is rejected once the Group is full; returning members — and
+      // Client ID is rejected once the Room is full; returning members — and
       // their new videos — always go through. See currentMembers.
       const members = await currentMembers(env, prefix);
       if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
-        return json({ error: "group full" }, 409);
+        return json({ error: "room full" }, 409);
       }
 
       // updatedAt is server-authoritative — never trust the client's value.
@@ -142,7 +142,7 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-// Derives the Group's current distinct Client IDs from existing key names under
+// Derives the Room's current distinct Client IDs from existing key names under
 // the Code's prefix — no value reads. Both key kinds reserve a slot: progress
 // keys are `${code}:${clientId}:${videoId}` (member id is the first segment)
 // and presence keys are `${code}:presence:${clientId}` (member id is the second

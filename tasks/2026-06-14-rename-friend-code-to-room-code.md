@@ -1,6 +1,6 @@
 # Task: Rename "Friend Code" → "Room Code" and "Group" → "Room"
 
-Status: defined (not yet implemented)
+Status: **DONE** 2026-06-21. Full ubiquitous-language pivot Friend Code→Room Code, Group→Room across extension copy + comments + identifiers (`groupView`→`roomView`, `is-ingroup`→`is-inroom`, `change-code`/`el.changeCode`→`leave-room`/`el.leaveRoom`), backend (`"group full"`→`"room full"` + comments + tests), CONTEXT.md, ADR-0002. CLAUDE.md updated separately (it is gitignored, primary-only). Mechanism identifiers (`?code=`, KV keys, `code`/`codeOrigin`, `normalizeCode`) and the internal "disconnect" names kept.
 Date: 2026-06-14
 
 Pivot the ubiquitous language from **Friend Code / Group** to **Room Code / Room**.
@@ -81,4 +81,9 @@ This reverses the language deliberately documented in `CONTEXT.md` and `ADR-0002
 
 ## Review
 
-(To be filled in after implementation.)
+- **Backend** (`index.ts` + tests) — `"group full"`→`"room full"` (both POST paths), all "Group"/"Friend Code" comments → "Room"/"Room Code"; test describe/it names + expectations updated. `npm test` green (**28 tests**, not the spec's stale 11).
+- **Extension copy** — popup.html: `Friend Code`→`Room Code` label, `Create a code`→`Create a room`, `Join a friend`→`Join a room`, placeholder `room code`, `Change code`→`Leave room` (+ `id="leave-room"`), `.is-ingroup`→`.is-inroom`, confirm default `Leave`. popup.js status: `In group`→`In room`, `Group full`→`Room full`, `Waiting for buddy`→`Waiting for buddies`, sub-text → "…Room Code to join.", dialog copy per the leave-cluster row (dropped the now-unused buddy/buddies `label` var), confirm label `Disconnect`→`Leave`. manifest description → `Room Code`.
+- **Identifiers** — `YTB.groupView`→`YTB.roomView` (shared.js def + renderer.js + popup.js callers); status state `ingroup`→`inroom`; `el.changeCode`→`el.leaveRoom` + `getElementById("leave-room")`. Mechanism identifiers (`?code=`, KV keys, `code`/`codeOrigin`, `normalizeCode`) and internal `pendingDisconnect`/`confirm-disconnect`/`clearCodeAndChoose` names **kept** per spec; `Unpaired`/`.is-paired` kept.
+- **Docs** — CONTEXT.md: Room Code / Room / Room states entries, inverted `_Avoid_` lines (friend-code/group now avoided). ADR-0002 rewritten in place (title "Rooms of up to five…"; also refreshed the now-stale GET-shape / `roomView` / presence-counts-toward-cap facts). CLAUDE.md (gitignored, primary-only) updated post-merge with the full end-state (endpoints, presence, load order, terminology, test count).
+- **Verification** — grep gate clean on tracked files (only the deliberate `_Avoid_: friend code` line in CONTEXT.md remains, which is correct); `node --check` clean on all extension JS; no orphan `change-code`/`groupView`/`ingroup` references. Step 3/4 (live popup) code-reviewed against the markup/handlers; no live-browser harness in this job. (Re-roll referenced in the spec was already removed by the cute-codes task.)
+- *Note: the rename spec's grep pattern `waiting for buddy` substring-matches the new `waiting for buddies`; used a `\b`-anchored variant to confirm no singular remains.*

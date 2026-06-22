@@ -1,10 +1,10 @@
-// popup.js — identity, Friend Code, and the pairing status dot (which doubles as
+// popup.js — identity, Room Code, and the pairing status dot (which doubles as
 // the Sharing toggle: solid = sharing, hollow = not).
 // Consumes the frozen `window.YTB` contract from shared.js (task 03). The popup is
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
 // so it survives a browser restart. See CONTEXT.md for terminology.
 
-// Built-in word lists for client-side Friend Code generation. A code is a two-word
+// Built-in word lists for client-side Room Code generation. A code is a two-word
 // "<adjective>-<animal>" slug (e.g. "silly-otters"), shown to users in its pretty
 // form "The Silly Otters" (see prettyCode). The animal word is stored already
 // plural. With ~120 * ~120 ≈ 14k+ combinations two independently generated codes
@@ -45,7 +45,7 @@ const el = {
   name: document.getElementById("name"),
   nameValue: document.getElementById("name-value"),
   nameEdit: document.getElementById("name-edit"),
-  // Friend Code views (mutually exclusive — only one is shown at a time).
+  // Room Code views (mutually exclusive — only one is shown at a time).
   viewChooser: document.getElementById("view-chooser"),
   viewJoin: document.getElementById("view-join"),
   viewConnected: document.getElementById("view-connected"),
@@ -57,7 +57,7 @@ const el = {
   joinBack: document.getElementById("join-back"),
   code: document.getElementById("code"),
   copyCode: document.getElementById("copy-code"),
-  changeCode: document.getElementById("change-code"),
+  leaveRoom: document.getElementById("leave-room"),
   status: document.getElementById("status"),
   statusText: document.getElementById("status-text"),
   statusSub: document.getElementById("status-sub"),
@@ -79,11 +79,11 @@ const el = {
 let myClientId = "";
 
 // The action to run if the open confirm dialog is confirmed (set per-open;
-// cleared on cancel/confirm). One dialog serves Change code AND Stop sharing.
+// cleared on cancel/confirm). One dialog serves Leave room AND Stop sharing.
 let pendingConfirm = null;
 
 // Last-known Sharing state + whether the status dot is currently a live toggle
-// (it is in waiting / in group; passive in Group full). Read by the dot's click.
+// (it is in waiting / in room; passive in Room full). Read by the dot's click.
 let currentSharing = true;
 let dotInteractive = false;
 
@@ -193,10 +193,10 @@ function wireHandlers() {
     setTimeout(() => el.copyCode.classList.remove("copied"), 1500);
   });
 
-  // Connected → Change code: the explicit "leave this code" action. Always
+  // Connected → Leave room: the explicit "leave this room" action. Always
   // confirm (copy adapts to whether a buddy is connected); on confirm, drop the
   // code and reopen the chooser.
-  el.changeCode.addEventListener("click", () => {
+  el.leaveRoom.addEventListener("click", () => {
     confirmDisconnectThen(clearCodeAndChoose);
   });
 
@@ -219,7 +219,7 @@ function wireHandlers() {
   // confirm; starting (off → solid) is instant. The reporter reads `sharing` and
   // stops/resumes its POSTs; the renderer keeps drawing the Buddy either way.
   el.sharingDot.addEventListener("click", () => {
-    if (!dotInteractive) return; // passive in Group full (button is disabled too)
+    if (!dotInteractive) return; // passive in Room full (button is disabled too)
     if (currentSharing) {
       openConfirm({
         title: "Stop sharing?",
@@ -268,11 +268,11 @@ function commitName() {
   );
 }
 
-// --- Friend Code flows (create / join) ---------------------------------------
+// --- Room Code flows (create / join) -----------------------------------------
 
 // Create flow: generate a code, commit it, assert presence (so I appear to a
 // Buddy who joins later even before I watch anything), then land on Connected.
-// The GET shows me as the lone member → "Waiting for buddy" with a live dot.
+// The GET shows me as the lone member → "Waiting for buddies" with a live dot.
 async function createAndCommit() {
   const { code: oldCode } = await YTB.getConfig();
   const code = generateCode();
@@ -329,25 +329,24 @@ function openConfirm({ title, body, confirmLabel, variant, onConfirm }) {
   showConfirm();
 }
 
-// Confirm leaving the current code before `onProceed` (the red Disconnect
-// variant). Copy adapts to whether a buddy is actually connected.
+// Confirm leaving the current room before `onProceed` (the red Leave variant).
+// Copy adapts to whether a buddy is actually connected.
 async function confirmDisconnectThen(onProceed) {
   const { code } = await YTB.getConfig();
   const names = await buddyNames(code);
   if (names.length > 0) {
-    const label = names.length === 1 ? "buddy" : "buddies";
     openConfirm({
       title: "Are you sure you want to go?",
-      body: `This will disconnect you from your ${label}: ${names.join(", ")}.`,
-      confirmLabel: "Disconnect",
+      body: `This will remove you from the room, away from: ${names.join(", ")}.`,
+      confirmLabel: "Leave",
       variant: "danger",
       onConfirm: onProceed,
     });
   } else {
     openConfirm({
-      title: "Change your Friend Code?",
-      body: "No buddy has connected to this code yet.",
-      confirmLabel: "Disconnect",
+      title: "Leave this room?",
+      body: "No buddy has joined this room yet.",
+      confirmLabel: "Leave",
       variant: "danger",
       onConfirm: onProceed,
     });
@@ -363,7 +362,7 @@ async function setSharing(on) {
   await refreshStatus(code);
 }
 
-// Confirmed disconnect via Change code: client-only. Clear the code locally →
+// Confirmed disconnect via Leave room: client-only. Clear the code locally →
 // reporter stops POSTing and the renderer stops drawing (both bail on an empty
 // code); old records under the old code expire via the backend's 14-day TTL.
 async function clearCodeAndChoose() {
@@ -376,13 +375,13 @@ async function clearCodeAndChoose() {
   showView("chooser");
 }
 
-// Buddy Display Names under `code` for the confirmation, via the shared groupView
+// Buddy Display Names under `code` for the confirmation, via the shared roomView
 // (same dedup-by-Client-ID the roster uses); an unnamed buddy falls back to a
 // stable "<Adjective> Buddy" (YTB.buddyName), matching the roster and on-page
-// tooltips. Group-full lockout is irrelevant here — I am already a member.
+// tooltips. Room-full lockout is irrelevant here — I am already a member.
 async function buddyNames(code) {
   if (!code) return [];
-  const { buddies } = YTB.groupView(await YTB.getRecords(code), myClientId);
+  const { buddies } = YTB.roomView(await YTB.getRecords(code), myClientId);
   return buddies.map((b) => YTB.buddyName(b.clientId, b.name));
 }
 
@@ -397,8 +396,8 @@ function hideConfirm() {
 
 // --- view switching ----------------------------------------------------------
 
-// Show exactly one of the three Friend Code views. The Cancel link in the chooser
-// only makes sense when an active code exists (reached via "Change code").
+// Show exactly one of the three Room Code views. The Cancel link in the chooser
+// only makes sense when an active code exists (reached via "Leave room").
 function showView(name) {
   el.viewChooser.hidden = name !== "chooser";
   el.viewJoin.hidden = name !== "join";
@@ -417,15 +416,15 @@ function showConnected(code, codeOrigin) {
   showView("connected");
 }
 
-// Group status, from my perspective (a Friend Code is one Group of up to
+// Room status, from my perspective (a Room Code is one Room of up to
 // YTB.MAX_MEMBERS people):
 //   Unpaired      — no code.
 //   Waiting       — code set, but no Buddy has a record yet.
-//   In group      — 1+ Buddies; list each with their color swatch + last-seen.
-//   Group full    — 5 others already, I'm not one of them (the locked-out 6th).
+//   In room       — 1+ Buddies; list each with their color swatch + last-seen.
+//   Room full     — 5 others already, I'm not one of them (the locked-out 6th).
 async function refreshStatus(code) {
   if (!code) {
-    setStatus("unpaired", "Unpaired", "Enter or generate a Friend Code to pair.");
+    setStatus("unpaired", "Unpaired", "Enter or generate a Room Code to join.");
     renderRoster([]);
     return;
   }
@@ -433,28 +432,28 @@ async function refreshStatus(code) {
   const { sharing } = await YTB.getConfig();
   currentSharing = sharing;
   const records = await YTB.getRecords(code);
-  const { buddies, locked } = YTB.groupView(records, myClientId);
+  const { buddies, locked } = YTB.roomView(records, myClientId);
 
   if (locked) {
-    // Group full: the dot is a passive dark indicator — no Sharing toggle here.
-    setStatus("full", "Group full", `This code already has ${YTB.MAX_MEMBERS} members.`, false);
+    // Room full: the dot is a passive dark indicator — no Sharing toggle here.
+    setStatus("full", "Room full", `This code already has ${YTB.MAX_MEMBERS} members.`, false);
     renderRoster([]);
     return;
   }
 
   if (buddies.length === 0) {
-    setStatus("waiting", "Waiting for buddy", "", true);
+    setStatus("waiting", "Waiting for buddies", "", true);
     renderRoster([]);
     return;
   }
 
   const noun = buddies.length === 1 ? "buddy" : "buddies";
-  setStatus("ingroup", "In group", `${buddies.length} ${noun}`, true);
+  setStatus("inroom", "In room", `${buddies.length} ${noun}`, true);
   renderRoster(buddies);
 }
 
 // Render the status line + its dot. `interactive` = the dot is the live Sharing
-// toggle (waiting / in group); when false (Group full / unpaired) the dot is a
+// toggle (waiting / in room); when false (Room full / unpaired) the dot is a
 // passive indicator. Sharing off shows a hollow dot + a "· Not sharing" suffix.
 function setStatus(state, text, sub, interactive = false) {
   const notSharing = interactive && !currentSharing;
@@ -479,7 +478,7 @@ function setStatus(state, text, sub, interactive = false) {
 
 // Render one row per Buddy: [color swatch] name · last-seen. The swatch color
 // matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
-// as the color legend. Newest-active Buddy first (groupView already sorts).
+// as the color legend. Newest-active Buddy first (roomView already sorts).
 function renderRoster(buddies) {
   currentRosterBuddies = buddies;
   el.roster.textContent = "";
