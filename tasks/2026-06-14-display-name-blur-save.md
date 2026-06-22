@@ -1,6 +1,6 @@
 # Task: Display Name — drop the "Save" button, save on blur, pencil-icon Edit
 
-> Status: defined (grilled), not started. Created 2026-06-14.
+> Status: **DONE** 2026-06-21. Save button removed; name commits on blur/Enter; locked chip carries an overlaid Lucide square-pen edit icon.
 
 ## Problem
 
@@ -67,3 +67,10 @@ The locked name reads as a single chip with a small pencil icon **inside** it.
 
 - `extension/popup.html`
 - `extension/popup.js`
+
+## Review
+
+- `popup.html` — deleted `<button id="name-save">`; input is now the sole (full-width) child of `.field-edit`. Replaced the `Edit` text button with an icon `<button id="name-edit" aria-label="Edit display name">` wrapping an inline Lucide square-pen SVG. CSS: `.field-locked` is now `position: relative`; `.locked-value` gains `padding-right: 32px`; `#name-edit` is absolutely positioned at the chip's right edge (bare, `--muted`→`--fg` on hover, 16px).
+- `popup.js` — removed `el.nameSave`, the Save click handler, and the blur-skip guard; `blur` now always commits (`el.name.addEventListener("blur", commitName)`). `commitName` and the pencil-click handler unchanged.
+- Verified: `node --check` clean; no `Save`/`nameSave`/`relatedTarget` refs remain; pencil button keyboard-focusable with aria-label.
+- Acceptance: items code-reviewed against the markup/CSS/handlers (no live-browser harness in this job); per-keystroke save (`input` listener) untouched, so closing mid-edit still keeps typed text.

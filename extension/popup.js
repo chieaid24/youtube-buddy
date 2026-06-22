@@ -44,7 +44,6 @@ const el = {
   name: document.getElementById("name"),
   nameValue: document.getElementById("name-value"),
   nameEdit: document.getElementById("name-edit"),
-  nameSave: document.getElementById("name-save"),
   // Friend Code views (mutually exclusive — only one is shown at a time).
   viewChooser: document.getElementById("view-chooser"),
   viewJoin: document.getElementById("view-join"),
@@ -114,18 +113,14 @@ function wireHandlers() {
     YTB.setConfig({ name: el.name.value });
   });
 
-  // Name commit: Save click, Enter, or blur turns the editable name into a locked
-  // value. Blur is skipped when focus moves to Save (which commits on its own click).
-  el.nameSave.addEventListener("click", commitName);
+  // Name commit: Enter or blur turns the editable name into a locked chip. There
+  // is no Save button — unfocusing the field (or pressing Enter) just saves.
   el.name.addEventListener("keydown", (e) => {
     if (e.key === "Enter") commitName();
   });
-  el.name.addEventListener("blur", (e) => {
-    if (e.relatedTarget === el.nameSave) return;
-    commitName();
-  });
+  el.name.addEventListener("blur", commitName);
 
-  // Name Edit is unguarded (cosmetic) → reopen the input immediately.
+  // The pencil icon is unguarded (cosmetic) → reopen the input immediately.
   el.nameEdit.addEventListener("click", () => {
     setFieldLocked(el.nameField, false);
     el.name.focus();
@@ -206,7 +201,7 @@ function wireHandlers() {
 
 // --- Display Name lock/edit ---------------------------------------------------
 
-/** Toggle a field between locked (value + Edit) and editable (input + Save). */
+/** Toggle a field between locked (value chip + pencil) and editable (input). */
 function setFieldLocked(field, locked) {
   field.classList.toggle("is-locked", locked);
 }
