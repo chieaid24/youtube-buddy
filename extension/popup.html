@@ -211,25 +211,58 @@
         border-radius: 6px;
         background: #fafafa;
       }
+      /* The dot's color tracks the pairing state via --dot-color. */
+      .status.is-paired,
+      .status.is-ingroup {
+        --dot-color: var(--paired);
+      }
+      .status.is-waiting {
+        --dot-color: var(--waiting);
+      }
+      .status.is-unpaired {
+        --dot-color: var(--unpaired);
+      }
+      .status.is-full {
+        --dot-color: var(--full);
+      }
       .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
         flex: 0 0 auto;
-        background: var(--unpaired);
+        background: var(--dot-color, var(--unpaired));
       }
-      .status.is-paired .dot,
-      .status.is-ingroup .dot {
-        background: var(--paired);
+      /* Hollow dot = Sharing off (solid = on). */
+      .status.not-sharing .dot {
+        background: transparent;
+        box-shadow: inset 0 0 0 2px var(--dot-color, var(--unpaired));
       }
-      .status.is-waiting .dot {
-        background: var(--waiting);
+      /* The dot is also the Sharing toggle: a small glyph centered in a ~28px
+         focusable hit area (replaces the old Sharing switch). Passive (disabled)
+         in the Group-full state. */
+      .sharing-dot {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        margin: -8px 0;
+        padding: 0;
+        border: none;
+        background: none;
+        border-radius: 50%;
+        cursor: pointer;
+        flex: 0 0 auto;
       }
-      .status.is-unpaired .dot {
-        background: var(--unpaired);
+      .sharing-dot:hover:not(:disabled) {
+        background: rgba(0, 0, 0, 0.06);
       }
-      .status.is-full .dot {
-        background: var(--full);
+      .sharing-dot:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(6, 95, 212, 0.4);
+      }
+      .sharing-dot:disabled {
+        cursor: default;
       }
       #status-text {
         font-weight: 600;
@@ -296,60 +329,6 @@
         color: var(--muted);
         white-space: nowrap;
       }
-      .toggle-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin: 14px 0 12px;
-      }
-      .toggle-row .name {
-        font-weight: 600;
-      }
-      .toggle-row .hint {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 2px;
-      }
-      /* Sharing switch — a real checkbox styled as a toggle */
-      .switch {
-        position: relative;
-        display: inline-block;
-        width: 38px;
-        height: 22px;
-        flex: 0 0 auto;
-      }
-      .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-      }
-      .slider {
-        position: absolute;
-        inset: 0;
-        background: #cccccc;
-        border-radius: 22px;
-        transition: background 0.15s;
-      }
-      .slider::before {
-        content: "";
-        position: absolute;
-        height: 16px;
-        width: 16px;
-        left: 3px;
-        top: 3px;
-        background: #fff;
-        border-radius: 50%;
-        transition: transform 0.15s;
-      }
-      .switch input:checked + .slider {
-        background: var(--accent);
-      }
-      .switch input:checked + .slider::before {
-        transform: translateX(16px);
-      }
-      .switch input:focus-visible + .slider {
-        box-shadow: 0 0 0 2px rgba(6, 95, 212, 0.4);
-      }
       footer {
         margin-top: 4px;
         padding-top: 10px;
@@ -406,6 +385,15 @@
       }
       button.danger:hover {
         background: #a93226;
+      }
+      /* Neutral confirm variant (e.g. Stop sharing) — emphasized but not danger. */
+      button.neutral {
+        color: #fff;
+        background: #444444;
+        border-color: #444444;
+      }
+      button.neutral:hover {
+        background: #333333;
       }
     </style>
   </head>
@@ -480,7 +468,9 @@
           </button>
         </div>
         <div id="status" class="status is-unpaired">
-          <span class="dot"></span>
+          <button id="sharing-dot" class="sharing-dot" type="button">
+            <span class="dot"></span>
+          </button>
           <span id="status-text">Unpaired</span>
         </div>
         <p id="status-sub"></p>
@@ -498,17 +488,6 @@
         <option value="pastel">Pastel</option>
       </select>
       <div id="swatch-strip" class="swatch-strip"></div>
-    </div>
-
-    <div class="toggle-row">
-      <div>
-        <div class="name">Sharing</div>
-        <div class="hint">Share your watch progress with your Buddy</div>
-      </div>
-      <label class="switch">
-        <input id="sharing" type="checkbox" />
-        <span class="slider"></span>
-      </label>
     </div>
 
     <footer>

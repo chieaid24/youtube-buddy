@@ -1,4 +1,5 @@
-// popup.js — identity, Friend Code, pairing status, and the Sharing toggle.
+// popup.js — identity, Friend Code, and the pairing status dot (which doubles as
+// the Sharing toggle: solid = sharing, hollow = not).
 // Consumes the frozen `window.YTB` contract from shared.js (task 03). The popup is
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
 // so it survives a browser restart. See CONTEXT.md for terminology.
@@ -63,21 +64,28 @@ const el = {
   roster: document.getElementById("roster"),
   palette: document.getElementById("palette"),
   swatchStrip: document.getElementById("swatch-strip"),
-  sharing: document.getElementById("sharing"),
+  sharingDot: document.getElementById("sharing-dot"),
   backendUrl: document.getElementById("backend-url"),
   // Disconnect confirmation dialog.
   confirmOverlay: document.getElementById("confirm-overlay"),
   confirmTitle: document.getElementById("confirm-title"),
   confirmBody: document.getElementById("confirm-body"),
   confirmCancel: document.getElementById("confirm-cancel"),
-  confirmDisconnect: document.getElementById("confirm-disconnect"),
+  // The single confirm/OK button (id kept as confirm-disconnect); its label and
+  // variant are set per-open by openConfirm.
+  confirmOk: document.getElementById("confirm-disconnect"),
 };
 
 let myClientId = "";
 
-// The action to run if the open disconnect dialog is confirmed (set per-open;
-// cleared on cancel/confirm). Lets one dialog serve both Change code and Re-roll.
-let pendingDisconnect = null;
+// The action to run if the open confirm dialog is confirmed (set per-open;
+// cleared on cancel/confirm). One dialog serves Change code AND Stop sharing.
+let pendingConfirm = null;
+
+// Last-known Sharing state + whether the status dot is currently a live toggle
+// (it is in waiting / in group; passive in Group full). Read by the dot's click.
+let currentSharing = true;
+let dotInteractive = false;
 
 // Last-rendered roster, so a palette change can recolor the swatches without a
 // re-GET (renderRoster rebuilds them through the new active palette).
@@ -94,7 +102,7 @@ async function init() {
   const config = await YTB.getConfig();
   el.name.value = config.name || "";
   el.nameValue.textContent = config.name || "";
-  el.sharing.checked = config.sharing;
+  currentSharing = config.sharing;
 
   // Buddy color palette: seed the synchronous cache (so roster swatches color
   // correctly on first render), reflect the choice in the picker, and preview it.
@@ -186,14 +194,14 @@ function wireHandlers() {
   // confirm (copy adapts to whether a buddy is connected); on confirm, drop the
   // code and reopen the chooser.
   el.changeCode.addEventListener("click", () => {
-    confirmDisconnectThen(clearCodeAndChoose, /* skipWhenUnpaired */ false);
+    confirmDisconnectThen(clearCodeAndChoose);
   });
 
-  // Disconnect dialog: Cancel/backdrop/Escape dismiss; Disconnect runs the pending
-  // action. The dialog is never a trap.
+  // Confirm dialog: Cancel/backdrop/Escape dismiss; OK runs the pending action.
+  // The dialog is never a trap.
   el.confirmCancel.addEventListener("click", hideConfirm);
-  el.confirmDisconnect.addEventListener("click", () => {
-    const proceed = pendingDisconnect;
+  el.confirmOk.addEventListener("click", () => {
+    const proceed = pendingConfirm;
     hideConfirm();
     if (proceed) proceed();
   });
@@ -204,10 +212,22 @@ function wireHandlers() {
     if (e.key === "Escape" && !el.confirmOverlay.hidden) hideConfirm();
   });
 
-  // The reporter (task 05) reads this flag; the popup only writes it. Off stops our
-  // POSTs but the renderer keeps showing the Buddy's markers.
-  el.sharing.addEventListener("change", () => {
-    YTB.setConfig({ sharing: el.sharing.checked });
+  // The status dot is the Sharing toggle. Stopping (solid → off) is guarded by a
+  // confirm; starting (off → solid) is instant. The reporter reads `sharing` and
+  // stops/resumes its POSTs; the renderer keeps drawing the Buddy either way.
+  el.sharingDot.addEventListener("click", () => {
+    if (!dotInteractive) return; // passive in Group full (button is disabled too)
+    if (currentSharing) {
+      openConfirm({
+        title: "Stop sharing?",
+        body: "Your Buddy won't see your progress until you start again.",
+        confirmLabel: "Stop sharing",
+        variant: "neutral",
+        onConfirm: () => setSharing(false),
+      });
+    } else {
+      setSharing(true);
+    }
   });
 
   // Buddy color palette: persist the choice (open YouTube tabs recolor live via
@@ -278,31 +298,52 @@ function prettyCode(slug) {
   return "The " + words.join(" ");
 }
 
-// --- disconnect confirmation -------------------------------------------------
+// --- confirmation dialog -----------------------------------------------------
 
-// Confirm leaving the current code before `onProceed`. Copy adapts to whether a
-// buddy is actually connected. With skipWhenUnpaired, an unpaired code (nobody to
-// disconnect from) runs onProceed straight away — used by Re-roll so swapping an
-// unjoined code stays friction-free.
-async function confirmDisconnectThen(onProceed, skipWhenUnpaired) {
+// One reusable confirm dialog. Callers set the copy, the confirm button's label
+// and variant ("danger" = red Disconnect; "neutral" = dark Stop sharing), and
+// the action to run on confirm.
+function openConfirm({ title, body, confirmLabel, variant, onConfirm }) {
+  el.confirmTitle.textContent = title;
+  el.confirmBody.textContent = body;
+  el.confirmOk.textContent = confirmLabel;
+  el.confirmOk.className = variant === "danger" ? "danger" : "neutral";
+  pendingConfirm = onConfirm;
+  showConfirm();
+}
+
+// Confirm leaving the current code before `onProceed` (the red Disconnect
+// variant). Copy adapts to whether a buddy is actually connected.
+async function confirmDisconnectThen(onProceed) {
   const { code } = await YTB.getConfig();
   const names = await buddyNames(code);
-  if (skipWhenUnpaired && names.length === 0) {
-    onProceed();
-    return;
-  }
   if (names.length > 0) {
     const label = names.length === 1 ? "buddy" : "buddies";
-    el.confirmTitle.textContent = "Are you sure you want to go?";
-    el.confirmBody.textContent = `This will disconnect you from your ${label}: ${names.join(
-      ", "
-    )}.`;
+    openConfirm({
+      title: "Are you sure you want to go?",
+      body: `This will disconnect you from your ${label}: ${names.join(", ")}.`,
+      confirmLabel: "Disconnect",
+      variant: "danger",
+      onConfirm: onProceed,
+    });
   } else {
-    el.confirmTitle.textContent = "Change your Friend Code?";
-    el.confirmBody.textContent = "No buddy has connected to this code yet.";
+    openConfirm({
+      title: "Change your Friend Code?",
+      body: "No buddy has connected to this code yet.",
+      confirmLabel: "Disconnect",
+      variant: "danger",
+      onConfirm: onProceed,
+    });
   }
-  pendingDisconnect = onProceed;
-  showConfirm();
+}
+
+// Toggle Sharing and re-render the status dot. Off stops our POSTs (reporter
+// reads the flag); the renderer keeps drawing the Buddy's markers either way.
+async function setSharing(on) {
+  currentSharing = on;
+  await YTB.setConfig({ sharing: on });
+  const { code } = await YTB.getConfig();
+  await refreshStatus(code);
 }
 
 // Confirmed disconnect via Change code: client-only. Clear the code locally →
@@ -330,7 +371,7 @@ function showConfirm() {
 
 function hideConfirm() {
   el.confirmOverlay.hidden = true;
-  pendingDisconnect = null;
+  pendingConfirm = null;
 }
 
 // --- view switching ----------------------------------------------------------
@@ -368,30 +409,51 @@ async function refreshStatus(code) {
     return;
   }
 
+  const { sharing } = await YTB.getConfig();
+  currentSharing = sharing;
   const records = await YTB.getRecords(code);
   const { buddies, locked } = YTB.groupView(records, myClientId);
 
   if (locked) {
-    setStatus("full", "Group full", `This code already has ${YTB.MAX_MEMBERS} members.`);
+    // Group full: the dot is a passive dark indicator — no Sharing toggle here.
+    setStatus("full", "Group full", `This code already has ${YTB.MAX_MEMBERS} members.`, false);
     renderRoster([]);
     return;
   }
 
   if (buddies.length === 0) {
-    setStatus("waiting", "Waiting for buddy", "");
+    setStatus("waiting", "Waiting for buddy", "", true);
     renderRoster([]);
     return;
   }
 
   const noun = buddies.length === 1 ? "buddy" : "buddies";
-  setStatus("ingroup", "In group", `${buddies.length} ${noun}`);
+  setStatus("ingroup", "In group", `${buddies.length} ${noun}`, true);
   renderRoster(buddies);
 }
 
-function setStatus(state, text, sub) {
-  el.status.className = `status is-${state}`;
-  el.statusText.textContent = text;
+// Render the status line + its dot. `interactive` = the dot is the live Sharing
+// toggle (waiting / in group); when false (Group full / unpaired) the dot is a
+// passive indicator. Sharing off shows a hollow dot + a "· Not sharing" suffix.
+function setStatus(state, text, sub, interactive = false) {
+  const notSharing = interactive && !currentSharing;
+  el.status.className = "status is-" + state + (notSharing ? " not-sharing" : "");
+  el.statusText.textContent = notSharing ? text + " · Not sharing" : text;
   el.statusSub.textContent = sub;
+
+  dotInteractive = interactive;
+  if (interactive) {
+    const action = currentSharing ? "Stop sharing" : "Start sharing";
+    el.sharingDot.disabled = false;
+    el.sharingDot.setAttribute("aria-pressed", String(currentSharing));
+    el.sharingDot.setAttribute("aria-label", action);
+    el.sharingDot.title = action;
+  } else {
+    el.sharingDot.disabled = true;
+    el.sharingDot.removeAttribute("aria-pressed");
+    el.sharingDot.removeAttribute("title");
+    el.sharingDot.setAttribute("aria-label", "Sharing status");
+  }
 }
 
 // Render one row per Buddy: [color swatch] name · last-seen. The swatch color

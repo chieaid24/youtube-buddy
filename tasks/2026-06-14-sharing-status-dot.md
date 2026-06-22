@@ -1,6 +1,6 @@
 # Task: Replace the Sharing slider with a click-to-toggle status dot
 
-> Status: defined (grilled), not started. Created 2026-06-14.
+> Status: **DONE** 2026-06-21. Sharing slider removed; the pairing status dot is now a `<button>` toggle (solid=sharing / hollow=off, `· Not sharing` suffix). Confirm dialog generalized to `openConfirm({title, body, confirmLabel, variant, onConfirm})`; `pendingDisconnect`→`pendingConfirm`. (Re-roll path no longer exists — removed by the cute-codes task — so only Change code uses the danger variant.)
 
 ## Problem
 
@@ -101,17 +101,22 @@ Generalize `#confirm-overlay` into one reusable
 
 ## Acceptance criteria
 
-1. No standalone Sharing toggle / slider / hint anywhere in the popup.
-2. Connected + sharing → solid colored dot, no suffix, tooltip "Stop sharing".
-3. Click solid dot → "Stop sharing?" confirm → on confirm the dot goes hollow +
-   `· Not sharing`; the reporter stops POSTing.
-4. Click hollow dot → resumes instantly (no dialog); dot solid, POSTs resume.
-5. Dot is keyboard-operable (Tab to it, Space/Enter toggle) with a visible focus ring
-   and correct `aria-pressed`.
-6. `Group full` → dark passive dot, not clickable; unpaired/chooser/join → no sharing
-   control.
-7. Disconnect confirm (Change code / Re-roll) still works, still red/"Disconnect",
-   via the now-shared dialog.
+1. [x] No standalone Sharing toggle / slider / hint — `.toggle-row`, `.switch`/`.slider` CSS, and `#sharing` removed.
+2. [x] Connected + sharing → solid colored dot, no suffix, tooltip "Stop sharing" — `setStatus(..., true)` with `currentSharing`.
+3. [x] Click solid dot → "Stop sharing?" confirm → hollow + `· Not sharing`; reporter stops — `openConfirm` (neutral) → `setSharing(false)`; reporter still bails on `!config.sharing`.
+4. [x] Click hollow dot → resumes instantly (no dialog) — `setSharing(true)` on the else branch.
+5. [x] Keyboard-operable, visible focus ring, correct `aria-pressed` — real `<button>`; `:focus-visible` ring; `aria-pressed` = sharing state.
+6. [x] `Group full` → dark passive dot, not clickable; unpaired/chooser/join → no control — `interactive=false` ⇒ `disabled`, no title; control lives inside `#view-connected`.
+7. [x] Change-code disconnect confirm still red/"Disconnect" via the shared dialog — `confirmDisconnectThen` → `openConfirm` (danger). *(Re-roll removed earlier in this batch.)*
+
+*Items 2–6 code-reviewed against the markup/CSS/handlers; no live-browser harness in this job.*
+
+## Review
+
+- `extension/popup.html` — status `<span class="dot">` → `<button id="sharing-dot" class="sharing-dot">` wrapping the dot glyph; removed the entire Sharing `.toggle-row` + the `.switch`/`.slider`/`.toggle-row` CSS; added `--dot-color` per pairing state, solid/hollow (`.not-sharing`) dot, the `.sharing-dot` button (28px hit area, hover halo, focus-visible ring, `:disabled`), and a neutral confirm-button variant.
+- `extension/popup.js` — generalized the dialog into `openConfirm({title, body, confirmLabel, variant, onConfirm})`; `pendingDisconnect`→`pendingConfirm`, `el.confirmDisconnect`→`el.confirmOk` (id unchanged); `confirmDisconnectThen` now routes through `openConfirm` (danger) and dropped the now-unused `skipWhenUnpaired`; added the dot click handler (asymmetric confirm/instant) + `setSharing`; `setStatus` gained an `interactive` arg that renders dot fill, `· Not sharing` suffix, `aria-pressed`, tooltip, and disabled/passive Group-full state; removed the `#sharing` checkbox wiring + `el.sharing.checked` init.
+- Backend / `shared.js` / `reporter.js` logic unchanged (sharing semantics intact: off = stop my POSTs only).
+- Verified: `node --check` clean; no `el.sharing`/`pendingDisconnect`/`.switch`/`.toggle-row` references remain; `reporter.js:74` still gates POSTs on `config.sharing`.
 
 ## Non-goals
 
