@@ -120,6 +120,9 @@ async function init() {
   // real GET); otherwise the chooser (true first run, nothing to Cancel back to).
   if (config.code) {
     showConnected(config.code, config.codeOrigin);
+    // Re-assert presence on open: refreshes my TTL and backfills installs that
+    // predate the presence feature.
+    await YTB.assertPresence(config.code);
     await refreshStatus(config.code);
   } else {
     showView("chooser");
@@ -255,28 +258,42 @@ function commitName() {
   const name = el.name.value.trim();
   el.name.value = name;
   el.nameValue.textContent = name;
-  YTB.setConfig({ name });
   setFieldLocked(el.nameField, name.length > 0);
+  // Persist, then re-assert presence so the new name propagates to Buddies
+  // immediately (best-effort, fire-and-forget).
+  YTB.setConfig({ name }).then(() =>
+    YTB.getConfig().then(({ code }) => {
+      if (code) YTB.assertPresence(code);
+    })
+  );
 }
 
 // --- Friend Code flows (create / join) ---------------------------------------
 
-// Create flow: generate a code, commit it, land on Connected. A brand-new random
-// code can't be paired yet, so we set status to "Waiting for buddy" WITHOUT a GET.
+// Create flow: generate a code, commit it, assert presence (so I appear to a
+// Buddy who joins later even before I watch anything), then land on Connected.
+// The GET shows me as the lone member → "Waiting for buddy" with a live dot.
 async function createAndCommit() {
+  const { code: oldCode } = await YTB.getConfig();
   const code = generateCode();
+  if (oldCode && oldCode !== code) await YTB.deletePresence(oldCode, myClientId);
   await YTB.setConfig({ code, codeOrigin: "created" });
   showConnected(code, "created");
-  setStatus("waiting", "Waiting for buddy", "");
+  await YTB.assertPresence(code);
+  await refreshStatus(code);
 }
 
-// Join flow: commit the typed code (normalized) and refresh status with a real
-// GET — that GET is the actual "did it match?" check.
+// Join flow: commit the typed code (normalized), assert my presence, and refresh
+// status with a real GET — that GET both checks the match AND now surfaces an
+// already-present owner (who may not have watched anything yet).
 async function joinAndCommit() {
   const code = YTB.normalizeCode(el.joinInput.value);
   if (!code) return; // Empty — stay on the entry view.
+  const { code: oldCode } = await YTB.getConfig();
+  if (oldCode && oldCode !== code) await YTB.deletePresence(oldCode, myClientId);
   await YTB.setConfig({ code, codeOrigin: "joined" });
   showConnected(code, "joined");
+  await YTB.assertPresence(code);
   await refreshStatus(code);
 }
 
@@ -350,6 +367,10 @@ async function setSharing(on) {
 // reporter stops POSTing and the renderer stops drawing (both bail on an empty
 // code); old records under the old code expire via the backend's 14-day TTL.
 async function clearCodeAndChoose() {
+  // Leave the room: drop my presence row first (best-effort; on failure it just
+  // TTLs out), then clear the code locally so the reporter/renderer stand down.
+  const { code: oldCode } = await YTB.getConfig();
+  if (oldCode) await YTB.deletePresence(oldCode, myClientId);
   await YTB.setConfig({ code: "", codeOrigin: "" });
   el.code.textContent = "";
   showView("chooser");

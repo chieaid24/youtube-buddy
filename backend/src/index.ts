@@ -10,9 +10,14 @@ interface ProgressBody {
   duration: number;
 }
 
+interface PresenceBody {
+  clientId: string;
+  name: string;
+}
+
 // Progress Records age out 14 days after their last write. Active videos keep
 // getting rewritten so they never expire; abandoned ones drop, which also
-// bounds the GET prefix scan.
+// bounds the GET prefix scan. Presence Records share the same TTL.
 const TTL_SECONDS = 14 * 24 * 3600;
 
 // A Friend Code is one Group of at most this many distinct Client IDs (you +
@@ -21,13 +26,13 @@ const MAX_MEMBERS = 5;
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    // Preflight
+    // Preflight, for any path.
     if (req.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
@@ -39,7 +44,50 @@ export default {
       return json({ error: "missing code" }, 400);
     }
 
-    if (req.method === "POST") {
+    const prefix = `${code}:`;
+    const path = url.pathname;
+
+    // Presence: a member appears the instant they join a Code, independent of
+    // whether they're watching anything. Stored under `${code}:presence:${id}`.
+    if (req.method === "POST" && path === "/presence") {
+      const body = (await req.json()) as Partial<PresenceBody>;
+      if (typeof body.clientId !== "string" || body.clientId === "") {
+        return json({ error: "missing or invalid field: clientId" }, 400);
+      }
+
+      // A presence row reserves a Group slot just like a progress row — see the
+      // cap-check note in currentMembers.
+      const members = await currentMembers(env, prefix);
+      if (!members.has(body.clientId) && members.size >= MAX_MEMBERS) {
+        return json({ error: "group full" }, 409);
+      }
+
+      // updatedAt is server-authoritative; name is optional (coerced to "").
+      const record = {
+        clientId: body.clientId,
+        name: typeof body.name === "string" ? body.name : "",
+        updatedAt: Date.now(),
+      };
+      await env.PROGRESS.put(
+        `${prefix}presence:${body.clientId}`,
+        JSON.stringify(record),
+        { expirationTtl: TTL_SECONDS }
+      );
+      return json({ ok: true });
+    }
+
+    // Leaving a Code drops the presence row. Idempotent: deleting an absent key
+    // still succeeds.
+    if (req.method === "DELETE" && path === "/presence") {
+      const clientId = url.searchParams.get("clientId");
+      if (!clientId) {
+        return json({ error: "missing clientId" }, 400);
+      }
+      await env.PROGRESS.delete(`${prefix}presence:${clientId}`);
+      return json({ ok: true });
+    }
+
+    if (req.method === "POST" && path === "/") {
       const body = (await req.json()) as Partial<ProgressBody>;
       const error = validate(body);
       if (error) {
@@ -47,18 +95,10 @@ export default {
       }
 
       // Best-effort Group cap: a Friend Code holds at most MAX_MEMBERS distinct
-      // Client IDs. The current members are derived from existing key names
-      // (`${code}:${clientId}:${videoId}`) with no value reads, and a brand-new
-      // Client ID is rejected once the Group is full. Returning members — and
-      // their new videos — always go through. KV is eventually consistent with
-      // no transactions, so a simultaneous-join race (or a >1000-key code whose
-      // listing truncates) can momentarily admit a 6th; acceptable for a
-      // friends-only weak-secret app.
-      const prefix = `${code}:`;
-      const existing = await env.PROGRESS.list({ prefix });
-      const members = new Set(
-        existing.keys.map((k) => k.name.slice(prefix.length).split(":")[0])
-      );
+      // Client IDs, counting both progress and presence rows. A brand-new
+      // Client ID is rejected once the Group is full; returning members — and
+      // their new videos — always go through. See currentMembers.
+      const members = await currentMembers(env, prefix);
       if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
         return json({ error: "group full" }, 409);
       }
@@ -79,20 +119,46 @@ export default {
       return json({ ok: true });
     }
 
-    if (req.method === "GET") {
-      const list = await env.PROGRESS.list({ prefix: `${code}:` });
-      const entries = await Promise.all(
+    if (req.method === "GET" && path === "/") {
+      // One prefix scan over both kinds; partition by key shape. Presence keys
+      // carry the "presence" infix (`${code}:presence:${id}`); everything else
+      // is a progress key (`${code}:${id}:${videoId}`).
+      const list = await env.PROGRESS.list({ prefix });
+      const progress: unknown[] = [];
+      const presence: unknown[] = [];
+      await Promise.all(
         list.keys.map(async (k) => {
           const value = await env.PROGRESS.get(k.name);
-          return value ? JSON.parse(value) : null;
+          if (value === null) return;
+          const isPresence =
+            k.name.slice(prefix.length).split(":")[0] === "presence";
+          (isPresence ? presence : progress).push(JSON.parse(value));
         })
       );
-      return json(entries.filter((e) => e !== null));
+      return json({ progress, presence });
     }
 
     return json({ error: "method not allowed" }, 405);
   },
 } satisfies ExportedHandler<Env>;
+
+// Derives the Group's current distinct Client IDs from existing key names under
+// the Code's prefix — no value reads. Both key kinds reserve a slot: progress
+// keys are `${code}:${clientId}:${videoId}` (member id is the first segment)
+// and presence keys are `${code}:presence:${clientId}` (member id is the second
+// segment). The "presence" infix can never collide with a Client ID (8 hex
+// chars). KV is eventually consistent with no transactions, so a
+// simultaneous-join race (or a >1000-key code whose listing truncates) can
+// momentarily admit a 6th member; acceptable for a friends-only weak-secret app.
+async function currentMembers(env: Env, prefix: string): Promise<Set<string>> {
+  const existing = await env.PROGRESS.list({ prefix });
+  const members = new Set<string>();
+  for (const k of existing.keys) {
+    const parts = k.name.slice(prefix.length).split(":");
+    members.add(parts[0] === "presence" ? parts[1] : parts[0]);
+  }
+  return members;
+}
 
 // Returns an error message for an invalid POST body, or null if it is valid.
 // `name` is intentionally NOT required: Display Name is optional (a blank name

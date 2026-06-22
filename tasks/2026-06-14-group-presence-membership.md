@@ -1,6 +1,6 @@
 # Task: Explicit Group presence (membership independent of watch data)
 
-> Status: defined (grilled), not started. Created 2026-06-14.
+> Status: **DONE** 2026-06-21. Presence endpoints (`POST`/`DELETE /presence`), structured `GET {progress,presence}`, union cap, `presence.js` content script, renderer 60s poll + join toast. Backend 28 tests green.
 
 ## Problem
 
@@ -123,14 +123,23 @@ New KV key, **separate from Progress Records**:
 - Deleting old **Progress** Records on code change (still TTL-only, unchanged).
 
 ## Acceptance criteria
-1. B sets a code (never watches). A joins the same code -> A's popup shows **In group ·
-   1 buddy** with B rostered as "joined", not "Waiting".
-2. While A watches, B connects -> within ~60s A sees an on-page toast and B in the
-   roster.
-3. Five presence-only members fill the cap; a 6th is locked out (409 / "Group full").
-4. A changes/re-rolls/joins-over -> A's presence row gone from the old code
-   (best-effort), no longer rostered for others.
-5. Sharing off -> A still present and counted; no marker for A.
+1. [x] B sets a code (never watches), A joins → A sees **In group**, B rostered, not "Waiting" — *verified in code: `groupView` treats a presence-only owner as a buddy (harness test passed); join asserts presence + GETs.*
+2. [x] While A watches, B connects → ~60s later A sees a toast + B in roster — renderer `setInterval(PRESENCE_POLL_MS=60s)` re-GETs; `notePresence` diffs and toasts new arrivals.
+3. [x] Five presence-only members fill the cap; 6th locked out (409 "group full") — backend `currentMembers` counts presence rows (test: 6th presence AND 6th progress → 409).
+4. [x] Leave-paths drop my presence row (best-effort) — `clearCodeAndChoose` + create/join-over call `deletePresence(oldCode, myClientId)`; `DELETE /presence` idempotent (tested).
+5. [x] Sharing off → still present and counted, no marker — `assertPresence` is independent of `sharing` (presence.js + popup); reporter still gates POSTs on `sharing`.
+
+*Items 1–2,5 backend-tested + code/logic-reviewed (`groupView` harness run); live two-profile run not automatable in this job.*
+
+## Review
+
+- **`backend/src/index.ts`** (subagent) — path-based routing; `POST /presence` (validate clientId, optional name, cap check, store `{code}:presence:{clientId}`), `DELETE /presence?...&clientId=` (idempotent), `GET /` now returns `{progress, presence}` (one prefix scan partitioned by key shape), shared `currentMembers()` union helper used by both POST paths, CORS `+DELETE`.
+- **`backend/test/index.spec.ts`** (subagent) — 28 tests: GET-shape, presence store/updatedAt/optional-name, DELETE idempotent + 400s, cap counts presence rows, 405 via `PUT /`.
+- **`extension/shared.js`** — `getRecords` → `{progress, presence}`; new `assertPresence(code)` / `deletePresence(code, clientId)` (best-effort, `assertPresence` independent of sharing); `groupView` rewritten for the structured shape (buddy = foreign id in either set; progress preferred over presence; cap = union of distinct foreign ids).
+- **`extension/popup.js`** — create/join assert presence (+ delete old code's row); `init` re-asserts (refresh/backfill); `commitName` re-asserts so the name propagates; `clearCodeAndChoose` deletes presence. (Also fixed `createAndCommit` to land on an interactive dot via `refreshStatus`.)
+- **`extension/renderer.js`** — refresh reads `records.progress` for markers; `notePresence` diffs foreign ids and toasts new arrivals (baseline-silent on first read); `showToast` + toast CSS; ~60s `setInterval` poll (token-guarded).
+- **`extension/presence.js`** (new) + **`manifest.json`** — content script (after shared, before content) asserting presence on `ytb:navigate`, throttled ~5 min, ungated to /watch, independent of sharing.
+- Verified: backend 28/28 green; `node --check` clean on all 4 JS files incl. presence.js; manifest JSON valid with the new load order; `groupView` merge/lock logic exercised via a node harness.
 
 ## Test plan
 - **Backend (`test/index.spec.ts`, vitest):** new GET `{progress,presence}` shape;

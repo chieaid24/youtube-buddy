@@ -31,13 +31,18 @@
   const TOOLTIP_CLASS = "ytb-watch-tooltip";
   const THUMB_BAR_CLASS = "ytb-thumb-bar"; // segmented-bar container
   const THUMB_SEG_CLASS = "ytb-thumb-seg"; // one colored segment per Buddy
+  const TOAST_WRAP_CLASS = "ytb-toast-wrap"; // fixed stack container
+  const TOAST_CLASS = "ytb-toast"; // one "<Buddy> joined" toast
   const STYLE_ID = "ytb-renderer-style";
+  const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
   // --- state ---
   let myClientId = null; // memoized; my own records are filtered out
   let buddyByVideoId = new Map(); // videoId -> Buddy ProgressRecord[] (latest per Buddy)
   let currentVideoId = null; // active /watch video, or null off a watch page
   let refreshToken = 0; // guards against out-of-order async refreshes
+  let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
+  let baselineReady = false; // skip toasts on the very first read (no false "joined")
 
   injectStyle();
 
@@ -56,20 +61,27 @@
     const { code } = await YTB.getConfig();
     if (!code) {
       buddyByVideoId = new Map();
+      resetPresenceBaseline();
       return;
     }
     myClientId = myClientId || (await YTB.ensureClientId());
-    const all = await YTB.getRecords(code);
+    const records = await YTB.getRecords(code);
+    const view = YTB.groupView(records, myClientId);
+
+    // Toast new arrivals (presence OR progress). Diff against last refresh; the
+    // first read just seeds the baseline so existing Buddies never "join".
+    notePresence(view.buddies);
 
     // Locked out of a full Group: I'm not a member and 5 others already are.
-    if (YTB.groupView(all, myClientId).locked) {
+    if (view.locked) {
       buddyByVideoId = new Map();
       return;
     }
 
-    // videoId -> (clientId -> latest record), then flattened to arrays.
+    // videoId -> (clientId -> latest record), then flattened to arrays. Presence
+    // rows have no videoId, so they never produce a marker (only a toast/roster).
     const byVideo = new Map();
-    for (const r of all) {
+    for (const r of records.progress) {
       if (!r || r.clientId === myClientId || !r.videoId) continue;
       let perBuddy = byVideo.get(r.videoId);
       if (!perBuddy) {
@@ -84,6 +96,28 @@
       next.set(videoId, Array.from(perBuddy.values()));
     }
     buddyByVideoId = next;
+  }
+
+  // Reset the toast baseline when there is no code (so re-joining later doesn't
+  // replay every existing member as a fresh "joined").
+  function resetPresenceBaseline() {
+    knownBuddyIds = new Set();
+    baselineReady = false;
+  }
+
+  // Diff the current foreign Buddies against the last seen set; toast any new
+  // clientId once the baseline has been established. `buddies` already excludes
+  // me and dedups by clientId (presence-only Buddies included).
+  function notePresence(buddies) {
+    const current = new Set();
+    for (const b of buddies) {
+      current.add(b.clientId);
+      if (baselineReady && !knownBuddyIds.has(b.clientId)) {
+        showToast(YTB.buddyName(b.clientId, b.name) + " joined");
+      }
+    }
+    knownBuddyIds = current;
+    baselineReady = true;
   }
 
   // ---------------------------------------------------------------------------
@@ -262,6 +296,30 @@
     }
   }
 
+  /**
+   * Show a small auto-dismissing toast (e.g. "Silly Buddy joined"). Stacks in a
+   * fixed bottom-right container; each toast fades out after ~4s. Styled via the
+   * injected renderer stylesheet.
+   * @param {string} text
+   */
+  function showToast(text) {
+    let wrap = document.querySelector("." + TOAST_WRAP_CLASS);
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = TOAST_WRAP_CLASS;
+      (document.body || document.documentElement).appendChild(wrap);
+    }
+    const toast = document.createElement("div");
+    toast.className = TOAST_CLASS;
+    toast.textContent = text;
+    wrap.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("show"));
+    setTimeout(() => {
+      toast.classList.remove("show");
+      setTimeout(() => toast.remove(), 250);
+    }, 4000);
+  }
+
   /** Inject the renderer's CSS once (no separate stylesheet file). */
   function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -317,6 +375,33 @@
         pointer-events: auto;
         cursor: default;
       }
+      .${TOAST_WRAP_CLASS} {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 2147483000;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .${TOAST_CLASS} {
+        max-width: 280px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        font: 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Arial, sans-serif;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 0.25s, transform 0.25s;
+      }
+      .${TOAST_CLASS}.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -358,4 +443,15 @@
     renderWatchMarker(currentVideoId);
     renderThumbnails();
   });
+
+  // Live updates: re-GET every ~60s so a Buddy who joins or moves shows up (and
+  // arrival toasts fire) without a navigation. ~1 GET/min per open tab. Uses the
+  // same refreshToken guard so a poll can't clobber a fresher navigate render.
+  setInterval(async () => {
+    const token = ++refreshToken;
+    await refresh();
+    if (token !== refreshToken) return;
+    renderWatchMarker(currentVideoId);
+    renderThumbnails();
+  }, PRESENCE_POLL_MS);
 })();

@@ -14,7 +14,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["shared.js", "reporter.js", "renderer.js", "content.js"],
+      "js": ["shared.js", "reporter.js", "renderer.js", "presence.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

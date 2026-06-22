@@ -7,7 +7,7 @@ Order chosen to minimize `popup.js`/`shared.js` conflict churn; rename last so i
 - [x] 3. display-name-blur-save — drop Save, pencil edit icon ✅ merged
 - [x] 4. themeable-buddy-color-palettes — `PALETTES` map + picker ✅ merged
 - [x] 5. sharing-status-dot — dot toggle, generalize confirm dialog ✅ merged
-- [ ] 6. group-presence-membership — presence endpoints, `presence.js`, poll/toast
+- [x] 6. group-presence-membership — presence endpoints, `presence.js`, poll/toast ✅ merged
 - [ ] 7. rename-friend-code-to-room-code — ubiquitous-language pivot (LAST)
 
 Flow per task: implement in worktree → verify (backend `npm test`, JS `node --check`, grep gates) → commit → mark task done + update docs → merge branch→main.

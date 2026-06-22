@@ -115,21 +115,78 @@ const YTB = {
   },
 
   /**
-   * GET every live Progress Record under `code` (mine AND the Buddy's — the
-   * server does no filtering; consumers split by comparing clientId).
+   * GET everything live under `code`: Progress Records AND presence rows (mine
+   * AND the Buddies' — the server does no filtering; consumers split by comparing
+   * clientId). The server returns `{ progress, presence }`; on any failure this
+   * resolves to empty arrays so callers never have to null-check.
    * @param {string} code Friend Code (already normalized).
-   * @returns {Promise<Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>>}
+   * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>}>}
    */
   async getRecords(code) {
+    const empty = { progress: [], presence: [] };
     try {
       const res = await fetch(
         YTB.BACKEND_URL + "/?code=" + encodeURIComponent(code)
       );
-      if (!res.ok) return [];
+      if (!res.ok) return empty;
       const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      return {
+        progress: Array.isArray(data && data.progress) ? data.progress : [],
+        presence: Array.isArray(data && data.presence) ? data.presence : [],
+      };
     } catch {
-      return [];
+      return empty;
+    }
+  },
+
+  /**
+   * Announce "I'm here" under `code` — a presence row independent of watching and
+   * of the Sharing toggle. Idempotent upsert (the server refreshes updatedAt +
+   * TTL), so it doubles as a keep-alive and a backfill for pre-presence installs.
+   * Best-effort: resolves { ok: true } on success, false otherwise.
+   * @param {string} code Friend Code (already normalized).
+   * @returns {Promise<{ok: true}|false>}
+   */
+  async assertPresence(code) {
+    if (!code) return false; // Unpaired — nobody to appear to.
+    const { name } = await YTB.getConfig();
+    const clientId = await YTB.ensureClientId();
+    try {
+      const res = await fetch(
+        YTB.BACKEND_URL + "/presence?code=" + encodeURIComponent(code),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId, name }),
+        }
+      );
+      return res.ok ? { ok: true } : false;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Remove my presence row from `code` (leave the room). Idempotent on the
+   * server. Best-effort — on failure the row just TTLs out in 14 days.
+   * @param {string} code Friend Code (already normalized).
+   * @param {string} clientId
+   * @returns {Promise<{ok: true}|false>}
+   */
+  async deletePresence(code, clientId) {
+    if (!code || !clientId) return false;
+    try {
+      const res = await fetch(
+        YTB.BACKEND_URL +
+          "/presence?code=" +
+          encodeURIComponent(code) +
+          "&clientId=" +
+          encodeURIComponent(clientId),
+        { method: "DELETE" }
+      );
+      return res.ok ? { ok: true } : false;
+    } catch {
+      return false;
     }
   },
 
@@ -252,22 +309,31 @@ const YTB = {
   },
 
   /**
-   * Reduce a flat records array (mine AND the Buddies') into a Group view from
-   * my perspective. A Buddy is any record with a foreign clientId; the Group is
-   * capped at MAX_MEMBERS distinct Client IDs.
-   * @param {Array<{clientId: string, name: string, updatedAt: number}>} records
+   * Reduce the structured `{ progress, presence }` records (mine AND the
+   * Buddies') into a Group view from my perspective. A Buddy is any FOREIGN
+   * clientId appearing in EITHER set: their latest Progress Record (carries a
+   * position) is preferred, else their presence row ("joined", no position). The
+   * Group is capped at MAX_MEMBERS distinct Client IDs across both sets.
+   * @param {{progress: Array<object>, presence: Array<object>}} records
    * @param {string} myClientId
    * @returns {{buddies: Array<object>, iAmMember: boolean, locked: boolean}}
-   *   buddies — one latest record per distinct Buddy, newest-first.
-   *   iAmMember — I already have a record under the code.
-   *   locked — the Group is full of OTHERS and I am not one of them (would be
-   *            the rejected 6th): render nothing, show "Group full".
+   *   buddies — one entry per distinct foreign Buddy, newest-first by updatedAt.
+   *   iAmMember — I appear in either set under the code.
+   *   locked — the Group is full of OTHERS and I am not one of them (would be the
+   *            rejected 6th): render nothing, show "Group full".
    */
   groupView(records, myClientId) {
-    const latestByBuddy = new Map(); // clientId -> latest record (any video)
+    const progress = (records && records.progress) || [];
+    const presence = (records && records.presence) || [];
+
+    const latestByBuddy = new Map(); // clientId -> latest progress record
+    const presenceByBuddy = new Map(); // clientId -> presence row
+    const memberIds = new Set(); // distinct clientIds across BOTH sets (for the cap)
     let iAmMember = false;
-    for (const r of records) {
+
+    for (const r of progress) {
       if (!r || !r.clientId) continue;
+      memberIds.add(r.clientId);
       if (r.clientId === myClientId) {
         iAmMember = true;
         continue;
@@ -275,11 +341,40 @@ const YTB = {
       const prev = latestByBuddy.get(r.clientId);
       if (!prev || r.updatedAt > prev.updatedAt) latestByBuddy.set(r.clientId, r);
     }
-    const buddies = Array.from(latestByBuddy.values()).sort(
-      (a, b) => b.updatedAt - a.updatedAt
-    );
-    // 5 distinct others with no record of my own = a full Group I'd be the 6th of.
-    const locked = !iAmMember && buddies.length >= YTB.MAX_MEMBERS;
+    for (const p of presence) {
+      if (!p || !p.clientId) continue;
+      memberIds.add(p.clientId);
+      if (p.clientId === myClientId) {
+        iAmMember = true;
+        continue;
+      }
+      presenceByBuddy.set(p.clientId, p);
+    }
+
+    // One entry per foreign Buddy: prefer their progress record (has a position),
+    // else a presence-only row (joined, no videoId/timestamp).
+    const buddyIds = new Set([
+      ...latestByBuddy.keys(),
+      ...presenceByBuddy.keys(),
+    ]);
+    const buddies = [];
+    for (const cid of buddyIds) {
+      const prog = latestByBuddy.get(cid);
+      if (prog) {
+        buddies.push(prog);
+      } else {
+        const p = presenceByBuddy.get(cid);
+        buddies.push({ clientId: p.clientId, name: p.name, updatedAt: p.updatedAt });
+      }
+    }
+    buddies.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    // Distinct OTHERS; 5 of them with no membership of my own = a full Group I'd
+    // be the locked-out 6th of.
+    let foreignCount = 0;
+    for (const id of memberIds) if (id !== myClientId) foreignCount++;
+    const locked = !iAmMember && foreignCount >= YTB.MAX_MEMBERS;
+
     return { buddies, iAmMember, locked };
   },
 };
