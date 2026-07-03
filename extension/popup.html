@@ -1,519 +1,521 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>YouTube Buddy</title>
-    <style>
-      :root {
-        --fg: #0f0f0f;
-        --muted: #606060;
-        --line: #e5e5e5;
-        --accent: #065fd4;
-        --bg: #ffffff;
-        --paired: #2ba640;
-        --waiting: #c79100;
-        --unpaired: #909090;
-        --full: #444444;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        width: 300px;
-        margin: 0;
-        padding: 14px 14px 12px;
-        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Arial, sans-serif;
-        color: var(--fg);
-        background: var(--bg);
-      }
-      h1 {
-        margin: 0 0 12px;
-        font-size: 15px;
-        font-weight: 600;
-      }
-      .field {
-        margin-bottom: 12px;
-      }
-      label.lbl {
-        display: block;
-        margin-bottom: 4px;
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-      }
-      input[type="text"] {
-        width: 100%;
-        padding: 7px 9px;
-        font-size: 13px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        outline: none;
-      }
-      input[type="text"]:focus {
-        border-color: var(--accent);
-      }
-      #join-input {
-        text-transform: lowercase;
-      }
-      /* The active code shows as a read-only pretty label ("The Silly Otters"),
+	<head>
+		<meta charset="utf-8" />
+		<title>YouTube Buddy</title>
+		<style>
+			:root {
+				--fg: #0f0f0f;
+				--muted: #606060;
+				--line: #e5e5e5;
+				--accent: #065fd4;
+				--bg: #ffffff;
+				--paired: #2ba640;
+				--waiting: #c79100;
+				--unpaired: #909090;
+				--full: #444444;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				width: 300px;
+				margin: 0;
+				padding: 14px 14px 12px;
+				font:
+					13px/1.4 -apple-system,
+					BlinkMacSystemFont,
+					'Segoe UI',
+					Roboto,
+					Arial,
+					sans-serif;
+				color: var(--fg);
+				background: var(--bg);
+			}
+			h1 {
+				margin: 0 0 12px;
+				font-size: 15px;
+				font-weight: 600;
+			}
+			.field {
+				margin-bottom: 12px;
+			}
+			label.lbl {
+				display: block;
+				margin-bottom: 4px;
+				font-size: 11px;
+				font-weight: 600;
+				color: var(--muted);
+				text-transform: uppercase;
+				letter-spacing: 0.03em;
+			}
+			input[type='text'] {
+				width: 100%;
+				padding: 7px 9px;
+				font-size: 13px;
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				outline: none;
+			}
+			input[type='text']:focus {
+				border-color: var(--accent);
+			}
+			#join-input {
+				text-transform: lowercase;
+			}
+			/* The active code shows as a read-only pretty label ("The Silly Otters"),
          so it is a styled <span>, not an input. */
-      .code-row #code {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        padding: 7px 9px;
-        font-size: 13px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fafafa;
-        color: var(--fg);
-      }
-      .code-row,
-      .edit-row {
-        display: flex;
-        gap: 6px;
-      }
-      .code-row input,
-      .edit-row input {
-        flex: 1;
-      }
-      /* Copy button: clipboard icon swaps to a checkmark for 1.5s after a copy. */
-      #copy-code {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 34px;
-        padding: 7px;
-        color: var(--muted);
-      }
-      #copy-code svg {
-        width: 16px;
-        height: 16px;
-      }
-      #copy-code .icon-check {
-        display: none;
-      }
-      #copy-code.copied .icon-copy {
-        display: none;
-      }
-      #copy-code.copied .icon-check {
-        display: inline;
-        color: var(--paired);
-      }
-      /* Locked vs editable Display Name: the field shows ONE of these. `.is-locked`
+			.code-row #code {
+				flex: 1;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				padding: 7px 9px;
+				font-size: 13px;
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				background: #fafafa;
+				color: var(--fg);
+			}
+			.code-row,
+			.edit-row {
+				display: flex;
+				gap: 6px;
+			}
+			#view-connected .code-row {
+				position: relative;
+				margin-bottom: 22px;
+			}
+			.code-row input,
+			.edit-row input {
+				flex: 1;
+			}
+			/* Copy feedback is anchored under the active Room Code. */
+			#copy-code {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 34px;
+				padding: 7px;
+				color: var(--muted);
+			}
+			#copy-code svg {
+				width: 16px;
+				height: 16px;
+			}
+			.copy-feedback {
+				position: absolute;
+				top: calc(100% + 3px);
+				right: 0;
+				min-height: 17px;
+				font-size: 11px;
+				color: var(--paired);
+			}
+			.copy-feedback.is-error {
+				color: #c5221f;
+			}
+			/* Locked vs editable Display Name: the field shows ONE of these. `.is-locked`
          on the `.field` (set in popup.js) swaps which child is visible. The name
          is locked iff it holds a non-empty committed value. */
-      .field.is-locked .field-edit {
-        display: none;
-      }
-      .field:not(.is-locked) .field-locked {
-        display: none;
-      }
-      .field-locked {
-        position: relative;
-        display: flex;
-        align-items: center;
-      }
-      .field-locked .locked-value {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        /* Right padding clears the overlaid pencil so the name never runs under it. */
-        padding: 7px 32px 7px 9px;
-        font-size: 13px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fafafa;
-      }
-      /* Pencil edit affordance, overlaid at the chip's right edge — bare icon,
+			.field.is-locked .field-edit {
+				display: none;
+			}
+			.field:not(.is-locked) .field-locked {
+				display: none;
+			}
+			.field-locked {
+				position: relative;
+				display: flex;
+				align-items: center;
+			}
+			.field-locked .locked-value {
+				flex: 1;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				/* Right padding clears the overlaid pencil so the name never runs under it. */
+				padding: 7px 32px 7px 9px;
+				font-size: 13px;
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				background: #fafafa;
+			}
+			/* Pencil edit affordance, overlaid at the chip's right edge — bare icon,
          not the boxed default button. */
-      #name-edit {
-        position: absolute;
-        right: 8px;
-        top: 50%;
-        transform: translateY(-50%);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-        border: none;
-        background: none;
-        color: var(--muted);
-        cursor: pointer;
-      }
-      #name-edit:hover {
-        background: none;
-        color: var(--fg);
-      }
-      #name-edit svg {
-        width: 16px;
-        height: 16px;
-      }
-      button {
-        padding: 7px 10px;
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--fg);
-        background: #f2f2f2;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      button:hover {
-        background: #e8e8e8;
-      }
-      /* Chooser: two equal-width primary actions side by side. */
-      .chooser {
-        display: flex;
-        gap: 6px;
-      }
-      .chooser button {
-        flex: 1;
-      }
-      button.primary {
-        color: #fff;
-        background: var(--accent);
-        border-color: var(--accent);
-      }
-      button.primary:hover {
-        background: #0556bd;
-      }
-      /* Text-only affordances (Leave room / Back / Cancel). */
-      button.link {
-        margin-top: 8px;
-        padding: 0;
-        border: none;
-        background: none;
-        color: var(--accent);
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        white-space: normal;
-      }
-      button.link:hover {
-        background: none;
-        text-decoration: underline;
-      }
-      .status {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 9px 10px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fafafa;
-      }
-      /* The dot's color tracks the pairing state via --dot-color. */
-      .status.is-paired,
-      .status.is-inroom {
-        --dot-color: var(--paired);
-      }
-      .status.is-waiting {
-        --dot-color: var(--waiting);
-      }
-      .status.is-unpaired {
-        --dot-color: var(--unpaired);
-      }
-      .status.is-full {
-        --dot-color: var(--full);
-      }
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        flex: 0 0 auto;
-        background: var(--dot-color, var(--unpaired));
-      }
-      /* Hollow dot = Sharing off (solid = on). */
-      .status.not-sharing .dot {
-        background: transparent;
-        box-shadow: inset 0 0 0 2px var(--dot-color, var(--unpaired));
-      }
-      /* The dot is also the Sharing toggle: a small glyph centered in a ~28px
+			#name-edit {
+				position: absolute;
+				right: 8px;
+				top: 50%;
+				transform: translateY(-50%);
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				padding: 0;
+				border: none;
+				background: none;
+				color: var(--muted);
+				cursor: pointer;
+			}
+			#name-edit:hover {
+				background: none;
+				color: var(--fg);
+			}
+			#name-edit svg {
+				width: 16px;
+				height: 16px;
+			}
+			button {
+				padding: 7px 10px;
+				font-size: 12px;
+				font-weight: 600;
+				color: var(--fg);
+				background: #f2f2f2;
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				cursor: pointer;
+				white-space: nowrap;
+			}
+			button:hover {
+				background: #e8e8e8;
+			}
+			/* Chooser: two equal-width primary actions side by side. */
+			.chooser {
+				display: flex;
+				gap: 6px;
+			}
+			.chooser button {
+				flex: 1;
+			}
+			button.primary {
+				color: #fff;
+				background: var(--accent);
+				border-color: var(--accent);
+			}
+			button.primary:hover {
+				background: #0556bd;
+			}
+			/* Text-only affordances (Leave room / Back / Cancel). */
+			button.link {
+				margin-top: 8px;
+				padding: 0;
+				border: none;
+				background: none;
+				color: var(--accent);
+				font-size: 12px;
+				font-weight: 600;
+				cursor: pointer;
+				white-space: normal;
+			}
+			button.link:hover {
+				background: none;
+				text-decoration: underline;
+			}
+			.status {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				padding: 9px 10px;
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				background: #fafafa;
+			}
+			/* The dot's color tracks the pairing state via --dot-color. */
+			.status.is-paired,
+			.status.is-inroom {
+				--dot-color: var(--paired);
+			}
+			.status.is-waiting {
+				--dot-color: var(--waiting);
+			}
+			.status.is-unpaired {
+				--dot-color: var(--unpaired);
+			}
+			.status.is-full {
+				--dot-color: var(--full);
+			}
+			.dot {
+				width: 8px;
+				height: 8px;
+				border-radius: 50%;
+				flex: 0 0 auto;
+				background: var(--dot-color, var(--unpaired));
+			}
+			/* Hollow dot = Sharing off (solid = on). */
+			.status.not-sharing .dot {
+				background: transparent;
+				box-shadow: inset 0 0 0 2px var(--dot-color, var(--unpaired));
+			}
+			/* The dot is also the Sharing toggle: a small glyph centered in a ~28px
          focusable hit area (replaces the old Sharing switch). Passive (disabled)
          in the Room-full state. */
-      .sharing-dot {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        margin: -8px 0;
-        padding: 0;
-        border: none;
-        background: none;
-        border-radius: 50%;
-        cursor: pointer;
-        flex: 0 0 auto;
-      }
-      .sharing-dot:hover:not(:disabled) {
-        background: rgba(0, 0, 0, 0.06);
-      }
-      .sharing-dot:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(6, 95, 212, 0.4);
-      }
-      .sharing-dot:disabled {
-        cursor: default;
-      }
-      #status-text {
-        font-weight: 600;
-      }
-      #status-sub {
-        margin: 4px 0 0;
-        font-size: 12px;
-        color: var(--muted);
-      }
-      select {
-        width: 100%;
-        padding: 7px 9px;
-        font-size: 13px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fff;
-        color: var(--fg);
-        cursor: pointer;
-        outline: none;
-      }
-      select:focus {
-        border-color: var(--accent);
-      }
-      /* Live preview of the selected palette under the picker. */
-      .swatch-strip {
-        display: flex;
-        gap: 6px;
-        margin-top: 8px;
-      }
-      .swatch-strip .swatch {
-        width: 20px;
-        height: 20px;
-        border-radius: 4px;
-      }
-      .roster {
-        margin: 8px 0 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .roster:empty {
-        display: none;
-      }
-      .buddy {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-      }
-      .buddy .swatch {
-        width: 10px;
-        height: 10px;
-        border-radius: 2px;
-        flex: 0 0 auto;
-      }
-      .buddy .buddy-name {
-        font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .buddy .buddy-seen {
-        margin-left: auto;
-        color: var(--muted);
-        white-space: nowrap;
-      }
-      footer {
-        margin-top: 4px;
-        padding-top: 10px;
-        border-top: 1px solid var(--line);
-        font-size: 11px;
-        color: var(--muted);
-      }
-      footer .url {
-        word-break: break-all;
-        color: var(--muted);
-      }
-      /* Inline disconnect confirmation — a styled in-popup dialog (not the
+			.sharing-dot {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 28px;
+				height: 28px;
+				margin: -8px 0;
+				padding: 0;
+				border: none;
+				background: none;
+				border-radius: 50%;
+				cursor: pointer;
+				flex: 0 0 auto;
+			}
+			.sharing-dot:hover:not(:disabled) {
+				background: rgba(0, 0, 0, 0.06);
+			}
+			.sharing-dot:focus-visible {
+				outline: none;
+				box-shadow: 0 0 0 2px rgba(6, 95, 212, 0.4);
+			}
+			.sharing-dot:disabled {
+				cursor: default;
+			}
+			#status-text {
+				font-weight: 600;
+			}
+			#status-sub {
+				margin: 4px 0 0;
+				font-size: 12px;
+				color: var(--muted);
+			}
+			select {
+				width: 100%;
+				padding: 7px 9px;
+				font-size: 13px;
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				background: #fff;
+				color: var(--fg);
+				cursor: pointer;
+				outline: none;
+			}
+			select:focus {
+				border-color: var(--accent);
+			}
+			/* Live preview of the selected palette under the picker. */
+			.swatch-strip {
+				display: flex;
+				gap: 6px;
+				margin-top: 8px;
+			}
+			.swatch-strip .swatch {
+				width: 20px;
+				height: 20px;
+				border-radius: 4px;
+			}
+			.roster {
+				margin: 8px 0 0;
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+			.roster:empty {
+				display: none;
+			}
+			.buddy {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				font-size: 12px;
+			}
+			.buddy .swatch {
+				width: 10px;
+				height: 10px;
+				border-radius: 2px;
+				flex: 0 0 auto;
+			}
+			.buddy .buddy-name {
+				font-weight: 600;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.buddy .buddy-seen {
+				margin-left: auto;
+				color: var(--muted);
+				white-space: nowrap;
+			}
+			footer {
+				margin-top: 4px;
+				padding-top: 10px;
+				border-top: 1px solid var(--line);
+				font-size: 11px;
+				color: var(--muted);
+			}
+			footer .url {
+				word-break: break-all;
+				color: var(--muted);
+			}
+			/* Inline disconnect confirmation — a styled in-popup dialog (not the
          native confirm) so the buddy list renders on-brand. */
-      .confirm-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 100;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 16px;
-        background: rgba(0, 0, 0, 0.35);
-      }
-      .confirm-overlay[hidden] {
-        display: none;
-      }
-      .confirm-box {
-        max-width: 100%;
-        padding: 14px;
-        background: var(--bg);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-      }
-      .confirm-title {
-        margin: 0 0 6px;
-        font-size: 13px;
-        font-weight: 600;
-      }
-      .confirm-body {
-        margin: 0 0 12px;
-        font-size: 12px;
-        color: var(--muted);
-      }
-      .confirm-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-      }
-      button.danger {
-        color: #fff;
-        background: #c0392b;
-        border-color: #c0392b;
-      }
-      button.danger:hover {
-        background: #a93226;
-      }
-      /* Neutral confirm variant (e.g. Stop sharing) — emphasized but not danger. */
-      button.neutral {
-        color: #fff;
-        background: #444444;
-        border-color: #444444;
-      }
-      button.neutral:hover {
-        background: #333333;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>YouTube Buddy</h1>
+			.confirm-overlay {
+				position: fixed;
+				inset: 0;
+				z-index: 100;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 16px;
+				background: rgba(0, 0, 0, 0.35);
+			}
+			.confirm-overlay[hidden] {
+				display: none;
+			}
+			.confirm-box {
+				max-width: 100%;
+				padding: 14px;
+				background: var(--bg);
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+			}
+			.confirm-title {
+				margin: 0 0 6px;
+				font-size: 13px;
+				font-weight: 600;
+			}
+			.confirm-body {
+				margin: 0 0 12px;
+				font-size: 12px;
+				color: var(--muted);
+			}
+			.confirm-actions {
+				display: flex;
+				gap: 8px;
+				justify-content: flex-end;
+			}
+			button.danger {
+				color: #fff;
+				background: #c0392b;
+				border-color: #c0392b;
+			}
+			button.danger:hover {
+				background: #a93226;
+			}
+			/* Neutral confirm variant (e.g. Stop sharing) — emphasized but not danger. */
+			button.neutral {
+				color: #fff;
+				background: #444444;
+				border-color: #444444;
+			}
+			button.neutral:hover {
+				background: #333333;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>YouTube Buddy</h1>
 
-    <div class="field" id="name-field">
-      <label class="lbl" for="name">Display Name</label>
-      <!-- Locked once set; the pencil icon reopens the input (cosmetic, unguarded). -->
-      <div class="field-locked">
-        <span class="locked-value" id="name-value"></span>
-        <button id="name-edit" type="button" aria-label="Edit display name">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-          </svg>
-        </button>
-      </div>
-      <div class="field-edit edit-row">
-        <input
-          id="name"
-          type="text"
-          placeholder='Buddy "Buddy" McGee'
-          autocomplete="off"
-        />
-      </div>
-    </div>
+		<div class="field" id="name-field">
+			<label class="lbl" for="name">Display Name</label>
+			<!-- Locked once set; the pencil icon reopens the input (cosmetic, unguarded). -->
+			<div class="field-locked">
+				<span class="locked-value" id="name-value"></span>
+				<button id="name-edit" type="button" aria-label="Edit display name">
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+						<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+					</svg>
+				</button>
+			</div>
+			<div class="field-edit edit-row">
+				<input id="name" type="text" placeholder='Buddy "Buddy" McGee' autocomplete="off" />
+			</div>
+		</div>
 
-    <div class="field">
-      <label class="lbl">Room Code</label>
+		<div class="field">
+			<label class="lbl">Room Code</label>
 
-      <!-- Chooser: shown when there is no code yet, or after "Leave room". -->
-      <div id="view-chooser">
-        <div class="chooser">
-          <button id="choose-create" type="button" class="primary">
-            Create a room
-          </button>
-          <button id="choose-join" type="button">Join a room</button>
-        </div>
-        <button id="chooser-cancel" type="button" class="link" hidden>
-          Cancel
-        </button>
-      </div>
+			<!-- Chooser: shown when there is no code yet, or after "Leave room". -->
+			<div id="view-chooser">
+				<div class="chooser">
+					<button id="choose-create" type="button" class="primary">Create a room</button>
+					<button id="choose-join" type="button">Join a room</button>
+				</div>
+				<button id="chooser-cancel" type="button" class="link" hidden>Cancel</button>
+			</div>
 
-      <!-- Join: type a Buddy's code (free text, must match a real code). -->
-      <div id="view-join" hidden>
-        <div class="code-row">
-          <input
-            id="join-input"
-            type="text"
-            placeholder="room code"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button id="join-submit" type="button">Join</button>
-        </div>
-        <button id="join-back" type="button" class="link">Back</button>
-      </div>
+			<!-- Join: type a Buddy's code (free text, must match a real code). -->
+			<div id="view-join" hidden>
+				<div class="code-row">
+					<input id="join-input" type="text" placeholder="room code" autocomplete="off" spellcheck="false" />
+					<button id="join-submit" type="button">Join</button>
+				</div>
+				<button id="join-back" type="button" class="link">Back</button>
+			</div>
 
-      <!-- Connected: the single active code + pairing status. -->
-      <div id="view-connected" hidden>
-        <div class="code-row">
-          <span id="code"></span>
-          <button id="copy-code" type="button" aria-label="Copy code" title="Copy">
-            <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-          </button>
-        </div>
-        <div id="status" class="status is-unpaired">
-          <button id="sharing-dot" class="sharing-dot" type="button">
-            <span class="dot"></span>
-          </button>
-          <span id="status-text">Unpaired</span>
-        </div>
-        <p id="status-sub"></p>
-        <div id="roster" class="roster"></div>
-        <button id="leave-room" type="button" class="link">Leave room</button>
-      </div>
-    </div>
+			<!-- Connected: the single active code + pairing status. -->
+			<div id="view-connected" hidden>
+				<div class="code-row">
+					<span id="code"></span>
+					<button id="copy-code" type="button" aria-label="Copy code" title="Copy">
+						<svg
+							class="icon-copy"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+							<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+						</svg>
+					</button>
+					<span id="copy-feedback" class="copy-feedback" role="status" aria-live="polite"></span>
+				</div>
+				<div id="status" class="status is-unpaired">
+					<button id="sharing-dot" class="sharing-dot" type="button">
+						<span class="dot"></span>
+					</button>
+					<span id="status-text">Unpaired</span>
+				</div>
+				<p id="status-sub"></p>
+				<div id="roster" class="roster"></div>
+				<button id="leave-room" type="button" class="link">Leave room</button>
+			</div>
+		</div>
 
-    <div class="field">
-      <label class="lbl" for="palette">Buddy Colors</label>
-      <select id="palette">
-        <option value="default">Default</option>
-        <option value="tropical">Tropical</option>
-        <option value="cool">Cool</option>
-        <option value="pastel">Pastel</option>
-      </select>
-      <div id="swatch-strip" class="swatch-strip"></div>
-    </div>
+		<div class="field">
+			<label class="lbl" for="palette">Buddy Colors</label>
+			<select id="palette">
+				<option value="default">Default</option>
+				<option value="tropical">Tropical</option>
+				<option value="cool">Cool</option>
+				<option value="pastel">Pastel</option>
+			</select>
+			<div id="swatch-strip" class="swatch-strip"></div>
+		</div>
 
-    <footer>
-      Backend: <span id="backend-url" class="url"></span>
-    </footer>
+		<footer>Backend: <span id="backend-url" class="url"></span></footer>
 
-    <div id="confirm-overlay" class="confirm-overlay" hidden>
-      <div
-        class="confirm-box"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-title"
-      >
-        <p class="confirm-title" id="confirm-title"></p>
-        <p class="confirm-body" id="confirm-body"></p>
-        <div class="confirm-actions">
-          <button id="confirm-cancel" type="button">Cancel</button>
-          <!-- Label + variant are set per-open by openConfirm (Leave / Stop sharing). -->
-          <button id="confirm-disconnect" type="button" class="danger">
-            Leave
-          </button>
-        </div>
-      </div>
-    </div>
+		<div id="confirm-overlay" class="confirm-overlay" hidden>
+			<div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+				<p class="confirm-title" id="confirm-title"></p>
+				<p class="confirm-body" id="confirm-body"></p>
+				<div class="confirm-actions">
+					<button id="confirm-cancel" type="button">Cancel</button>
+					<!-- Label + variant are set per-open by openConfirm (Leave / Stop sharing). -->
+					<button id="confirm-disconnect" type="button" class="danger">Leave</button>
+				</div>
+			</div>
+		</div>
 
-    <script src="shared.js"></script>
-    <script src="popup.js"></script>
-  </body>
+		<script src="shared.js"></script>
+		<script src="room-code.js"></script>
+		<script src="popup.js"></script>
+	</body>
 </html>

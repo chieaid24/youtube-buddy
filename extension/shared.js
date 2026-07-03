@@ -27,23 +27,21 @@ const YTB = {
 	MAX_MEMBERS: 5,
 
 	// --- storage (chrome.storage.local) ---
-	// Stored keys: name (Display Name), code (Room Code), codeOrigin
-	// ("created" | "joined" — how the active code was set; drives the popup's
-	// Re-roll affordance), clientId, sharing (boolean), palette (buddy color
-	// theme name; local render preference, default "default").
+	// Stored keys: name (Display Name), code (Room Code), clientId, sharing
+	// (boolean), palette (buddy color theme name; local render preference,
+	// default "default").
 
 	/**
 	 * Read the full config, applying defaults for unset keys.
 	 * `clientId` is "" until ensureClientId() has minted one — call that when you
 	 * need a guaranteed id.
-	 * @returns {Promise<{name: string, code: string, codeOrigin: string, clientId: string, sharing: boolean, palette: string}>}
+	 * @returns {Promise<{name: string, code: string, clientId: string, sharing: boolean, palette: string}>}
 	 */
 	async getConfig() {
-		const stored = await chrome.storage.local.get(['name', 'code', 'codeOrigin', 'clientId', 'sharing', 'palette']);
+		const stored = await chrome.storage.local.get(['name', 'code', 'clientId', 'sharing', 'palette']);
 		return {
 			name: stored.name ?? '',
 			code: stored.code ?? '',
-			codeOrigin: stored.codeOrigin ?? '',
 			clientId: stored.clientId ?? '',
 			sharing: stored.sharing ?? true,
 			palette: stored.palette ?? 'default',
@@ -51,14 +49,14 @@ const YTB = {
 	},
 
 	/**
-	 * Merge-write a subset of { name, code, codeOrigin, sharing, palette } into
+	 * Merge-write a subset of { name, code, sharing, palette } into
 	 * chrome.storage.local. `clientId` is intentionally NOT writable here — it is
 	 * owned by ensureClientId.
-	 * @param {{name?: string, code?: string, codeOrigin?: string, sharing?: boolean, palette?: string}} partial
+	 * @param {{name?: string, code?: string, sharing?: boolean, palette?: string}} partial
 	 */
 	async setConfig(partial) {
 		const next = {};
-		for (const key of ['name', 'code', 'codeOrigin', 'sharing', 'palette']) {
+		for (const key of ['name', 'code', 'sharing', 'palette']) {
 			if (key in partial) next[key] = partial[key];
 		}
 		await chrome.storage.local.set(next);
