@@ -5,15 +5,15 @@ A Chrome extension plus Cloudflare Worker backend that lets a small Room of frie
 ## Language
 
 **Room Code**:
-A short shared string (e.g. `silly-otters`, shown as "The Silly Otters") that forms a Room. It is both the joining mechanism and the only access control — anyone holding the code can read and write that Room's data.
+A short shared string that forms a Room. Newly generated Room Codes use a `<descriptor>-<plural-animal>` slug (e.g. `red-frogs` or `jumping-spiders`), shown as "The Red Frogs" or "The Jumping Spiders". Joined codes remain permissive and need not match the generated-code vocabulary. A Room Code is both the joining mechanism and the only access control — anyone holding the code can read and write that Room's data.
 _Avoid_: friend code, group code, secret (the people form a _Room_, but the string itself is always the _Room Code_)
 
 **Room**:
-The set of people sharing one Room Code — at most five (you plus up to four Buddies). The backend enforces the cap best-effort; a sixth person is locked out.
+The set of people sharing one Room Code — at most five (you plus up to four Buddies). The backend enforces the cap best-effort; a sixth person is locked out. Leaving removes that member's presence and all of their Progress Records from the Room, freeing their slot immediately.
 _Avoid_: group, channel, party
 
 **Progress Record**:
-One user's last-known position in one specific video. A user has many Progress Records (one per video watched); old ones expire rather than living forever.
+One user's last-known position in one specific video. A user has many Progress Records (one per video watched); old ones expire rather than living forever, and all are deleted when that user leaves the Room.
 _Avoid_: progress entry, watch state, sync record
 
 **Client ID**:
@@ -29,7 +29,7 @@ Any other person in your Room — there can be up to four. Their Progress Record
 _Avoid_: friend, peer, partner (in code and UI copy; "friend" is fine in prose)
 
 **Buddy Color**:
-One of eight curated colors that a viewer assigns to a Buddy by clicking the color beside that Buddy's Display Name. Assignments are private to that browser and scoped to the Room Code. A color already assigned to another current Buddy in the same Room is unavailable; the same color may be used independently in another Room or browser.
+One of eight curated colors used to render a Buddy's progress for one viewer. A new Buddy receives a random currently available color. The viewer can change it by clicking the color beside that Buddy's Display Name. Assignments are private to that browser and scoped to the Room Code. A color already assigned to another current Buddy in the same Room is unavailable; the same color may be used independently in another Room or browser. The assignment is discarded when the Buddy leaves, so a later rejoin receives a new random available color.
 _Avoid_: palette, global color, shared color
 
 **Room states** (Unpaired / Waiting / In room / Room full):
