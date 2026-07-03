@@ -32,6 +32,7 @@ web-ext-artifacts/
 
 # Logs
 logs/
+progress/
 *.log
 npm-debug.log*
 
