@@ -117,6 +117,10 @@ function wireHandlers() {
 		setFieldLocked(el.nameField, false);
 		el.name.focus();
 	});
+	el.nameValue.addEventListener('click', () => {
+		setFieldLocked(el.nameField, false);
+		el.name.focus();
+	});
 
 	// Chooser → Create: mint + commit a fresh code immediately (no confirm step).
 	el.chooseCreate.addEventListener('click', () => createAndCommit());
@@ -395,8 +399,7 @@ async function refreshStatus(code) {
 		return;
 	}
 
-	const noun = buddies.length === 1 ? 'buddy' : 'buddies';
-	setStatus('inroom', 'In room', `${buddies.length} ${noun}`, true);
+	setStatus('inroom', 'Sharing', '', true);
 	renderRoster(buddies);
 }
 
