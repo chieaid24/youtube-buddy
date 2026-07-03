@@ -30,8 +30,7 @@ const el = {
 	statusText: document.getElementById('status-text'),
 	statusSub: document.getElementById('status-sub'),
 	roster: document.getElementById('roster'),
-	palette: document.getElementById('palette'),
-	swatchStrip: document.getElementById('swatch-strip'),
+	colorGrid: document.getElementById('color-grid'),
 	sharingDot: document.getElementById('sharing-dot'),
 	backendUrl: document.getElementById('backend-url'),
 	// Disconnect confirmation dialog.
@@ -55,9 +54,10 @@ let pendingConfirm = null;
 let currentSharing = true;
 let dotInteractive = false;
 
-// Last-rendered roster, so a palette change can recolor the swatches without a
-// re-GET (renderRoster rebuilds them through the new active palette).
+// Last-rendered roster, so a Buddy Color change can redraw without a re-GET.
 let currentRosterBuddies = [];
+let selectedBuddyId = '';
+let activeRoomCode = '';
 
 init();
 
@@ -71,12 +71,6 @@ async function init() {
 	el.name.value = config.name || '';
 	el.nameValue.textContent = config.name || '';
 	currentSharing = config.sharing;
-
-	// Buddy color palette: seed the synchronous cache (so roster swatches color
-	// correctly on first render), reflect the choice in the picker, and preview it.
-	YTB._activePalette = config.palette;
-	el.palette.value = config.palette;
-	renderSwatchStrip(config.palette);
 
 	// The Display Name starts locked iff it already holds a non-empty committed
 	// value, so a fresh install (blank name) opens in edit mode (onboarding unchanged).
@@ -201,17 +195,6 @@ function wireHandlers() {
 			setSharing(true);
 		}
 	});
-
-	// Buddy color palette: persist the choice (open YouTube tabs recolor live via
-	// chrome.storage.onChanged), update the cache + preview, and recolor the roster
-	// swatches here — all with no reload.
-	el.palette.addEventListener('change', () => {
-		const palette = el.palette.value;
-		YTB.setConfig({ palette });
-		YTB._activePalette = palette;
-		renderSwatchStrip(palette);
-		renderRoster(currentRosterBuddies);
-	});
 }
 
 // --- Display Name lock/edit ---------------------------------------------------
@@ -246,7 +229,10 @@ async function createAndCommit() {
 	const { code: oldCode } = await YTB.getConfig();
 	const code = generateCode();
 	await YTB.setConfig({ code });
-	if (oldCode && oldCode !== code) await YTB.deleteMember(oldCode, myClientId);
+	if (oldCode && oldCode !== code) {
+		await YTB.deleteMember(oldCode, myClientId);
+		await YTB.clearRoomColors(oldCode);
+	}
 	showConnected(code);
 	await YTB.assertPresence(code);
 	await refreshStatus(code);
@@ -260,7 +246,10 @@ async function joinAndCommit() {
 	if (!code) return; // Empty — stay on the entry view.
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code });
-	if (oldCode && oldCode !== code) await YTB.deleteMember(oldCode, myClientId);
+	if (oldCode && oldCode !== code) {
+		await YTB.deleteMember(oldCode, myClientId);
+		await YTB.clearRoomColors(oldCode);
+	}
 	showConnected(code);
 	await YTB.assertPresence(code);
 	await refreshStatus(code);
@@ -322,7 +311,10 @@ async function setSharing(on) {
 async function clearCodeAndChoose() {
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code: '' });
-	if (oldCode) await YTB.deleteMember(oldCode, myClientId);
+	if (oldCode) {
+		await YTB.deleteMember(oldCode, myClientId);
+		await YTB.clearRoomColors(oldCode);
+	}
 	el.code.textContent = '';
 	showView('chooser');
 }
@@ -385,6 +377,12 @@ async function refreshStatus(code) {
 	currentSharing = sharing;
 	const records = await YTB.getRecords(code);
 	const { buddies, locked } = YTB.roomView(records, myClientId);
+	activeRoomCode = code;
+	await YTB.syncBuddyColors(
+		code,
+		buddies.map((buddy) => buddy.clientId),
+		records.ok,
+	);
 
 	if (locked) {
 		// Room full: the dot is a passive dark indicator — no Sharing toggle here.
@@ -443,9 +441,12 @@ function renderRoster(buddies) {
 		const row = document.createElement('div');
 		row.className = 'buddy';
 
-		const swatch = document.createElement('span');
+		const swatch = document.createElement('button');
 		swatch.className = 'swatch';
 		swatch.style.background = YTB.buddyColor(b.clientId);
+		swatch.type = 'button';
+		swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(b.clientId, b.name)}`);
+		swatch.addEventListener('click', () => openColorGrid(b.clientId));
 
 		const name = document.createElement('span');
 		name.className = 'buddy-name';
@@ -460,16 +461,36 @@ function renderRoster(buddies) {
 	}
 }
 
-// Preview the palette under the picker: one swatch per color in `name`'s array,
-// in the same order buddyColor indexes them.
-function renderSwatchStrip(name) {
-	el.swatchStrip.textContent = '';
-	for (const color of YTB.paletteColors(name)) {
-		const swatch = document.createElement('span');
-		swatch.className = 'swatch';
-		swatch.style.background = color;
-		el.swatchStrip.appendChild(swatch);
+function openColorGrid(clientId) {
+	selectedBuddyId = clientId;
+	el.colorGrid.textContent = '';
+	const room = YTB._buddyColors[activeRoomCode] || {};
+	const used = new Set(
+		Object.entries(room)
+			.filter(([id]) => id !== clientId)
+			.map(([, color]) => color),
+	);
+	for (const color of YTB.BUDDY_COLORS) {
+		const button = document.createElement('button');
+		button.className = 'color-choice';
+		button.type = 'button';
+		button.disabled = used.has(color);
+		button.title = button.disabled ? 'Already assigned' : 'Choose color';
+		button.setAttribute('aria-label', button.disabled ? `${color}, Already assigned` : `Choose ${color}`);
+		button.setAttribute('aria-pressed', String(room[clientId] === color));
+		const chip = document.createElement('span');
+		chip.style.background = color;
+		button.appendChild(chip);
+		button.addEventListener('click', async () => {
+			if (await YTB.setBuddyColor(activeRoomCode, selectedBuddyId, color)) {
+				el.colorGrid.hidden = true;
+				renderRoster(currentRosterBuddies);
+			}
+		});
+		el.colorGrid.appendChild(button);
 	}
+	el.colorGrid.hidden = false;
+	el.colorGrid.querySelector('[aria-pressed="true"]')?.focus();
 }
 
 // Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is for

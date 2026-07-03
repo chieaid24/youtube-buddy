@@ -27,36 +27,33 @@ const YTB = {
 	MAX_MEMBERS: 5,
 
 	// --- storage (chrome.storage.local) ---
-	// Stored keys: name (Display Name), code (Room Code), clientId, sharing
-	// (boolean), palette (buddy color theme name; local render preference,
-	// default "default").
+	// Stored keys: name, code, clientId, sharing, and Room-scoped buddyColors.
 
 	/**
 	 * Read the full config, applying defaults for unset keys.
 	 * `clientId` is "" until ensureClientId() has minted one — call that when you
 	 * need a guaranteed id.
-	 * @returns {Promise<{name: string, code: string, clientId: string, sharing: boolean, palette: string}>}
+	 * @returns {Promise<{name: string, code: string, clientId: string, sharing: boolean}>}
 	 */
 	async getConfig() {
-		const stored = await chrome.storage.local.get(['name', 'code', 'clientId', 'sharing', 'palette']);
+		const stored = await chrome.storage.local.get(['name', 'code', 'clientId', 'sharing']);
 		return {
 			name: stored.name ?? '',
 			code: stored.code ?? '',
 			clientId: stored.clientId ?? '',
 			sharing: stored.sharing ?? true,
-			palette: stored.palette ?? 'default',
 		};
 	},
 
 	/**
-	 * Merge-write a subset of { name, code, sharing, palette } into
+	 * Merge-write a subset of { name, code, sharing } into
 	 * chrome.storage.local. `clientId` is intentionally NOT writable here — it is
 	 * owned by ensureClientId.
-	 * @param {{name?: string, code?: string, sharing?: boolean, palette?: string}} partial
+	 * @param {{name?: string, code?: string, sharing?: boolean}} partial
 	 */
 	async setConfig(partial) {
 		const next = {};
-		for (const key of ['name', 'code', 'sharing', 'palette']) {
+		for (const key of ['name', 'code', 'sharing']) {
 			if (key in partial) next[key] = partial[key];
 		}
 		await chrome.storage.local.set(next);
@@ -117,7 +114,7 @@ const YTB = {
 	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>}>}
 	 */
 	async getRecords(code) {
-		const empty = { progress: [], presence: [] };
+		const empty = { progress: [], presence: [], ok: false };
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) return empty;
@@ -125,6 +122,7 @@ const YTB = {
 			return {
 				progress: Array.isArray(data && data.progress) ? data.progress : [],
 				presence: Array.isArray(data && data.presence) ? data.presence : [],
+				ok: true,
 			};
 		} catch {
 			return empty;
@@ -212,31 +210,57 @@ const YTB = {
 
 	// --- Room helpers (multiple Buddies) ---
 
-	// Marker color palettes. Each is >= 5 visually distinct colors, all clear of
-	// YouTube's red watched-bar. `default` is tuned for high contrast on the dark
-	// player and bright thumbnails (every user gets it out of the box); the rest
-	// are opt-in themes, a purely LOCAL render preference (config `palette`). A
-	// Room holds <= MAX_MEMBERS, so up to 4 Buddies ever need a color at once.
-	PALETTES: {
-		default: ['#00d2ff', '#ffc400', '#8c5bff', '#00e08a', '#ff7a00', '#ff3df5'],
-		tropical: ['#ff8c42', '#ffd23f', '#2ec4b6', '#06d6a0', '#ff5db1', '#9b5de5'],
-		cool: ['#56cfe1', '#4ea8de', '#5e60ce', '#7400b8', '#64dfdf', '#80ffdb'],
-		pastel: ['#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', '#bdb2ff', '#ffc6ff'],
+	// Fixed colors chosen for contrast on light popup/feed surfaces and YouTube's
+	// dark player. A Room has at most four foreign Buddies, leaving spare choices.
+	BUDDY_COLORS: ['#00a6d6', '#f0a500', '#7655d6', '#00a86b', '#e85d04', '#d936c7', '#558b2f', '#4776e6'],
+	_buddyColors: {},
+	_activeRoomCode: '',
+
+	async syncBuddyColors(code, buddyIds, successful, random = Math.random) {
+		const stored = await chrome.storage.local.get('buddyColors');
+		const all = stored.buddyColors || {};
+		const room = { ...(all[code] || {}) };
+		if (successful) {
+			const current = new Set(buddyIds);
+			for (const id of Object.keys(room)) if (!current.has(id)) delete room[id];
+			for (const id of buddyIds) {
+				if (room[id]) continue;
+				const used = new Set(Object.values(room));
+				const available = YTB.BUDDY_COLORS.filter((color) => !used.has(color));
+				room[id] = available[Math.floor(random() * available.length)];
+			}
+			all[code] = room;
+			await chrome.storage.local.set({ buddyColors: all });
+		}
+		YTB._buddyColors = all;
+		YTB._activeRoomCode = code;
+		return room;
 	},
 
-	// Cached active palette NAME for the synchronous buddyColor(). Each context
-	// (popup, content script) seeds this from config on load and refreshes it on a
-	// chrome.storage change; a stale read just costs one render in the old palette.
-	_activePalette: 'default',
+	async setBuddyColor(code, clientId, color) {
+		if (!YTB.BUDDY_COLORS.includes(color)) return false;
+		const stored = await chrome.storage.local.get('buddyColors');
+		const all = stored.buddyColors || {};
+		const room = { ...(all[code] || {}) };
+		if (Object.entries(room).some(([id, assigned]) => id !== clientId && assigned === color)) return false;
+		room[clientId] = color;
+		all[code] = room;
+		YTB._buddyColors = all;
+		YTB._activeRoomCode = code;
+		await chrome.storage.local.set({ buddyColors: all });
+		return true;
+	},
 
-	// Resolve a palette name to its color array, falling back to `default`.
-	paletteColors(name) {
-		return YTB.PALETTES[name] || YTB.PALETTES.default;
+	async clearRoomColors(code) {
+		const stored = await chrome.storage.local.get('buddyColors');
+		const all = stored.buddyColors || {};
+		delete all[code];
+		YTB._buddyColors = all;
+		await chrome.storage.local.set({ buddyColors: all });
 	},
 
 	// Playful adjectives for unnamed Buddies (see buddyName). 16 entries spread
-	// unnamed Buddies across the small set ever on screen, and stay independent of
-	// the color palette so two unnamed Buddies rarely share BOTH adjective + color.
+	// unnamed Buddies across the small set ever on screen.
 	ADJECTIVES: [
 		'Silly',
 		'Scary',
@@ -271,21 +295,13 @@ const YTB = {
 	},
 
 	/**
-	 * Stable color for a Buddy, hashed from their Client ID — within a palette the
-	 * SAME friend is the SAME color on every video, thumbnail, and the popup
-	 * roster, regardless of who else is in the Room. Pass `paletteName` to force a
-	 * palette (e.g. the popup's live preview); omit it to read the cached active
-	 * palette (YTB._activePalette). Switching palette recolors everyone but keeps
-	 * each Buddy's slot. More Buddies than palette entries can collide; tooltips
-	 * and the popup roster still disambiguate (accepted tradeoff).
+	 * Return the viewer-local assignment for a Buddy in a Room.
 	 * @param {string} clientId
-	 * @param {string} [paletteName]
+	 * @param {string} [code]
 	 * @returns {string} a hex color
 	 */
-	buddyColor(clientId, paletteName) {
-		const palette = YTB.paletteColors(paletteName || YTB._activePalette);
-		const h = YTB.hashClientId(clientId);
-		return palette[((h % palette.length) + palette.length) % palette.length];
+	buddyColor(clientId, code = YTB._activeRoomCode) {
+		return (YTB._buddyColors[code] || {})[clientId] || YTB.BUDDY_COLORS[0];
 	},
 
 	/**

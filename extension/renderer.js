@@ -21,312 +21,311 @@
 // the Sharing toggle — Sharing only gates POSTs.
 
 (function () {
-  "use strict";
+	'use strict';
 
-  // --- constants ---
-  // Each Buddy gets a stable color from YTB.buddyColor (set inline per element);
-  // the CSS defaults below only matter before a color is assigned.
+	// --- constants ---
+	// Each Buddy gets a stable color from YTB.buddyColor (set inline per element);
+	// the CSS defaults below only matter before a color is assigned.
 
-  const MARKER_CLASS = "ytb-watch-marker";
-  const TOOLTIP_CLASS = "ytb-watch-tooltip";
-  const THUMB_BAR_CLASS = "ytb-thumb-bar"; // segmented-bar container
-  const THUMB_SEG_CLASS = "ytb-thumb-seg"; // one colored segment per Buddy
-  const TOAST_WRAP_CLASS = "ytb-toast-wrap"; // fixed stack container
-  const TOAST_CLASS = "ytb-toast"; // one "<Buddy> joined" toast
-  const STYLE_ID = "ytb-renderer-style";
-  const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
+	const MARKER_CLASS = 'ytb-watch-marker';
+	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
+	const THUMB_BAR_CLASS = 'ytb-thumb-bar'; // segmented-bar container
+	const THUMB_SEG_CLASS = 'ytb-thumb-seg'; // one colored segment per Buddy
+	const TOAST_WRAP_CLASS = 'ytb-toast-wrap'; // fixed stack container
+	const TOAST_CLASS = 'ytb-toast'; // one "<Buddy> joined" toast
+	const STYLE_ID = 'ytb-renderer-style';
+	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
-  // --- state ---
-  let myClientId = null; // memoized; my own records are filtered out
-  let buddyByVideoId = new Map(); // videoId -> Buddy ProgressRecord[] (latest per Buddy)
-  let currentVideoId = null; // active /watch video, or null off a watch page
-  let refreshToken = 0; // guards against out-of-order async refreshes
-  let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
-  let baselineReady = false; // skip toasts on the very first read (no false "joined")
+	// --- state ---
+	let myClientId = null; // memoized; my own records are filtered out
+	let buddyByVideoId = new Map(); // videoId -> Buddy ProgressRecord[] (latest per Buddy)
+	let currentVideoId = null; // active /watch video, or null off a watch page
+	let refreshToken = 0; // guards against out-of-order async refreshes
+	let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
+	let baselineReady = false; // skip toasts on the very first read (no false "joined")
 
-  injectStyle();
+	injectStyle();
 
-  // ---------------------------------------------------------------------------
-  // Data: fetch + cache the Buddies' records.
-  // ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Data: fetch + cache the Buddies' records.
+	// ---------------------------------------------------------------------------
 
-  /**
-   * GET every record under the configured Room Code and index the Buddies'
-   * (foreign clientId) by videoId — one latest record per Buddy per video. Bails
-   * to an empty cache when there is no code (Unpaired) or when this install is
-   * the locked-out 6th member (Room full — draw nothing). Server-side TTL
-   * already drops records older than 14 days, so no age filter is needed here.
-   */
-  async function refresh() {
-    const { code } = await YTB.getConfig();
-    if (!code) {
-      buddyByVideoId = new Map();
-      resetPresenceBaseline();
-      return;
-    }
-    myClientId = myClientId || (await YTB.ensureClientId());
-    const records = await YTB.getRecords(code);
-    const view = YTB.roomView(records, myClientId);
+	/**
+	 * GET every record under the configured Room Code and index the Buddies'
+	 * (foreign clientId) by videoId — one latest record per Buddy per video. Bails
+	 * to an empty cache when there is no code (Unpaired) or when this install is
+	 * the locked-out 6th member (Room full — draw nothing). Server-side TTL
+	 * already drops records older than 14 days, so no age filter is needed here.
+	 */
+	async function refresh() {
+		const { code } = await YTB.getConfig();
+		if (!code) {
+			buddyByVideoId = new Map();
+			resetPresenceBaseline();
+			return;
+		}
+		myClientId = myClientId || (await YTB.ensureClientId());
+		const records = await YTB.getRecords(code);
+		const view = YTB.roomView(records, myClientId);
+		await YTB.syncBuddyColors(
+			code,
+			view.buddies.map((buddy) => buddy.clientId),
+			records.ok,
+		);
 
-    // Toast new arrivals (presence OR progress). Diff against last refresh; the
-    // first read just seeds the baseline so existing Buddies never "join".
-    notePresence(view.buddies);
+		// Toast new arrivals (presence OR progress). Diff against last refresh; the
+		// first read just seeds the baseline so existing Buddies never "join".
+		notePresence(view.buddies);
 
-    // Locked out of a full Room: I'm not a member and 5 others already are.
-    if (view.locked) {
-      buddyByVideoId = new Map();
-      return;
-    }
+		// Locked out of a full Room: I'm not a member and 5 others already are.
+		if (view.locked) {
+			buddyByVideoId = new Map();
+			return;
+		}
 
-    // videoId -> (clientId -> latest record), then flattened to arrays. Presence
-    // rows have no videoId, so they never produce a marker (only a toast/roster).
-    const byVideo = new Map();
-    for (const r of records.progress) {
-      if (!r || r.clientId === myClientId || !r.videoId) continue;
-      let perBuddy = byVideo.get(r.videoId);
-      if (!perBuddy) {
-        perBuddy = new Map();
-        byVideo.set(r.videoId, perBuddy);
-      }
-      const prev = perBuddy.get(r.clientId);
-      if (!prev || r.updatedAt > prev.updatedAt) perBuddy.set(r.clientId, r);
-    }
-    const next = new Map();
-    for (const [videoId, perBuddy] of byVideo) {
-      next.set(videoId, Array.from(perBuddy.values()));
-    }
-    buddyByVideoId = next;
-  }
+		// videoId -> (clientId -> latest record), then flattened to arrays. Presence
+		// rows have no videoId, so they never produce a marker (only a toast/roster).
+		const byVideo = new Map();
+		for (const r of records.progress) {
+			if (!r || r.clientId === myClientId || !r.videoId) continue;
+			let perBuddy = byVideo.get(r.videoId);
+			if (!perBuddy) {
+				perBuddy = new Map();
+				byVideo.set(r.videoId, perBuddy);
+			}
+			const prev = perBuddy.get(r.clientId);
+			if (!prev || r.updatedAt > prev.updatedAt) perBuddy.set(r.clientId, r);
+		}
+		const next = new Map();
+		for (const [videoId, perBuddy] of byVideo) {
+			next.set(videoId, Array.from(perBuddy.values()));
+		}
+		buddyByVideoId = next;
+	}
 
-  // Reset the toast baseline when there is no code (so re-joining later doesn't
-  // replay every existing member as a fresh "joined").
-  function resetPresenceBaseline() {
-    knownBuddyIds = new Set();
-    baselineReady = false;
-  }
+	// Reset the toast baseline when there is no code (so re-joining later doesn't
+	// replay every existing member as a fresh "joined").
+	function resetPresenceBaseline() {
+		knownBuddyIds = new Set();
+		baselineReady = false;
+	}
 
-  // Diff the current foreign Buddies against the last seen set; toast any new
-  // clientId once the baseline has been established. `buddies` already excludes
-  // me and dedups by clientId (presence-only Buddies included).
-  function notePresence(buddies) {
-    const current = new Set();
-    for (const b of buddies) {
-      current.add(b.clientId);
-      if (baselineReady && !knownBuddyIds.has(b.clientId)) {
-        showToast(YTB.buddyName(b.clientId, b.name) + " joined");
-      }
-    }
-    knownBuddyIds = current;
-    baselineReady = true;
-  }
+	// Diff the current foreign Buddies against the last seen set; toast any new
+	// clientId once the baseline has been established. `buddies` already excludes
+	// me and dedups by clientId (presence-only Buddies included).
+	function notePresence(buddies) {
+		const current = new Set();
+		for (const b of buddies) {
+			current.add(b.clientId);
+			if (baselineReady && !knownBuddyIds.has(b.clientId)) {
+				showToast(YTB.buddyName(b.clientId, b.name) + ' joined');
+			}
+		}
+		knownBuddyIds = current;
+		baselineReady = true;
+	}
 
-  // ---------------------------------------------------------------------------
-  // Watch page: one colored marker per Buddy on the player progress bar.
-  // ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Watch page: one colored marker per Buddy on the player progress bar.
+	// ---------------------------------------------------------------------------
 
-  /**
-   * Draw (or refresh) a marker per Buddy on `.ytp-progress-bar` for `videoId`,
-   * each at the Buddy's position in that Buddy's color, with a hover tooltip.
-   * No-op when the bar isn't built yet (the player initializes async —
-   * ytb:mutation re-invokes us until it is). Keyed by clientId so markers
-   * survive re-renders (no flicker mid-hover); Buddies that left are removed.
-   * Overlapping positions are allowed to overlap.
-   * @param {string|null} videoId
-   */
-  function renderWatchMarker(videoId) {
-    const bar = document.querySelector(".ytp-progress-bar");
-    if (!bar) return; // player not ready yet — a later ytb:mutation retries
+	/**
+	 * Draw (or refresh) a marker per Buddy on `.ytp-progress-bar` for `videoId`,
+	 * each at the Buddy's position in that Buddy's color, with a hover tooltip.
+	 * No-op when the bar isn't built yet (the player initializes async —
+	 * ytb:mutation re-invokes us until it is). Keyed by clientId so markers
+	 * survive re-renders (no flicker mid-hover); Buddies that left are removed.
+	 * Overlapping positions are allowed to overlap.
+	 * @param {string|null} videoId
+	 */
+	function renderWatchMarker(videoId) {
+		const bar = document.querySelector('.ytp-progress-bar');
+		if (!bar) return; // player not ready yet — a later ytb:mutation retries
 
-    const records = videoId ? buddyByVideoId.get(videoId) : null;
-    const desired = new Map(); // clientId -> { fraction, record }
-    if (records) {
-      for (const r of records) {
-        const fraction = positionFraction(r);
-        if (fraction !== null) desired.set(r.clientId, { fraction, record: r });
-      }
-    }
+		const records = videoId ? buddyByVideoId.get(videoId) : null;
+		const desired = new Map(); // clientId -> { fraction, record }
+		if (records) {
+			for (const r of records) {
+				const fraction = positionFraction(r);
+				if (fraction !== null) desired.set(r.clientId, { fraction, record: r });
+			}
+		}
 
-    // Reconcile existing markers by clientId: keep the ones still wanted, drop
-    // the rest. Index them rather than querying per id, so an unusual clientId
-    // can never form a bad attribute selector.
-    const existing = new Map();
-    for (const marker of bar.querySelectorAll(":scope > ." + MARKER_CLASS)) {
-      const cid = marker.dataset.ytbCid;
-      if (desired.has(cid)) existing.set(cid, marker);
-      else marker.remove();
-    }
-    if (desired.size === 0) return;
+		// Reconcile existing markers by clientId: keep the ones still wanted, drop
+		// the rest. Index them rather than querying per id, so an unusual clientId
+		// can never form a bad attribute selector.
+		const existing = new Map();
+		for (const marker of bar.querySelectorAll(':scope > .' + MARKER_CLASS)) {
+			const cid = marker.dataset.ytbCid;
+			if (desired.has(cid)) existing.set(cid, marker);
+			else marker.remove();
+		}
+		if (desired.size === 0) return;
 
-    // The bar must establish a positioning context for the absolute markers.
-    if (getComputedStyle(bar).position === "static") {
-      bar.style.position = "relative";
-    }
+		// The bar must establish a positioning context for the absolute markers.
+		if (getComputedStyle(bar).position === 'static') {
+			bar.style.position = 'relative';
+		}
 
-    for (const [cid, { fraction, record }] of desired) {
-      let marker = existing.get(cid);
-      if (!marker) {
-        marker = document.createElement("div");
-        marker.className = MARKER_CLASS;
-        marker.dataset.ytbCid = cid;
-        const tooltip = document.createElement("div");
-        tooltip.className = TOOLTIP_CLASS;
-        marker.appendChild(tooltip);
-        bar.appendChild(marker);
-      }
-      marker.style.left = (fraction * 100).toFixed(3) + "%";
-      marker.style.background = YTB.buddyColor(cid);
-      const who = YTB.buddyName(record.clientId, record.name);
-      marker.querySelector("." + TOOLTIP_CLASS).textContent =
-        who + " · " + YTB.formatTime(record.timestamp);
-    }
-  }
+		for (const [cid, { fraction, record }] of desired) {
+			let marker = existing.get(cid);
+			if (!marker) {
+				marker = document.createElement('div');
+				marker.className = MARKER_CLASS;
+				marker.dataset.ytbCid = cid;
+				const tooltip = document.createElement('div');
+				tooltip.className = TOOLTIP_CLASS;
+				marker.appendChild(tooltip);
+				bar.appendChild(marker);
+			}
+			marker.style.left = (fraction * 100).toFixed(3) + '%';
+			marker.style.background = YTB.buddyColor(cid);
+			const who = YTB.buddyName(record.clientId, record.name);
+			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' · ' + YTB.formatTime(record.timestamp);
+		}
+	}
 
-  // ---------------------------------------------------------------------------
-  // Thumbnails: a single segmented bar per tile, one colored band per Buddy.
-  // Bands are sorted by position; each Buddy owns [previous Buddy's pos .. own
-  // pos] in their color. So with Alice @ 30% and Bob @ 70%, 0–30% is Alice's
-  // color and 30–70% is Bob's, and the fill stops at the furthest Buddy.
-  // ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Thumbnails: a single segmented bar per tile, one colored band per Buddy.
+	// Bands are sorted by position; each Buddy owns [previous Buddy's pos .. own
+	// pos] in their color. So with Alice @ 30% and Bob @ 70%, 0–30% is Alice's
+	// color and 30–70% is Bob's, and the fill stops at the furthest Buddy.
+	// ---------------------------------------------------------------------------
 
-  /**
-   * Overlay the segmented Buddy bar on every thumbnail tile whose video matches.
-   * Idempotent + recycle-safe: YouTube reuses tile DOM nodes for different
-   * videos as you scroll, so each pass re-keys the bar to the tile's CURRENT
-   * videoId and only rebuilds its bands when the video or the positions change
-   * (a signature guard) — frequent ytb:mutation passes never tear down a
-   * tooltip mid-hover.
-   */
-  function renderThumbnails() {
-    const anchors = document.querySelectorAll('a[href*="/watch?v="]');
-    for (const anchor of anchors) {
-      // Decorate only thumbnail anchors — the ones wrapping the tile image — so
-      // we never draw a bar across a video-title link. The image check is
-      // surface-agnostic: it matches both the classic `a#thumbnail` tiles and
-      // the newer `yt-lockup-view-model` tiles, whose anchors differ.
-      if (!anchor.querySelector("img")) continue;
+	/**
+	 * Overlay the segmented Buddy bar on every thumbnail tile whose video matches.
+	 * Idempotent + recycle-safe: YouTube reuses tile DOM nodes for different
+	 * videos as you scroll, so each pass re-keys the bar to the tile's CURRENT
+	 * videoId and only rebuilds its bands when the video or the positions change
+	 * (a signature guard) — frequent ytb:mutation passes never tear down a
+	 * tooltip mid-hover.
+	 */
+	function renderThumbnails() {
+		const anchors = document.querySelectorAll('a[href*="/watch?v="]');
+		for (const anchor of anchors) {
+			// Decorate only thumbnail anchors — the ones wrapping the tile image — so
+			// we never draw a bar across a video-title link. The image check is
+			// surface-agnostic: it matches both the classic `a#thumbnail` tiles and
+			// the newer `yt-lockup-view-model` tiles, whose anchors differ.
+			if (!anchor.querySelector('img')) continue;
 
-      const videoId = videoIdFromHref(anchor.getAttribute("href"));
-      const records = videoId ? buddyByVideoId.get(videoId) : null;
+			const videoId = videoIdFromHref(anchor.getAttribute('href'));
+			const records = videoId ? buddyByVideoId.get(videoId) : null;
 
-      // One band per Buddy with a computable position, sorted ascending. The
-      // clientId tiebreak keeps equal-position bands deterministic.
-      const segments = [];
-      if (records) {
-        for (const r of records) {
-          const fraction = positionFraction(r);
-          if (fraction !== null) {
-            segments.push({ cid: r.clientId, fraction, record: r });
-          }
-        }
-        segments.sort(
-          (a, b) => a.fraction - b.fraction || (a.cid < b.cid ? -1 : 1)
-        );
-      }
+			// One band per Buddy with a computable position, sorted ascending. The
+			// clientId tiebreak keeps equal-position bands deterministic.
+			const segments = [];
+			if (records) {
+				for (const r of records) {
+					const fraction = positionFraction(r);
+					if (fraction !== null) {
+						segments.push({ cid: r.clientId, fraction, record: r });
+					}
+				}
+				segments.sort((a, b) => a.fraction - b.fraction || (a.cid < b.cid ? -1 : 1));
+			}
 
-      let container = anchor.querySelector(":scope > ." + THUMB_BAR_CLASS);
+			let container = anchor.querySelector(':scope > .' + THUMB_BAR_CLASS);
 
-      if (segments.length === 0) {
-        if (container) container.remove();
-        delete anchor.dataset.ytbVid;
-        continue;
-      }
+			if (segments.length === 0) {
+				if (container) container.remove();
+				delete anchor.dataset.ytbVid;
+				continue;
+			}
 
-      // Rebuild bands only when the video or its positions changed.
-      const sig =
-        videoId +
-        "|" +
-        segments.map((s) => s.cid + ":" + s.fraction.toFixed(3)).join(",");
-      if (container && container.dataset.ytbSig === sig) continue;
+			// Rebuild bands only when the video or its positions changed.
+			const sig = videoId + '|' + segments.map((s) => s.cid + ':' + s.fraction.toFixed(3)).join(',');
+			if (container && container.dataset.ytbSig === sig) continue;
 
-      if (!container) {
-        // The anchor must establish a positioning context for the absolute bar.
-        if (getComputedStyle(anchor).position === "static") {
-          anchor.style.position = "relative";
-        }
-        container = document.createElement("div");
-        container.className = THUMB_BAR_CLASS;
-        anchor.appendChild(container);
-      }
-      container.textContent = ""; // clear old bands before rebuilding
-      let prev = 0;
-      for (const s of segments) {
-        const seg = document.createElement("div");
-        seg.className = THUMB_SEG_CLASS;
-        seg.style.left = (prev * 100).toFixed(3) + "%";
-        seg.style.width = ((s.fraction - prev) * 100).toFixed(3) + "%";
-        seg.style.background = YTB.buddyColor(s.cid);
-        const tooltip = document.createElement("div");
-        tooltip.className = TOOLTIP_CLASS;
-        const who = YTB.buddyName(s.record.clientId, s.record.name);
-        tooltip.textContent = who + " · " + YTB.formatTime(s.record.timestamp);
-        seg.appendChild(tooltip);
-        container.appendChild(seg);
-        prev = s.fraction;
-      }
-      container.dataset.ytbSig = sig;
-      anchor.dataset.ytbVid = videoId;
-    }
-  }
+			if (!container) {
+				// The anchor must establish a positioning context for the absolute bar.
+				if (getComputedStyle(anchor).position === 'static') {
+					anchor.style.position = 'relative';
+				}
+				container = document.createElement('div');
+				container.className = THUMB_BAR_CLASS;
+				anchor.appendChild(container);
+			}
+			container.textContent = ''; // clear old bands before rebuilding
+			let prev = 0;
+			for (const s of segments) {
+				const seg = document.createElement('div');
+				seg.className = THUMB_SEG_CLASS;
+				seg.style.left = (prev * 100).toFixed(3) + '%';
+				seg.style.width = ((s.fraction - prev) * 100).toFixed(3) + '%';
+				seg.style.background = YTB.buddyColor(s.cid);
+				const tooltip = document.createElement('div');
+				tooltip.className = TOOLTIP_CLASS;
+				const who = YTB.buddyName(s.record.clientId, s.record.name);
+				tooltip.textContent = who + ' · ' + YTB.formatTime(s.record.timestamp);
+				seg.appendChild(tooltip);
+				container.appendChild(seg);
+				prev = s.fraction;
+			}
+			container.dataset.ytbSig = sig;
+			anchor.dataset.ytbVid = videoId;
+		}
+	}
 
-  // ---------------------------------------------------------------------------
-  // Helpers.
-  // ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Helpers.
+	// ---------------------------------------------------------------------------
 
-  /**
-   * The clamped [0,1] watched fraction for a record, or null if it can't be
-   * computed (non-finite / non-positive duration).
-   * @param {{timestamp: number, duration: number}} record
-   * @returns {number|null}
-   */
-  function positionFraction(record) {
-    const t = Number(record.timestamp);
-    const d = Number(record.duration);
-    if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return null;
-    return Math.max(0, Math.min(1, t / d));
-  }
+	/**
+	 * The clamped [0,1] watched fraction for a record, or null if it can't be
+	 * computed (non-finite / non-positive duration).
+	 * @param {{timestamp: number, duration: number}} record
+	 * @returns {number|null}
+	 */
+	function positionFraction(record) {
+		const t = Number(record.timestamp);
+		const d = Number(record.duration);
+		if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return null;
+		return Math.max(0, Math.min(1, t / d));
+	}
 
-  /** Parse the `v=` videoId out of a /watch href, or null. */
-  function videoIdFromHref(href) {
-    if (!href) return null;
-    try {
-      const u = new URL(href, location.href);
-      return u.pathname === "/watch" ? u.searchParams.get("v") : null;
-    } catch {
-      return null;
-    }
-  }
+	/** Parse the `v=` videoId out of a /watch href, or null. */
+	function videoIdFromHref(href) {
+		if (!href) return null;
+		try {
+			const u = new URL(href, location.href);
+			return u.pathname === '/watch' ? u.searchParams.get('v') : null;
+		} catch {
+			return null;
+		}
+	}
 
-  /**
-   * Show a small auto-dismissing toast (e.g. "Silly Buddy joined"). Stacks in a
-   * fixed bottom-right container; each toast fades out after ~4s. Styled via the
-   * injected renderer stylesheet.
-   * @param {string} text
-   */
-  function showToast(text) {
-    let wrap = document.querySelector("." + TOAST_WRAP_CLASS);
-    if (!wrap) {
-      wrap = document.createElement("div");
-      wrap.className = TOAST_WRAP_CLASS;
-      (document.body || document.documentElement).appendChild(wrap);
-    }
-    const toast = document.createElement("div");
-    toast.className = TOAST_CLASS;
-    toast.textContent = text;
-    wrap.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add("show"));
-    setTimeout(() => {
-      toast.classList.remove("show");
-      setTimeout(() => toast.remove(), 250);
-    }, 4000);
-  }
+	/**
+	 * Show a small auto-dismissing toast (e.g. "Silly Buddy joined"). Stacks in a
+	 * fixed bottom-right container; each toast fades out after ~4s. Styled via the
+	 * injected renderer stylesheet.
+	 * @param {string} text
+	 */
+	function showToast(text) {
+		let wrap = document.querySelector('.' + TOAST_WRAP_CLASS);
+		if (!wrap) {
+			wrap = document.createElement('div');
+			wrap.className = TOAST_WRAP_CLASS;
+			(document.body || document.documentElement).appendChild(wrap);
+		}
+		const toast = document.createElement('div');
+		toast.className = TOAST_CLASS;
+		toast.textContent = text;
+		wrap.appendChild(toast);
+		requestAnimationFrame(() => toast.classList.add('show'));
+		setTimeout(() => {
+			toast.classList.remove('show');
+			setTimeout(() => toast.remove(), 250);
+		}, 4000);
+	}
 
-  /** Inject the renderer's CSS once (no separate stylesheet file). */
-  function injectStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const fallback = YTB.PALETTES.default[0]; // before a per-Buddy color is set
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = `
+	/** Inject the renderer's CSS once (no separate stylesheet file). */
+	function injectStyle() {
+		if (document.getElementById(STYLE_ID)) return;
+		const fallback = YTB.BUDDY_COLORS[0]; // before a per-Buddy color is set
+		const style = document.createElement('style');
+		style.id = STYLE_ID;
+		style.textContent = `
       .${MARKER_CLASS} {
         position: absolute;
         top: 0;
@@ -403,55 +402,47 @@
         transform: translateY(0);
       }
     `;
-    (document.head || document.documentElement).appendChild(style);
-  }
+		(document.head || document.documentElement).appendChild(style);
+	}
 
-  // ---------------------------------------------------------------------------
-  // Wiring: pure consumer of content.js's ytb:* events. Registered
-  // synchronously so the initial ytb:navigate (fired by content.js, loaded
-  // last) is received.
-  // ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// Wiring: pure consumer of content.js's ytb:* events. Registered
+	// synchronously so the initial ytb:navigate (fired by content.js, loaded
+	// last) is received.
+	// ---------------------------------------------------------------------------
 
-  document.addEventListener("ytb:navigate", async (e) => {
-    currentVideoId = (e.detail && e.detail.videoId) || null;
-    const token = ++refreshToken;
-    await refresh();
-    if (token !== refreshToken) return; // a newer navigate superseded this one
-    renderWatchMarker(currentVideoId);
-    renderThumbnails();
-  });
+	document.addEventListener('ytb:navigate', async (e) => {
+		currentVideoId = (e.detail && e.detail.videoId) || null;
+		const token = ++refreshToken;
+		await refresh();
+		if (token !== refreshToken) return; // a newer navigate superseded this one
+		renderWatchMarker(currentVideoId);
+		renderThumbnails();
+	});
 
-  document.addEventListener("ytb:mutation", () => {
-    // The feed lazy-loaded more tiles (and/or the player finished building).
-    // Use the cached records — no re-GET. Re-apply the markers too, since the
-    // progress bar may have only just appeared after the last navigate.
-    renderWatchMarker(currentVideoId);
-    renderThumbnails();
-  });
+	document.addEventListener('ytb:mutation', () => {
+		// The feed lazy-loaded more tiles (and/or the player finished building).
+		// Use the cached records — no re-GET. Re-apply the markers too, since the
+		// progress bar may have only just appeared after the last navigate.
+		renderWatchMarker(currentVideoId);
+		renderThumbnails();
+	});
 
-  // Buddy color palette: seed the synchronous cache from config, and recolor this
-  // tab live when the popup changes the palette (no reload, no re-GET — re-render
-  // the cached records in the new colors).
-  YTB.getConfig().then((c) => {
-    YTB._activePalette = c.palette;
-    renderWatchMarker(currentVideoId);
-    renderThumbnails();
-  });
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !changes.palette) return;
-    YTB._activePalette = changes.palette.newValue || "default";
-    renderWatchMarker(currentVideoId);
-    renderThumbnails();
-  });
+	chrome.storage.onChanged.addListener((changes, area) => {
+		if (area !== 'local' || !changes.buddyColors) return;
+		YTB._buddyColors = changes.buddyColors.newValue || {};
+		renderWatchMarker(currentVideoId);
+		renderThumbnails();
+	});
 
-  // Live updates: re-GET every ~60s so a Buddy who joins or moves shows up (and
-  // arrival toasts fire) without a navigation. ~1 GET/min per open tab. Uses the
-  // same refreshToken guard so a poll can't clobber a fresher navigate render.
-  setInterval(async () => {
-    const token = ++refreshToken;
-    await refresh();
-    if (token !== refreshToken) return;
-    renderWatchMarker(currentVideoId);
-    renderThumbnails();
-  }, PRESENCE_POLL_MS);
+	// Live updates: re-GET every ~60s so a Buddy who joins or moves shows up (and
+	// arrival toasts fire) without a navigation. ~1 GET/min per open tab. Uses the
+	// same refreshToken guard so a poll can't clobber a fresher navigate render.
+	setInterval(async () => {
+		const token = ++refreshToken;
+		await refresh();
+		if (token !== refreshToken) return;
+		renderWatchMarker(currentVideoId);
+		renderThumbnails();
+	}, PRESENCE_POLL_MS);
 })();
