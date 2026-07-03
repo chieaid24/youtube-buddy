@@ -38,5 +38,6 @@ npm-debug.log*
 # OS / editor
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
 
 PRD.md
