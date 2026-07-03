@@ -4,257 +4,6 @@
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
 // so it survives a browser restart. See CONTEXT.md for terminology.
 
-// Built-in word lists for client-side Room Code generation. A code is a two-word
-// "<adjective>-<animal>" slug (e.g. "silly-otters"), shown to users in its pretty
-// form "The Silly Otters" (see prettyCode). The animal word is stored already
-// plural. With ~120 * ~120 ≈ 14k+ combinations two independently generated codes
-// almost never collide.
-const CODE_ADJECTIVES = [
-	'silly',
-	'happy',
-	'snuggly',
-	'wobbly',
-	'sneaky',
-	'goofy',
-	'jolly',
-	'fuzzy',
-	'derpy',
-	'sleepy',
-	'grumpy',
-	'bouncy',
-	'squishy',
-	'dapper',
-	'giggly',
-	'wiggly',
-	'cuddly',
-	'perky',
-	'plucky',
-	'chirpy',
-	'cheeky',
-	'bubbly',
-	'peppy',
-	'spunky',
-	'cozy',
-	'mellow',
-	'dreamy',
-	'fluffy',
-	'nimble',
-	'zippy',
-	'snazzy',
-	'jaunty',
-	'merry',
-	'quirky',
-	'zesty',
-	'breezy',
-	'sunny',
-	'chunky',
-	'dinky',
-	'teeny',
-	'tiny',
-	'mini',
-	'dorky',
-	'nerdy',
-	'cosmic',
-	'groovy',
-	'funky',
-	'snappy',
-	'spicy',
-	'mighty',
-	'tubby',
-	'pudgy',
-	'chubby',
-	'doughy',
-	'sugary',
-	'sweet',
-	'snug',
-	'comfy',
-	'toasty',
-	'plushy',
-	'velvety',
-	'silky',
-	'downy',
-	'snoozy',
-	'drowsy',
-	'lively',
-	'frisky',
-	'dandy',
-	'jazzy',
-	'spiffy',
-	'nifty',
-	'cute',
-	'precious',
-	'darling',
-	'winsome',
-	'chipper',
-	'genial',
-	'jovial',
-	'blithe',
-	'gleeful',
-	'beaming',
-	'radiant',
-	'sparkly',
-	'twinkly',
-	'shiny',
-	'glossy',
-	'dappled',
-	'spotty',
-	'stripy',
-	'patchy',
-	'scruffy',
-	'shaggy',
-	'woolly',
-	'furry',
-	'feathery',
-	'whiskery',
-	'floppy',
-	'droopy',
-	'wonky',
-	'lumpy',
-	'bumpy',
-	'jumpy',
-	'hoppy',
-	'skippy',
-	'dashing',
-	'gallant',
-	'noble',
-	'regal',
-	'fancy',
-	'posh',
-	'swanky',
-	'classy',
-	'cheery',
-	'sprightly',
-	'chummy',
-	'friendly',
-	'kindly',
-	'gentle',
-	'tender',
-	'caring',
-];
-
-const CODE_ANIMALS = [
-	'otters',
-	'foxes',
-	'pandas',
-	'penguins',
-	'llamas',
-	'geese',
-	'wolves',
-	'mice',
-	'bunnies',
-	'kittens',
-	'puppies',
-	'ducks',
-	'ducklings',
-	'owls',
-	'hedgehogs',
-	'raccoons',
-	'koalas',
-	'sloths',
-	'quokkas',
-	'capybaras',
-	'hamsters',
-	'gerbils',
-	'chinchillas',
-	'ferrets',
-	'squirrels',
-	'chipmunks',
-	'beavers',
-	'badgers',
-	'moles',
-	'shrews',
-	'bats',
-	'hares',
-	'rabbits',
-	'lambs',
-	'piglets',
-	'calves',
-	'foals',
-	'ponies',
-	'donkeys',
-	'goats',
-	'sheep',
-	'alpacas',
-	'camels',
-	'yaks',
-	'bison',
-	'moose',
-	'elks',
-	'deer',
-	'fawns',
-	'reindeer',
-	'caribou',
-	'antelopes',
-	'gazelles',
-	'zebras',
-	'giraffes',
-	'elephants',
-	'rhinos',
-	'hippos',
-	'lions',
-	'tigers',
-	'leopards',
-	'cheetahs',
-	'jaguars',
-	'lynxes',
-	'bobcats',
-	'cougars',
-	'pumas',
-	'bears',
-	'wombats',
-	'dingoes',
-	'kangaroos',
-	'wallabies',
-	'platypuses',
-	'echidnas',
-	'possums',
-	'lemurs',
-	'monkeys',
-	'baboons',
-	'gibbons',
-	'orangutans',
-	'gorillas',
-	'chimps',
-	'meerkats',
-	'mongooses',
-	'armadillos',
-	'anteaters',
-	'porcupines',
-	'skunks',
-	'opossums',
-	'weasels',
-	'minks',
-	'stoats',
-	'martens',
-	'seals',
-	'walruses',
-	'dolphins',
-	'whales',
-	'narwhals',
-	'orcas',
-	'manatees',
-	'dugongs',
-	'turtles',
-	'tortoises',
-	'frogs',
-	'toads',
-	'newts',
-	'salamanders',
-	'geckos',
-	'iguanas',
-	'chameleons',
-	'lizards',
-	'snakes',
-	'crabs',
-	'lobsters',
-	'shrimps',
-	'octopuses',
-	'squids',
-	'jellyfish',
-	'seahorses',
-	'starfish',
-];
-
 const ROSTER_POLL_MS = 5_000;
 
 const el = {
@@ -275,6 +24,7 @@ const el = {
 	joinBack: document.getElementById('join-back'),
 	code: document.getElementById('code'),
 	copyCode: document.getElementById('copy-code'),
+	copyFeedback: document.getElementById('copy-feedback'),
 	leaveRoom: document.getElementById('leave-room'),
 	status: document.getElementById('status'),
 	statusText: document.getElementById('status-text'),
@@ -338,7 +88,7 @@ async function init() {
 	// Route to the right view: an active code → Connected (refresh status with a
 	// real GET); otherwise the chooser (true first run, nothing to Cancel back to).
 	if (config.code) {
-		showConnected(config.code, config.codeOrigin);
+		showConnected(config.code);
 		// Re-assert presence on open: refreshes my TTL and backfills installs that
 		// predate the presence feature.
 		await YTB.assertPresence(config.code);
@@ -381,9 +131,9 @@ function wireHandlers() {
 	// Chooser → Cancel: only reachable when a code already exists (via "Change
 	// code"); return to Connected without touching the active code.
 	el.chooserCancel.addEventListener('click', async () => {
-		const { code, codeOrigin } = await YTB.getConfig();
+		const { code } = await YTB.getConfig();
 		if (!code) return; // No active code — nothing to cancel back to.
-		showConnected(code, codeOrigin);
+		showConnected(code);
 		await refreshStatus(code);
 	});
 
@@ -397,19 +147,15 @@ function wireHandlers() {
 	// Join → Back: abandon entry, return to the chooser (active code untouched).
 	el.joinBack.addEventListener('click', () => showView('chooser'));
 
-	// Connected → Copy: copy the pretty form ("The Silly Otters") to the clipboard;
-	// the clipboard icon flips to a checkmark for 1.5s as feedback. Shown for both
-	// created and joined codes.
+	// Connected → Copy: copy the pretty form and announce anchored success/failure
+	// feedback. The button is native keyboard-accessible.
 	el.copyCode.addEventListener('click', async () => {
 		const { code } = await YTB.getConfig();
 		if (!code) return;
-		try {
-			await navigator.clipboard.writeText(prettyCode(code));
-		} catch {
-			return; // Clipboard blocked — no feedback, no crash.
-		}
-		el.copyCode.classList.add('copied');
-		setTimeout(() => el.copyCode.classList.remove('copied'), 1500);
+		await YTBRoomCode.copy({
+			text: YTBRoomCode.pretty(code),
+			feedback: el.copyFeedback,
+		});
 	});
 
 	// Connected → Leave room: the explicit "leave this room" action. Always
@@ -495,9 +241,9 @@ function commitName() {
 async function createAndCommit() {
 	const { code: oldCode } = await YTB.getConfig();
 	const code = generateCode();
-	await YTB.setConfig({ code, codeOrigin: 'created' });
+	await YTB.setConfig({ code });
 	if (oldCode && oldCode !== code) await YTB.deleteMember(oldCode, myClientId);
-	showConnected(code, 'created');
+	showConnected(code);
 	await YTB.assertPresence(code);
 	await refreshStatus(code);
 }
@@ -509,29 +255,15 @@ async function joinAndCommit() {
 	const code = YTB.normalizeCode(el.joinInput.value);
 	if (!code) return; // Empty — stay on the entry view.
 	const { code: oldCode } = await YTB.getConfig();
-	await YTB.setConfig({ code, codeOrigin: 'joined' });
+	await YTB.setConfig({ code });
 	if (oldCode && oldCode !== code) await YTB.deleteMember(oldCode, myClientId);
-	showConnected(code, 'joined');
+	showConnected(code);
 	await YTB.assertPresence(code);
 	await refreshStatus(code);
 }
 
 function generateCode() {
-	const pick = (list) => list[Math.floor(Math.random() * list.length)];
-	const adjective = pick(CODE_ADJECTIVES);
-	const animal = pick(CODE_ANIMALS);
-	return YTB.normalizeCode(`${adjective}-${animal}`);
-}
-
-// "silly-otters" → "The Silly Otters": title-case each hyphenated word and
-// prepend "The ". The inverse (pretty → slug) is YTB.normalizeCode, so a Buddy
-// can paste either form on Join.
-function prettyCode(slug) {
-	const words = String(slug)
-		.split('-')
-		.filter(Boolean)
-		.map((w) => w.charAt(0).toUpperCase() + w.slice(1));
-	return 'The ' + words.join(' ');
+	return YTB.normalizeCode(YTBRoomCode.generate());
 }
 
 // --- confirmation dialog -----------------------------------------------------
@@ -585,7 +317,7 @@ async function setSharing(on) {
 // clearing local state so the Room slot and Buddy markers are released.
 async function clearCodeAndChoose() {
 	const { code: oldCode } = await YTB.getConfig();
-	await YTB.setConfig({ code: '', codeOrigin: '' });
+	await YTB.setConfig({ code: '' });
 	if (oldCode) await YTB.deleteMember(oldCode, myClientId);
 	el.code.textContent = '';
 	showView('chooser');
@@ -627,8 +359,8 @@ function showView(name) {
 
 // Render the Connected view for an active code, showing its pretty label. The
 // copy button is always available (created or joined).
-function showConnected(code, codeOrigin) {
-	el.code.textContent = prettyCode(code);
+function showConnected(code) {
+	el.code.textContent = YTBRoomCode.pretty(code);
 	showView('connected');
 }
 
