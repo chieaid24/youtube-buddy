@@ -8,6 +8,13 @@ type Feedback = {
 	};
 };
 
+type Button = {
+	classList: {
+		toggle(name: string, force: boolean): void;
+		remove(name: string): void;
+	};
+};
+
 describe('Room Code helpers', () => {
 	beforeAll(async () => {
 		Object.assign(globalThis, { window: globalThis });
@@ -50,7 +57,7 @@ describe('Room Code helpers', () => {
 	});
 
 	it.each([
-		['success', vi.fn().mockResolvedValue(undefined), 'Copied', false, true],
+		['success', vi.fn().mockResolvedValue(undefined), 'Copied!', false, true],
 		['failure', vi.fn().mockRejectedValue(new Error('denied')), 'Could not copy', true, false],
 	])('shows and clears anchored copy %s feedback', async (_case, writeText, message, isError, expected) => {
 		vi.useFakeTimers();
@@ -71,6 +78,47 @@ describe('Room Code helpers', () => {
 		await vi.advanceTimersByTimeAsync(1500);
 		expect(feedback.textContent).toBe('');
 	});
+
+	it('crossfades the copy button into a checkmark on success, reverting after the feedback duration', async () => {
+		vi.useFakeTimers();
+		const feedback: Feedback = {
+			textContent: '',
+			classList: { toggle: vi.fn(), remove: vi.fn() },
+		};
+		const buttonClasses = new Set<string>();
+		const button: Button = {
+			classList: {
+				toggle: (name, force) => (force ? buttonClasses.add(name) : buttonClasses.delete(name)),
+				remove: (name) => void buttonClasses.delete(name),
+			},
+		};
+		const writeText = vi.fn().mockResolvedValue(undefined);
+
+		await window.YTBRoomCode.copy({ text: 'The Dancing Otters', feedback, button, writeText });
+		expect(buttonClasses.has('is-copied')).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(1500);
+		expect(buttonClasses.has('is-copied')).toBe(false);
+	});
+
+	it('leaves the copy button unchanged on a failed copy', async () => {
+		vi.useFakeTimers();
+		const feedback: Feedback = {
+			textContent: '',
+			classList: { toggle: vi.fn(), remove: vi.fn() },
+		};
+		const buttonClasses = new Set<string>();
+		const button: Button = {
+			classList: {
+				toggle: (name, force) => (force ? buttonClasses.add(name) : buttonClasses.delete(name)),
+				remove: (name) => void buttonClasses.delete(name),
+			},
+		};
+		const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+
+		await window.YTBRoomCode.copy({ text: 'The Dancing Otters', feedback, button, writeText });
+		expect(buttonClasses.has('is-copied')).toBe(false);
+	});
 });
 
 declare global {
@@ -83,6 +131,7 @@ declare global {
 			copy(options: {
 				text: string;
 				feedback: Feedback;
+				button?: Button;
 				writeText?: (text: string) => Promise<void>;
 				durationMs?: number;
 			}): Promise<boolean>;

@@ -156,6 +156,7 @@ function wireHandlers() {
 		await YTBRoomCode.copy({
 			text,
 			feedback: el.copyFeedback,
+			button: el.copyCode,
 		});
 	});
 

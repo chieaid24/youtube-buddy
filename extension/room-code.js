@@ -128,7 +128,7 @@
 
 	const feedbackTimers = new WeakMap();
 
-	async function copy({ text, feedback, writeText, durationMs = 1500 }) {
+	async function copy({ text, feedback, button, writeText, durationMs = 1500 }) {
 		const previousTimer = feedbackTimers.get(feedback);
 		if (previousTimer) clearTimeout(previousTimer);
 		const copyText = writeText || navigator.clipboard.writeText.bind(navigator.clipboard);
@@ -141,11 +141,13 @@
 			// The visible failure message is the complete error handling contract.
 		}
 
-		feedback.textContent = succeeded ? 'Copied' : 'Could not copy';
+		feedback.textContent = succeeded ? 'Copied!' : 'Could not copy';
 		feedback.classList.toggle('is-error', !succeeded);
+		if (button) button.classList.toggle('is-copied', succeeded);
 		const timer = setTimeout(() => {
 			feedback.textContent = '';
 			feedback.classList.remove('is-error');
+			if (button) button.classList.remove('is-copied');
 			feedbackTimers.delete(feedback);
 		}, durationMs);
 		feedbackTimers.set(feedback, timer);
