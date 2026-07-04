@@ -21,6 +21,7 @@ const el = {
 	chooserCancel: document.getElementById('chooser-cancel'),
 	joinInput: document.getElementById('join-input'),
 	joinSubmit: document.getElementById('join-submit'),
+	joinFeedback: document.getElementById('join-feedback'),
 	joinBack: document.getElementById('join-back'),
 	code: document.getElementById('code'),
 	copyCode: document.getElementById('copy-code'),
@@ -135,7 +136,10 @@ function wireHandlers() {
 	// Join → submit: normalize (trim + lowercase) and commit verbatim. Pure match —
 	// no word-list validation; pairing succeeds only if it matches a real code.
 	el.joinSubmit.addEventListener('click', () => joinAndCommit());
-	el.joinInput.addEventListener('input', updateJoinSubmit);
+	el.joinInput.addEventListener('input', () => {
+		clearJoinError();
+		updateJoinSubmit();
+	});
 	el.joinInput.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') joinAndCommit();
 	});
@@ -243,12 +247,17 @@ async function createAndCommit() {
 	await refreshStatus(code);
 }
 
-// Join flow: commit the typed code (normalized), assert my presence, and refresh
-// status with a real GET — that GET both checks the match AND now surfaces an
-// already-present owner (who may not have watched anything yet).
+// Join flow: verify that the typed Room already has a member, then commit it,
+// assert my presence, and refresh status. The existence read must happen before
+// any local config or old-Room membership changes.
 async function joinAndCommit() {
 	const code = YTB.normalizeCode(el.joinInput.value);
 	if (!code) return; // Empty — stay on the entry view.
+	const records = await YTB.getRecords(code);
+	if (!YTB.roomExists(records)) {
+		showJoinError("This room doesn't exist yet");
+		return;
+	}
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code });
 	if (oldCode && oldCode !== code) {
@@ -258,6 +267,16 @@ async function joinAndCommit() {
 	showConnected(code);
 	await YTB.assertPresence(code);
 	await refreshStatus(code);
+}
+
+function showJoinError(message) {
+	el.joinFeedback.textContent = message;
+	el.joinFeedback.classList.add('is-error');
+}
+
+function clearJoinError() {
+	el.joinFeedback.textContent = '';
+	el.joinFeedback.classList.remove('is-error');
 }
 
 function generateCode() {
@@ -348,6 +367,7 @@ function hideConfirm() {
 // Show exactly one of the three Room Code views. The Cancel link in the chooser
 // only makes sense when an active code exists (reached via "Leave room").
 function showView(name) {
+	if (name === 'join') clearJoinError();
 	el.viewChooser.hidden = name !== 'chooser';
 	el.viewJoin.hidden = name !== 'join';
 	el.viewConnected.hidden = name !== 'connected';
