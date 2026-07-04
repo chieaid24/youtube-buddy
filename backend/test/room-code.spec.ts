@@ -51,6 +51,44 @@ describe('Room Code helpers', () => {
 		expect(descriptors).not.toEqual(expect.arrayContaining(['grumpy', 'derpy', 'dorky', 'pudgy']));
 	});
 
+	it('returns the first free generated Room Code without retrying', async () => {
+		const random = vi.fn().mockReturnValue(0);
+		const checkTaken = vi.fn().mockResolvedValue('free');
+
+		await expect(window.YTBRoomCode.generateAvailable({ random, checkTaken })).resolves.toBe('silly-otters');
+		expect(checkTaken).toHaveBeenCalledTimes(1);
+	});
+
+	it('retries collisions until a generated Room Code is free', async () => {
+		const values = [0, 0, 0.03, 0.03, 0.06, 0.06];
+		const checkTaken = vi.fn().mockResolvedValueOnce('taken').mockResolvedValueOnce('taken').mockResolvedValueOnce('free');
+
+		await expect(window.YTBRoomCode.generateAvailable({ random: () => values.shift()!, checkTaken })).resolves.toBe('snuggly-penguins');
+		expect(checkTaken).toHaveBeenCalledTimes(3);
+	});
+
+	it('adds an unchecked three-digit suffix after three collisions', async () => {
+		const values = [0, 0, 0, 0, 0, 0, 0.5];
+		const checkTaken = vi.fn().mockResolvedValue('taken');
+
+		await expect(window.YTBRoomCode.generateAvailable({ random: () => values.shift()!, checkTaken })).resolves.toBe('silly-otters-550');
+		expect(checkTaken).toHaveBeenCalledTimes(3);
+	});
+
+	it('aborts immediately when a later availability check fails', async () => {
+		const checkTaken = vi.fn().mockResolvedValueOnce('taken').mockResolvedValueOnce('failed');
+
+		await expect(window.YTBRoomCode.generateAvailable({ checkTaken })).rejects.toBeInstanceOf(window.YTBRoomCode.CheckFailedError);
+		expect(checkTaken).toHaveBeenCalledTimes(2);
+	});
+
+	it('turns a thrown availability check into the distinct failure signal', async () => {
+		const checkTaken = vi.fn().mockRejectedValue(new Error('network down'));
+
+		await expect(window.YTBRoomCode.generateAvailable({ checkTaken })).rejects.toBeInstanceOf(window.YTBRoomCode.CheckFailedError);
+		expect(checkTaken).toHaveBeenCalledTimes(1);
+	});
+
 	it('formats any normalized slug as a pretty Room Code', () => {
 		expect(window.YTBRoomCode.pretty('dancing-otters')).toBe('The Dancing Otters');
 		expect(window.YTBRoomCode.pretty('custom-code-outside-vocabulary')).toBe('The Custom Code Outside Vocabulary');
@@ -124,9 +162,14 @@ describe('Room Code helpers', () => {
 declare global {
 	interface Window {
 		YTBRoomCode: {
+			CheckFailedError: new () => Error;
 			DESCRIPTORS: readonly string[];
 			ANIMALS: readonly string[];
 			generate(random?: () => number): string;
+			generateAvailable(options: {
+				random?: () => number;
+				checkTaken(code: string): Promise<'taken' | 'free' | 'failed'>;
+			}): Promise<string>;
 			pretty(slug: string): string;
 			copy(options: {
 				text: string;

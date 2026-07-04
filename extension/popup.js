@@ -16,6 +16,7 @@ const el = {
 	viewJoin: document.getElementById('view-join'),
 	viewConnected: document.getElementById('view-connected'),
 	chooseCreate: document.getElementById('choose-create'),
+	createFeedback: document.getElementById('create-feedback'),
 	chooseJoin: document.getElementById('choose-join'),
 	chooserCancel: document.getElementById('chooser-cancel'),
 	joinInput: document.getElementById('join-input'),
@@ -244,8 +245,25 @@ function commitName() {
 // Buddy who joins later even before I watch anything), then land on Connected.
 // The GET shows me as the lone member → "No buddy joined yet :(" with a live dot.
 async function createAndCommit() {
+	clearCreateError();
 	const { code: oldCode } = await YTB.getConfig();
-	const code = generateCode();
+	let code;
+	try {
+		code = await YTBRoomCode.generateAvailable({
+			checkTaken: async (candidate) => {
+				const records = await YTB.getRecords(candidate);
+				if (!records.ok) return 'failed';
+				return records.progress.length > 0 || records.presence.length > 0 ? 'taken' : 'free';
+			},
+		});
+	} catch (error) {
+		if (error instanceof YTBRoomCode.CheckFailedError) {
+			showCreateError("Couldn't reach the server -- try again.");
+			return;
+		}
+		throw error;
+	}
+	code = YTB.normalizeCode(code);
 	await YTB.setConfig({ code });
 	if (oldCode && oldCode !== code) {
 		await YTB.deleteMember(oldCode, myClientId);
@@ -254,6 +272,16 @@ async function createAndCommit() {
 	showConnected(code);
 	await YTB.assertPresence(code);
 	await refreshStatus(code);
+}
+
+function showCreateError(message) {
+	el.createFeedback.textContent = message;
+	el.createFeedback.classList.add('is-error');
+}
+
+function clearCreateError() {
+	el.createFeedback.textContent = '';
+	el.createFeedback.classList.remove('is-error');
 }
 
 // Join flow: verify that the typed Room already has a member, then commit it,
@@ -286,10 +314,6 @@ function showJoinError(message) {
 function clearJoinError() {
 	el.joinFeedback.textContent = '';
 	el.joinFeedback.classList.remove('is-error');
-}
-
-function generateCode() {
-	return YTB.normalizeCode(YTBRoomCode.generate());
 }
 
 // --- confirmation dialog -----------------------------------------------------
@@ -377,6 +401,7 @@ function hideConfirm() {
 // only makes sense when an active code exists (reached via "Leave room").
 function showView(name) {
 	if (name === 'join') clearJoinError();
+	if (name !== 'chooser') clearCreateError();
 	el.viewChooser.hidden = name !== 'chooser';
 	el.viewJoin.hidden = name !== 'join';
 	el.viewConnected.hidden = name !== 'connected';
