@@ -111,10 +111,10 @@ const YTB = {
 	 * clientId). The server returns `{ progress, presence }`; on any failure this
 	 * resolves to empty arrays so callers never have to null-check.
 	 * @param {string} code Room Code (already normalized).
-	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>}>}
+	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>, notes: Array<{id: string, clientId: string, name: string, videoId: string, timestamp: number, kind: string, body: string, spoiler: boolean, createdAt: number}>}>}
 	 */
 	async getRecords(code) {
-		const empty = { progress: [], presence: [], ok: false };
+		const empty = { progress: [], presence: [], notes: [], ok: false };
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) return empty;
@@ -122,10 +122,25 @@ const YTB = {
 			return {
 				progress: Array.isArray(data && data.progress) ? data.progress : [],
 				presence: Array.isArray(data && data.presence) ? data.presence : [],
+				notes: Array.isArray(data && data.notes) ? data.notes : [],
 				ok: true,
 			};
 		} catch {
 			return empty;
+		}
+	},
+
+	/** Delete one of this install's Notes. Best-effort and ownership-checked by the server. */
+	async deleteNote(code, clientId, id) {
+		if (!code || !clientId || !id) return false;
+		try {
+			const query = new URLSearchParams({ code, clientId, id });
+			const res = await fetch(YTB.BACKEND_URL + '/notes?' + query, {
+				method: 'DELETE',
+			});
+			return res.ok ? { ok: true } : false;
+		} catch {
+			return false;
 		}
 	},
 
@@ -323,12 +338,12 @@ const YTB = {
 	},
 
 	/**
-	 * Reduce the structured `{ progress, presence }` records (mine AND the
+	 * Reduce the structured `{ progress, presence, notes }` records (mine AND the
 	 * Buddies') into a Room view from my perspective. A Buddy is any FOREIGN
-	 * clientId appearing in EITHER set: their latest Progress Record (carries a
+	 * clientId appearing in any set: their latest Progress Record (carries a
 	 * position) is preferred, else their presence row ("joined", no position). The
-	 * Room is capped at MAX_MEMBERS distinct Client IDs across both sets.
-	 * @param {{progress: Array<object>, presence: Array<object>}} records
+	 * Room is capped at MAX_MEMBERS distinct Client IDs across all three sets.
+	 * @param {{progress: Array<object>, presence: Array<object>, notes?: Array<object>}} records
 	 * @param {string} myClientId
 	 * @returns {{buddies: Array<object>, iAmMember: boolean, locked: boolean}}
 	 *   buddies — one entry per distinct foreign Buddy, newest-first by updatedAt.
@@ -339,10 +354,12 @@ const YTB = {
 	roomView(records, myClientId) {
 		const progress = (records && records.progress) || [];
 		const presence = (records && records.presence) || [];
+		const notes = (records && records.notes) || [];
 
 		const latestByBuddy = new Map(); // clientId -> latest progress record
 		const presenceByBuddy = new Map(); // clientId -> presence row
-		const memberIds = new Set(); // distinct clientIds across BOTH sets (for the cap)
+		const noteByBuddy = new Map(); // clientId -> latest Note
+		const memberIds = new Set(); // distinct clientIds across all sets (for the cap)
 		let iAmMember = false;
 
 		for (const r of progress) {
@@ -364,21 +381,38 @@ const YTB = {
 			}
 			presenceByBuddy.set(p.clientId, p);
 		}
+		for (const note of notes) {
+			if (!note || !note.clientId) continue;
+			memberIds.add(note.clientId);
+			if (note.clientId === myClientId) {
+				iAmMember = true;
+				continue;
+			}
+			const prev = noteByBuddy.get(note.clientId);
+			if (!prev || note.createdAt > prev.createdAt) noteByBuddy.set(note.clientId, note);
+		}
 
 		// One entry per foreign Buddy: prefer their progress record (has a position),
 		// else a presence-only row (joined, no videoId/timestamp).
-		const buddyIds = new Set([...latestByBuddy.keys(), ...presenceByBuddy.keys()]);
+		const buddyIds = new Set([...latestByBuddy.keys(), ...presenceByBuddy.keys(), ...noteByBuddy.keys()]);
 		const buddies = [];
 		for (const cid of buddyIds) {
 			const prog = latestByBuddy.get(cid);
 			if (prog) {
 				buddies.push(prog);
-			} else {
+			} else if (presenceByBuddy.has(cid)) {
 				const p = presenceByBuddy.get(cid);
 				buddies.push({
 					clientId: p.clientId,
 					name: p.name,
 					updatedAt: p.updatedAt,
+				});
+			} else {
+				const note = noteByBuddy.get(cid);
+				buddies.push({
+					clientId: note.clientId,
+					name: note.name,
+					updatedAt: note.createdAt,
 				});
 			}
 		}
