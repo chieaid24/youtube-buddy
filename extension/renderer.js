@@ -38,6 +38,7 @@
 	const TOAST_CLASS = 'ytb-toast'; // one "<Buddy> joined" toast
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
+	const NOTE_POPUP_MAX_DELTA_SECONDS = 2; // larger jumps are seeks, not playback
 
 	// --- state ---
 	let myClientId = null; // memoized; my own records are filtered out
@@ -48,6 +49,8 @@
 	let refreshToken = 0; // guards against out-of-order async refreshes
 	let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
 	let baselineReady = false; // skip toasts on the very first read (no false "joined")
+	let lastPlaybackTime = null; // previous timeupdate for natural Note crossings
+	let poppedNoteIds = new Set(); // once per Note for this video-open
 
 	injectStyle();
 
@@ -414,6 +417,34 @@
 		}, 4000);
 	}
 
+	/** Show each Note crossed by ordinary forward playback once per video-open. */
+	function popCrossedNotes(video) {
+		const currentTime = Number(video.currentTime);
+		if (!currentVideoId || !Number.isFinite(currentTime)) {
+			lastPlaybackTime = null;
+			return;
+		}
+
+		const previousTime = lastPlaybackTime;
+		lastPlaybackTime = currentTime;
+		if (
+			previousTime === null ||
+			video.seeking ||
+			currentTime <= previousTime ||
+			currentTime - previousTime > NOTE_POPUP_MAX_DELTA_SECONDS
+		) {
+			return;
+		}
+
+		for (const note of notesByVideoId.get(currentVideoId) || []) {
+			const timestamp = Number(note.timestamp);
+			if (!Number.isFinite(timestamp) || timestamp <= previousTime || timestamp > currentTime || poppedNoteIds.has(note.id)) continue;
+			poppedNoteIds.add(note.id);
+			const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
+			showToast(who + ' - ' + note.body);
+		}
+	}
+
 	/** Inject the renderer's CSS once (no separate stylesheet file). */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
@@ -540,6 +571,8 @@
 
 	document.addEventListener('ytb:navigate', async (e) => {
 		currentVideoId = (e.detail && e.detail.videoId) || null;
+		lastPlaybackTime = null;
+		poppedNoteIds = new Set();
 		const token = ++refreshToken;
 		await refresh();
 		if (token !== refreshToken) return; // a newer navigate superseded this one
@@ -577,12 +610,22 @@
 		renderThumbnails();
 	}, PRESENCE_POLL_MS);
 
-	// Spoiler state follows the active playhead and naturally resets when SPA
-	// navigation swaps or seeks the video back to the beginning.
+	// Spoiler state follows the active playhead. Note pop-ups only follow small,
+	// natural forward crossings; seeking explicitly rebases the crossing window.
+	document.addEventListener(
+		'seeking',
+		(event) => {
+			if (event.target instanceof HTMLVideoElement) lastPlaybackTime = Number(event.target.currentTime);
+		},
+		true,
+	);
+
 	document.addEventListener(
 		'timeupdate',
 		(event) => {
-			if (event.target instanceof HTMLVideoElement) renderWatchNotes(currentVideoId);
+			if (!(event.target instanceof HTMLVideoElement)) return;
+			renderWatchNotes(currentVideoId);
+			popCrossedNotes(event.target);
 		},
 		true,
 	);
