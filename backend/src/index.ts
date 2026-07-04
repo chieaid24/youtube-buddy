@@ -15,6 +15,18 @@ interface PresenceBody {
 	name: string;
 }
 
+interface NoteBody {
+	clientId: string;
+	name: string;
+	videoId: string;
+	timestamp: number;
+	kind: 'text' | 'emoji';
+	body: string;
+	spoiler: boolean;
+}
+
+export const NOTE_EMOJIS = ['\u{1F44D}', '\u{1F602}', '\u{1F62E}', '\u{2764}\u{FE0F}', '\u{1F525}', '\u{1F44F}'] as const;
+
 // Progress Records age out 14 days after their last write. Active videos keep
 // getting rewritten so they never expire; abandoned ones drop, which also
 // bounds the GET prefix scan. Presence Records share the same TTL.
@@ -84,6 +96,55 @@ export default {
 			return json({ ok: true });
 		}
 
+		if (req.method === 'POST' && path === '/notes') {
+			const body = (await req.json()) as Partial<NoteBody>;
+			const error = validateNote(body);
+			if (error) {
+				return json({ error }, 400);
+			}
+
+			const members = await currentMembers(env, prefix);
+			if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+				return json({ error: 'room full' }, 409);
+			}
+
+			const id = crypto.randomUUID();
+			const record = {
+				id,
+				clientId: body.clientId,
+				name: typeof body.name === 'string' ? body.name : '',
+				videoId: body.videoId,
+				timestamp: body.timestamp,
+				kind: body.kind,
+				body: body.body,
+				spoiler: body.spoiler ?? false,
+				createdAt: Date.now(),
+			};
+			await env.PROGRESS.put(`${prefix}note:${body.clientId}:${body.videoId}:${id}`, JSON.stringify(record), {
+				expirationTtl: TTL_SECONDS,
+			});
+			return json({ ok: true, id });
+		}
+
+		if (req.method === 'DELETE' && path === '/notes') {
+			const clientId = url.searchParams.get('clientId');
+			const id = url.searchParams.get('id');
+			if (!clientId || !id) {
+				return json({ error: `missing ${!clientId ? 'clientId' : 'id'}` }, 400);
+			}
+
+			const key = await findNoteKey(env, prefix, id);
+			if (!key) return json({ ok: true });
+			const raw = await env.PROGRESS.get(key);
+			if (raw === null) return json({ ok: true });
+			const note = JSON.parse(raw) as { clientId?: unknown };
+			if (note.clientId !== clientId) {
+				return json({ error: 'forbidden' }, 403);
+			}
+			await env.PROGRESS.delete(key);
+			return json({ ok: true });
+		}
+
 		if (req.method === 'POST' && path === '/') {
 			const body = (await req.json()) as Partial<ProgressBody>;
 			const error = validate(body);
@@ -123,15 +184,16 @@ export default {
 			const list = await env.PROGRESS.list({ prefix });
 			const progress: unknown[] = [];
 			const presence: unknown[] = [];
+			const notes: unknown[] = [];
 			await Promise.all(
 				list.keys.map(async (k) => {
 					const value = await env.PROGRESS.get(k.name);
 					if (value === null) return;
-					const isPresence = k.name.slice(prefix.length).split(':')[0] === 'presence';
-					(isPresence ? presence : progress).push(JSON.parse(value));
+					const kind = k.name.slice(prefix.length).split(':')[0];
+					(kind === 'presence' ? presence : kind === 'note' ? notes : progress).push(JSON.parse(value));
 				}),
 			);
-			return json({ progress, presence });
+			return json({ progress, presence, notes });
 		}
 
 		return json({ error: 'method not allowed' }, 405);
@@ -151,26 +213,40 @@ async function currentMembers(env: Env, prefix: string): Promise<Set<string>> {
 	const members = new Set<string>();
 	for (const k of existing.keys) {
 		const parts = k.name.slice(prefix.length).split(':');
-		members.add(parts[0] === 'presence' ? parts[1] : parts[0]);
+		members.add(parts[0] === 'presence' || parts[0] === 'note' ? parts[1] : parts[0]);
 	}
 	return members;
 }
 
 async function deleteMember(env: Env, prefix: string, clientId: string): Promise<void> {
-	const progressPrefix = `${prefix}${clientId}:`;
+	await deleteKeysWithPrefix(env, `${prefix}${clientId}:`);
+	await env.PROGRESS.delete(`${prefix}presence:${clientId}`);
+	await deleteKeysWithPrefix(env, `${prefix}note:${clientId}:`);
+}
+
+async function deleteKeysWithPrefix(env: Env, prefix: string): Promise<void> {
 	let cursor: string | undefined;
 
 	do {
 		const page = await env.PROGRESS.list({
-			prefix: progressPrefix,
+			prefix,
 			cursor,
 			limit: 500,
 		});
 		await Promise.all(page.keys.map(({ name }) => env.PROGRESS.delete(name)));
 		cursor = page.list_complete ? undefined : page.cursor;
 	} while (cursor);
+}
 
-	await env.PROGRESS.delete(`${prefix}presence:${clientId}`);
+async function findNoteKey(env: Env, prefix: string, id: string): Promise<string | null> {
+	let cursor: string | undefined;
+	do {
+		const page = await env.PROGRESS.list({ prefix: `${prefix}note:`, cursor });
+		const match = page.keys.find(({ name }) => name.endsWith(`:${id}`));
+		if (match) return match.name;
+		cursor = page.list_complete ? undefined : page.cursor;
+	} while (cursor);
+	return null;
 }
 
 // Returns an error message for an invalid POST body, or null if it is valid.
@@ -188,6 +264,30 @@ function validate(body: Partial<ProgressBody>): string | null {
 		if (typeof body[field] !== 'number' || !Number.isFinite(body[field])) {
 			return `missing or invalid field: ${field}`;
 		}
+	}
+	return null;
+}
+
+function validateNote(body: Partial<NoteBody>): string | null {
+	for (const field of ['clientId', 'videoId', 'body'] as const) {
+		if (typeof body[field] !== 'string' || body[field] === '') {
+			return `missing or invalid field: ${field}`;
+		}
+	}
+	if (typeof body.timestamp !== 'number' || !Number.isFinite(body.timestamp)) {
+		return 'missing or invalid field: timestamp';
+	}
+	if (body.kind !== 'text' && body.kind !== 'emoji') {
+		return 'missing or invalid field: kind';
+	}
+	if (body.kind === 'text' && body.body.length > 200) {
+		return 'text body exceeds 200 characters';
+	}
+	if (body.kind === 'emoji' && !(NOTE_EMOJIS as readonly string[]).includes(body.body)) {
+		return 'invalid emoji body';
+	}
+	if (body.spoiler !== undefined && typeof body.spoiler !== 'boolean') {
+		return 'missing or invalid field: spoiler';
 	}
 	return null;
 }

@@ -30,6 +30,29 @@ function postPresence(code: string, payload: unknown) {
 	});
 }
 
+function noteBody(overrides: Record<string, unknown> = {}) {
+	return {
+		clientId: 'a1b2c3d4',
+		name: 'aidan',
+		videoId: 'abc123',
+		timestamp: 42,
+		kind: 'text',
+		body: 'great moment',
+		...overrides,
+	};
+}
+
+function postNote(code: string, payload: unknown) {
+	return SELF.fetch(`https://example.com/notes?code=${code}`, {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	});
+}
+
+function deleteNote(code: string, clientId: string, id: string) {
+	return SELF.fetch(`https://example.com/notes?code=${code}&clientId=${clientId}&id=${id}`, { method: 'DELETE' });
+}
+
 function deleteMember(code: string, clientId?: string) {
 	const qs = clientId === undefined ? `code=${code}` : `code=${code}&clientId=${clientId}`;
 	return SELF.fetch(`https://example.com/member?${qs}`, { method: 'DELETE' });
@@ -282,6 +305,80 @@ describe('DELETE /member?code=', () => {
 	});
 });
 
+describe('POST /notes?code=', () => {
+	it('stores a Note with server fields and returns its id', async () => {
+		const code = 'note-stores';
+		const before = Date.now();
+		const res = await postNote(code, noteBody({ spoiler: true, createdAt: 1, id: 'forged' }));
+		const after = Date.now();
+		expect(res.status).toBe(200);
+		const result = (await res.json()) as { ok: boolean; id: string };
+		expect(result.ok).toBe(true);
+		expect(result.id).not.toBe('forged');
+
+		const raw = await env.PROGRESS.get(`${code}:note:a1b2c3d4:abc123:${result.id}`);
+		const note = JSON.parse(raw!);
+		expect(note).toMatchObject({ id: result.id, clientId: 'a1b2c3d4', body: 'great moment', spoiler: true });
+		expect(note.createdAt).toBeGreaterThanOrEqual(before);
+		expect(note.createdAt).toBeLessThanOrEqual(after);
+	});
+
+	it.each([
+		['missing clientId', noteBody({ clientId: undefined })],
+		['missing videoId', noteBody({ videoId: undefined })],
+		['missing timestamp', noteBody({ timestamp: undefined })],
+		['missing body', noteBody({ body: '' })],
+		['invalid kind', noteBody({ kind: 'gif' })],
+		['oversized text', noteBody({ body: 'x'.repeat(201) })],
+		['non-curated emoji', noteBody({ kind: 'emoji', body: '\u{1F4A9}' })],
+	])('rejects %s', async (_name, payload) => {
+		const res = await postNote('note-invalid', payload);
+		expect(res.status).toBe(400);
+	});
+
+	it('accepts a curated emoji and defaults optional fields', async () => {
+		const code = 'note-emoji';
+		const { name, ...payload } = noteBody({ kind: 'emoji', body: '\u{1F44D}' });
+		const res = await postNote(code, payload);
+		const { id } = (await res.json()) as { id: string };
+		const note = JSON.parse((await env.PROGRESS.get(`${code}:note:a1b2c3d4:abc123:${id}`))!);
+		expect(note).toMatchObject({ name: '', spoiler: false, kind: 'emoji', body: '\u{1F44D}' });
+	});
+
+	it('rejects a new member when the Room is full', async () => {
+		const code = 'note-room-full';
+		for (const clientId of ['m1', 'm2', 'm3', 'm4', 'm5']) await postPresence(code, { clientId });
+		const res = await postNote(code, noteBody({ clientId: 'm6' }));
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'room full' });
+	});
+});
+
+describe('DELETE /notes?code=', () => {
+	it('deletes an owned Note', async () => {
+		const code = 'note-delete';
+		const created = (await (await postNote(code, noteBody())).json()) as { id: string };
+		const res = await deleteNote(code, 'a1b2c3d4', created.id);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+		expect(await env.PROGRESS.list({ prefix: `${code}:note:` })).toMatchObject({ keys: [] });
+	});
+
+	it("forbids deleting another member's Note", async () => {
+		const code = 'note-delete-forbidden';
+		const created = (await (await postNote(code, noteBody())).json()) as { id: string };
+		const res = await deleteNote(code, 'someone-else', created.id);
+		expect(res.status).toBe(403);
+		expect((await env.PROGRESS.list({ prefix: `${code}:note:` })).keys).toHaveLength(1);
+	});
+
+	it('is idempotent for an unknown Note id', async () => {
+		const res = await deleteNote('note-delete-absent', 'a1b2c3d4', 'unknown');
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+	});
+});
+
 describe('Room cap counts presence rows', () => {
 	const members = ['m1', 'm2', 'm3', 'm4', 'm5'];
 
@@ -319,7 +416,7 @@ describe('Room cap counts presence rows', () => {
 });
 
 describe('GET /?code=', () => {
-	it('returns { progress, presence } for the code, and nothing from other codes', async () => {
+	it('returns { progress, presence, notes } for the code, and nothing from other codes', async () => {
 		const codeA = 'get-code-a';
 		const codeB = 'get-code-b';
 		await post(codeA, body({ clientId: 'c1', videoId: 'v1' }));
@@ -331,13 +428,27 @@ describe('GET /?code=', () => {
 		const data = (await res.json()) as {
 			progress: { clientId: string }[];
 			presence: { clientId: string }[];
+			notes: unknown[];
 		};
 		// No presence rows were written for this code.
 		expect(data.presence).toEqual([]);
 		expect(data.progress).toHaveLength(2);
+		expect(data.notes).toEqual([]);
 
 		const clientIds = data.progress.map((r) => r.clientId).sort();
 		expect(clientIds).toEqual(['c1', 'c2']);
+	});
+
+	it('includes Notes without mixing them into progress', async () => {
+		const code = 'get-notes';
+		await post(code, body());
+		await postNote(code, noteBody({ body: 'hello' }));
+		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
+			progress: unknown[];
+			notes: { body: string }[];
+		};
+		expect(data.progress).toHaveLength(1);
+		expect(data.notes.map((note) => note.body)).toEqual(['hello']);
 	});
 
 	it('returns both progress and presence rows for a code that has each', async () => {
