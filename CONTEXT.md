@@ -39,3 +39,7 @@ _Avoid_: paired, connected, linked
 **Sharing**:
 Whether this installation currently reports its own Progress Records. Pausing sharing never stops _seeing_ the Buddies' markers.
 _Avoid_: broadcasting, syncing (which also covers reads)
+
+**Note**:
+A Buddy's timestamped comment or emoji, pinned to one moment in one video, visible to the whole Room (like Progress Records). One entity with two content kinds: a text Note, or an emoji **Reaction** (chosen from a small curated set, parallel to the eight curated Buddy Colors). Distinct from a Buddy's position **marker** (marker = live watch position; Note = authored content left at a moment). A Note may be marked a **Spoiler**, showing only an obscured dot on the timeline until the viewer's own playhead passes its timestamp.
+_Avoid_: comment (alone, ambiguous with generic web comments), tag, marker, pin
