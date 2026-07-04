@@ -112,16 +112,40 @@
 			}
 			/* Copy feedback is anchored under the active Room Code. */
 			#copy-code {
+				position: relative;
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
 				width: 34px;
+				height: 30px;
 				padding: 7px;
 				color: var(--muted);
 			}
+			/* Copy/check icons overlay each other; the state class crossfades + scales
+			   between them so neither icon ever pops in/out instantly. */
 			#copy-code svg {
+				position: absolute;
+				top: 50%;
+				left: 50%;
 				width: 16px;
 				height: 16px;
+				transform: translate(-50%, -50%) scale(1);
+				opacity: 1;
+				transition:
+					opacity 180ms ease,
+					transform 180ms ease;
+			}
+			#copy-code .icon-check {
+				opacity: 0;
+				transform: translate(-50%, -50%) scale(0.5);
+			}
+			#copy-code.is-copied .icon-copy {
+				opacity: 0;
+				transform: translate(-50%, -50%) scale(0.5);
+			}
+			#copy-code.is-copied .icon-check {
+				opacity: 1;
+				transform: translate(-50%, -50%) scale(1);
 			}
 			.copy-feedback {
 				position: absolute;
@@ -528,6 +552,18 @@
 						>
 							<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
 							<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+						</svg>
+						<svg
+							class="icon-check"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M20 6 9 17l-5-5"></path>
 						</svg>
 					</button>
 					<span id="copy-feedback" class="copy-feedback" role="status" aria-live="polite"></span>
