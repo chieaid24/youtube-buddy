@@ -10,7 +10,12 @@ describe('extension member API', () => {
 			chrome: {
 				storage: {
 					local: {
-						get: vi.fn(async (key: string) => ({ [key]: storage[key] })),
+						get: vi.fn(async (key: string | string[]) =>
+							(Array.isArray(key) ? key : [key]).reduce<Record<string, unknown>>((result, item) => {
+								result[item] = storage[item];
+								return result;
+							}, {}),
+						),
 						set: vi.fn(async (values: Record<string, unknown>) => Object.assign(storage, values)),
 					},
 				},
@@ -88,6 +93,29 @@ describe('extension member API', () => {
 			method: 'DELETE',
 		});
 	});
+
+	it('posts a Note with the canonical payload and curated Reaction list', async () => {
+		storage = { code: 'silly-otters' };
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+		vi.stubGlobal('fetch', fetchMock);
+		const note = {
+			clientId: 'a1b2c3d4',
+			name: 'Sam',
+			videoId: 'video',
+			timestamp: 12.5,
+			kind: 'emoji',
+			body: '\u{1F44D}',
+			spoiler: true,
+		};
+
+		await expect(window.YTB.postNote(note)).resolves.toEqual({ ok: true });
+		expect(window.YTB.NOTE_EMOJIS).toEqual(['\u{1F44D}', '\u{1F602}', '\u{1F62E}', '\u{2764}\u{FE0F}', '\u{1F525}', '\u{1F44F}']);
+		expect(fetchMock).toHaveBeenCalledWith('http://localhost:8787/notes?code=silly-otters', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(note),
+		});
+	});
 });
 
 declare global {
@@ -96,6 +124,8 @@ declare global {
 			roomExists(records: { progress: object[]; presence: object[] }): boolean;
 			deleteMember(code: string, clientId: string): Promise<{ ok: true } | false>;
 			deleteNote(code: string, clientId: string, id: string): Promise<{ ok: true } | false>;
+			postNote(note: object): Promise<{ ok: true } | false>;
+			NOTE_EMOJIS: string[];
 			getRecords(code: string): Promise<{ notes: object[]; ok: boolean }>;
 			syncBuddyColors(code: string, ids: string[], successful: boolean, random?: () => number): Promise<Record<string, string>>;
 			setBuddyColor(code: string, clientId: string, color: string): Promise<boolean>;

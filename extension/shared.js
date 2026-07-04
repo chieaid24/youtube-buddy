@@ -26,6 +26,10 @@ const YTB = {
 	// enforces it, the client uses it to detect a full Room (see roomView).
 	MAX_MEMBERS: 5,
 
+	// Keep this literal in lockstep with backend NOTE_EMOJIS. The backend rejects
+	// any emoji outside this deliberately small Reaction set.
+	NOTE_EMOJIS: ['\u{1F44D}', '\u{1F602}', '\u{1F62E}', '\u{2764}\u{FE0F}', '\u{1F525}', '\u{1F44F}'],
+
 	// --- storage (chrome.storage.local) ---
 	// Stored keys: name, code, clientId, sharing, and Room-scoped buddyColors.
 
@@ -137,6 +141,30 @@ const YTB = {
 			const query = new URLSearchParams({ code, clientId, id });
 			const res = await fetch(YTB.BACKEND_URL + '/notes?' + query, {
 				method: 'DELETE',
+			});
+			return res.ok ? { ok: true } : false;
+		} catch {
+			return false;
+		}
+	},
+
+	/** Post a text Note or curated-emoji Reaction at a playback position. */
+	async postNote({ clientId, name, videoId, timestamp, kind, body, spoiler }) {
+		const { code, sharing } = await YTB.getConfig();
+		if (!code || !sharing) return false;
+		try {
+			const res = await fetch(YTB.BACKEND_URL + '/notes?code=' + encodeURIComponent(code), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					clientId,
+					name,
+					videoId,
+					timestamp,
+					kind,
+					body,
+					spoiler,
+				}),
 			});
 			return res.ok ? { ok: true } : false;
 		} catch {
