@@ -175,8 +175,8 @@
 			document.getElementById(BUTTON_ID)?.remove();
 			return;
 		}
-		const timestamp = document.querySelector('.ytp-time-display');
-		if (!timestamp) return;
+		const leftControls = document.querySelector('.ytp-left-controls');
+		if (!leftControls) return;
 		let button = document.getElementById(BUTTON_ID);
 		if (!button) {
 			button = document.createElement('button');
@@ -190,7 +190,12 @@
 				openComposer(button);
 			});
 		}
-		if (timestamp.nextElementSibling !== button) timestamp.insertAdjacentElement('afterend', button);
+		// Append to the end of the left control cluster, i.e. after the timecode
+		// and any neighbouring extensions' buttons (e.g. Language Reactor). Only
+		// (re)insert when the button is missing or detached from the current
+		// control bar, so we never fight a neighbour for the same slot on every
+		// mutation -- we tolerate its position instead of re-anchoring adjacently.
+		if (button.parentElement !== leftControls) leftControls.appendChild(button);
 	}
 
 	document.addEventListener('ytb:navigate', (event) => {
