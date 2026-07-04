@@ -118,6 +118,7 @@ function wireHandlers() {
 	// Chooser → Join: switch to the free-text entry view.
 	el.chooseJoin.addEventListener('click', () => {
 		el.joinInput.value = '';
+		updateJoinSubmit();
 		showView('join');
 		el.joinInput.focus();
 	});
@@ -134,6 +135,7 @@ function wireHandlers() {
 	// Join → submit: normalize (trim + lowercase) and commit verbatim. Pure match —
 	// no word-list validation; pairing succeeds only if it matches a real code.
 	el.joinSubmit.addEventListener('click', () => joinAndCommit());
+	el.joinInput.addEventListener('input', updateJoinSubmit);
 	el.joinInput.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') joinAndCommit();
 	});
@@ -191,6 +193,13 @@ function wireHandlers() {
 			setSharing(true);
 		}
 	});
+}
+
+// Keep the Join action unavailable and neutral until there is meaningful input.
+function updateJoinSubmit() {
+	const enabled = el.joinInput.value.trim().length > 0;
+	el.joinSubmit.disabled = !enabled;
+	el.joinSubmit.classList.toggle('primary', enabled);
 }
 
 // --- Display Name lock/edit ---------------------------------------------------
