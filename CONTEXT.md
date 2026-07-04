@@ -5,7 +5,7 @@ A Chrome extension plus Cloudflare Worker backend that lets a small Room of frie
 ## Language
 
 **Room Code**:
-A short shared string that forms a Room. Newly generated Room Codes use a `<descriptor>-<plural-animal>` slug (e.g. `red-frogs` or `jumping-spiders`), shown as "The Red Frogs" or "The Jumping Spiders". Joined codes remain permissive and need not match the generated-code vocabulary. A Room Code is both the joining mechanism and the only access control — anyone holding the code can read and write that Room's data.
+A short shared string that forms a Room. Newly generated Room Codes use a `<descriptor>-<plural-animal>` slug (e.g. `red-frogs` or `jumping-spiders`), shown as "The Red Frogs" or "The Jumping Spiders", and are checked against existing Rooms so a fresh code is never handed out already-in-use; the rare fallback when no clean slug is free appends a 3-digit number (`red-frogs-742`). Joined codes remain permissive and need not match the generated-code vocabulary — but joining requires the Room Code to already exist: at least one presence row or Progress Record must already be stored under it (i.e. someone else created it first). Typing an unknown code is rejected rather than silently creating a new empty Room. A Room Code is both the joining mechanism and the only access control — anyone holding the code can read and write that Room's data.
 _Avoid_: friend code, group code, secret (the people form a _Room_, but the string itself is always the _Room Code_)
 
 **Room**:
