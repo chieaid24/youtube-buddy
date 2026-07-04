@@ -225,6 +225,11 @@ const YTB = {
 
 	// --- Room helpers (multiple Buddies) ---
 
+	/** Return whether a Room has ever had at least one member record. */
+	roomExists(records) {
+		return (records?.progress?.length || 0) + (records?.presence?.length || 0) > 0;
+	},
+
 	// Fixed colors chosen for contrast on light popup/feed surfaces and YouTube's
 	// dark player. A Room has at most four foreign Buddies, leaving spare choices.
 	BUDDY_COLORS: ['#00a6d6', '#f0a500', '#7655d6', '#00a86b', '#e85d04', '#d936c7', '#558b2f', '#4776e6'],

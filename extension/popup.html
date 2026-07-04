@@ -137,6 +137,12 @@
 			.copy-feedback.is-error {
 				color: #c5221f;
 			}
+			.join-feedback {
+				position: static;
+				display: block;
+				min-height: 17px;
+				margin-top: 3px;
+			}
 			/* Locked vs editable Display Name: the field shows ONE of these. `.is-locked`
          on the `.field` (set in popup.js) swaps which child is visible. The name
          is locked iff it holds a non-empty committed value. */
@@ -504,6 +510,7 @@
 					<input id="join-input" type="text" placeholder="The Something Somethings" autocomplete="off" spellcheck="false" />
 					<button id="join-submit" type="button" disabled>Join</button>
 				</div>
+				<span id="join-feedback" class="copy-feedback join-feedback" role="status" aria-live="polite"></span>
 				<button id="join-back" type="button" class="link">Back</button>
 			</div>
 
