@@ -118,6 +118,31 @@
 		return `${pick(DESCRIPTORS, random)}-${pick(ANIMALS, random)}`;
 	}
 
+	class CheckFailedError extends Error {
+		constructor() {
+			super('Room Code availability check failed');
+			this.name = 'CheckFailedError';
+		}
+	}
+
+	async function generateAvailable({ random = Math.random, checkTaken }) {
+		let candidate = '';
+		for (let attempt = 0; attempt < 3; attempt++) {
+			candidate = generate(random);
+			let result;
+			try {
+				result = await checkTaken(candidate);
+			} catch {
+				throw new CheckFailedError();
+			}
+			if (result === 'free') return candidate;
+			if (result !== 'taken') throw new CheckFailedError();
+		}
+
+		const suffix = Math.floor(random() * 900) + 100;
+		return `${candidate}-${suffix}`;
+	}
+
 	function pretty(slug) {
 		const words = String(slug)
 			.split('-')
@@ -154,5 +179,5 @@
 		return succeeded;
 	}
 
-	window.YTBRoomCode = Object.freeze({ DESCRIPTORS, ANIMALS, generate, pretty, copy });
+	window.YTBRoomCode = Object.freeze({ DESCRIPTORS, ANIMALS, CheckFailedError, generate, generateAvailable, pretty, copy });
 })();
