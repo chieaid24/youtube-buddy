@@ -1,5 +1,4 @@
-// popup.js — identity, Room Code, and the pairing status dot (which doubles as
-// the Sharing toggle: solid = sharing, hollow = not).
+// popup.js — identity, Room Code, and the Sharing toggle.
 // Consumes the frozen `window.YTB` contract from shared.js (task 03). The popup is
 // the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
 // so it survives a browser restart. See CONTEXT.md for terminology.
@@ -32,7 +31,7 @@ const el = {
 	statusSub: document.getElementById('status-sub'),
 	roster: document.getElementById('roster'),
 	colorGrid: document.getElementById('color-grid'),
-	sharingDot: document.getElementById('sharing-dot'),
+	sharingToggle: document.getElementById('sharing-toggle'),
 	backendUrl: document.getElementById('backend-url'),
 	// Disconnect confirmation dialog.
 	confirmOverlay: document.getElementById('confirm-overlay'),
@@ -50,10 +49,9 @@ let myClientId = '';
 // cleared on cancel/confirm). One dialog serves Leave room AND Stop sharing.
 let pendingConfirm = null;
 
-// Last-known Sharing state + whether the status dot is currently a live toggle
-// (it is in waiting / in room; passive in Room full). Read by the dot's click.
+// Last-known Sharing state + whether the status text is currently a live toggle.
 let currentSharing = true;
-let dotInteractive = false;
+let sharingInteractive = false;
 
 // Last-rendered roster, so a Buddy Color change can redraw without a re-GET.
 let currentRosterBuddies = [];
@@ -192,11 +190,10 @@ function wireHandlers() {
 		closeColorGrid();
 	});
 
-	// The status dot is the Sharing toggle. Stopping (solid → off) is guarded by a
-	// confirm; starting (off → solid) is instant. The reporter reads `sharing` and
+	// Stopping Sharing is guarded by a confirm; starting is instant. The reporter reads `sharing` and
 	// stops/resumes its POSTs; the renderer keeps drawing the Buddy either way.
-	el.sharingDot.addEventListener('click', () => {
-		if (!dotInteractive) return; // passive in Room full (button is disabled too)
+	el.sharingToggle.addEventListener('click', () => {
+		if (!sharingInteractive) return;
 		if (currentSharing) {
 			openConfirm({
 				title: 'Stop sharing?',
@@ -422,19 +419,18 @@ async function refreshStatus(code) {
 	);
 
 	if (locked) {
-		// Room full: the dot is a passive dark indicator — no Sharing toggle here.
 		setStatus('full', 'Room full', `This code already has ${YTB.MAX_MEMBERS} members.`, false);
 		renderRoster([]);
 		return;
 	}
 
 	if (buddies.length === 0) {
-		setStatus('waiting', 'No buddy joined yet :(', '', true);
+		setStatus('waiting', 'Waiting for buddies', '', true);
 		renderRoster([]);
 		return;
 	}
 
-	setStatus('inroom', 'Sharing', '', true);
+	setStatus('inroom', '', '', true);
 	renderRoster(buddies);
 }
 
@@ -444,27 +440,26 @@ async function refreshConnectedRoom() {
 	await refreshStatus(code);
 }
 
-// Render the status line + its dot. `interactive` = the dot is the live Sharing
-// toggle (waiting / in room); when false (Room full / unpaired) the dot is a
-// passive indicator. Sharing off shows a hollow dot + a "· Not sharing" suffix.
+// Render the status line. Waiting and in-room states keep the Sharing toggle live;
+// only the in-room state exposes the boolean in its visible label.
 function setStatus(state, text, sub, interactive = false) {
 	const notSharing = interactive && !currentSharing;
 	el.status.className = 'status is-' + state + (notSharing ? ' not-sharing' : '');
 	el.statusText.textContent = notSharing ? text + ' · Not sharing' : text;
 	el.statusSub.textContent = sub;
 
-	dotInteractive = interactive;
+	sharingInteractive = interactive;
 	if (interactive) {
 		const action = currentSharing ? 'Stop sharing' : 'Start sharing';
-		el.sharingDot.disabled = false;
-		el.sharingDot.setAttribute('aria-pressed', String(currentSharing));
-		el.sharingDot.setAttribute('aria-label', action);
-		el.sharingDot.title = action;
+		el.sharingToggle.disabled = false;
+		el.sharingToggle.setAttribute('aria-pressed', String(currentSharing));
+		el.sharingToggle.setAttribute('aria-label', action);
+		el.sharingToggle.title = action;
 	} else {
-		el.sharingDot.disabled = true;
-		el.sharingDot.removeAttribute('aria-pressed');
-		el.sharingDot.removeAttribute('title');
-		el.sharingDot.setAttribute('aria-label', 'Sharing status');
+		el.sharingToggle.disabled = true;
+		el.sharingToggle.removeAttribute('aria-pressed');
+		el.sharingToggle.removeAttribute('title');
+		el.sharingToggle.setAttribute('aria-label', 'Sharing status');
 	}
 }
 
