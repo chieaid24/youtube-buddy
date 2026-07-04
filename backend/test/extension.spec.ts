@@ -64,12 +64,32 @@ describe('extension member API', () => {
 		expect(result).toEqual({ ok: true });
 		expect(fetchMock).toHaveBeenCalledWith('http://localhost:8787/member?code=silly-otters&clientId=a1b2c3d4', { method: 'DELETE' });
 	});
+
+	it('returns Notes from the Room read and deletes an owned Note', async () => {
+		const note = { id: 'note-1', clientId: 'a1b2c3d4', videoId: 'video', timestamp: 12 };
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ progress: [], presence: [], notes: [note] }),
+			})
+			.mockResolvedValueOnce({ ok: true });
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(window.YTB.getRecords('silly-otters')).resolves.toMatchObject({ notes: [note], ok: true });
+		await expect(window.YTB.deleteNote('silly-otters', 'a1b2c3d4', 'note-1')).resolves.toEqual({ ok: true });
+		expect(fetchMock).toHaveBeenLastCalledWith('http://localhost:8787/notes?code=silly-otters&clientId=a1b2c3d4&id=note-1', {
+			method: 'DELETE',
+		});
+	});
 });
 
 declare global {
 	interface Window {
 		YTB: {
 			deleteMember(code: string, clientId: string): Promise<{ ok: true } | false>;
+			deleteNote(code: string, clientId: string, id: string): Promise<{ ok: true } | false>;
+			getRecords(code: string): Promise<{ notes: object[]; ok: boolean }>;
 			syncBuddyColors(code: string, ids: string[], successful: boolean, random?: () => number): Promise<Record<string, string>>;
 			setBuddyColor(code: string, clientId: string, color: string): Promise<boolean>;
 			clearRoomColors(code: string): Promise<void>;
