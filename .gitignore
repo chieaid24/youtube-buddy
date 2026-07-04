@@ -7,6 +7,9 @@ CLAUDE.md
 AGENTS.md
 .agents/
 
+# Parallel-agent worktrees
+.worktrees/
+
 # Dependencies
 node_modules/
 
