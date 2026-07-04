@@ -111,10 +111,6 @@ function wireHandlers() {
 		setFieldLocked(el.nameField, false);
 		el.name.focus();
 	});
-	el.nameValue.addEventListener('click', () => {
-		setFieldLocked(el.nameField, false);
-		el.name.focus();
-	});
 
 	// Chooser → Create: mint + commit a fresh code immediately (no confirm step).
 	el.chooseCreate.addEventListener('click', () => createAndCommit());

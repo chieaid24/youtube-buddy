@@ -49,6 +49,9 @@
 				width: 132px;
 				margin: 0;
 			}
+			#name {
+				text-align: right;
+			}
 			.header .lbl {
 				position: absolute;
 				width: 1px;
@@ -157,11 +160,7 @@
 				/* Right padding clears the overlaid pencil so the name never runs under it. */
 				padding: 7px 32px 7px 9px;
 				font-size: 13px;
-				border: 1px solid var(--line);
-				border-radius: 6px;
-				background: transparent;
 				text-align: right;
-				cursor: pointer;
 			}
 			/* Pencil edit affordance, overlaid at the chip's right edge — bare icon,
          not the boxed default button. */
@@ -462,10 +461,10 @@
 		<header class="header">
 			<h1>YouTube Buddy</h1>
 			<div class="field" id="name-field">
-				<label class="lbl" for="name">Display Name</label>
+				<label class="lbl" for="name">Nickname</label>
 				<!-- Locked once set; the pencil icon reopens the input (cosmetic, unguarded). -->
 				<div class="field-locked">
-					<button class="locked-value" id="name-value" type="button" aria-label="Edit display name"></button>
+					<span class="locked-value" id="name-value"></span>
 					<button id="name-edit" type="button" aria-label="Edit display name">
 						<svg
 							viewBox="0 0 24 24"
