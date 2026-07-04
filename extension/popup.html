@@ -14,6 +14,7 @@
 				--waiting: #c79100;
 				--unpaired: #909090;
 				--full: #444444;
+				--danger: #c0392b;
 			}
 			* {
 				box-sizing: border-box;
@@ -260,7 +261,7 @@
 			button.primary:hover {
 				background: #0556bd;
 			}
-			/* Text-only affordances (Leave room / Back / Cancel). */
+			/* Text-only affordances (Back / Cancel). */
 			button.link {
 				margin-top: 8px;
 				padding: 0;
@@ -484,11 +485,16 @@
 			}
 			button.danger {
 				color: #fff;
-				background: #c0392b;
-				border-color: #c0392b;
+				background: var(--danger);
+				border-color: var(--danger);
 			}
 			button.danger:hover {
 				background: #a93226;
+			}
+			/* Leave room keeps the danger treatment's colors but needs the same
+         top margin the text-only affordances use to clear the roster/status block. */
+			#leave-room {
+				margin-top: 8px;
 			}
 			/* Neutral confirm variant (e.g. Stop sharing) — emphasized but not danger. */
 			button.neutral {
@@ -596,7 +602,7 @@
 					<div id="roster" class="roster"></div>
 					<div id="color-grid" class="color-grid" role="grid" aria-label="Choose Buddy Color" hidden></div>
 				</div>
-				<button id="leave-room" type="button" class="link">Leave room</button>
+				<button id="leave-room" type="button" class="danger">Leave room</button>
 			</div>
 		</div>
 
