@@ -179,7 +179,17 @@ function wireHandlers() {
 		if (e.target === el.confirmOverlay) hideConfirm();
 	});
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && !el.confirmOverlay.hidden) hideConfirm();
+		if (e.key !== 'Escape') return;
+		if (!el.confirmOverlay.hidden) hideConfirm();
+		else if (!el.colorGrid.hidden) closeColorGrid();
+	});
+
+	// Color picker dismiss: same "click anywhere else" pattern as the confirm
+	// dialog. Swatch clicks stop propagation (see renderRoster) so they never
+	// reach here -- this only ever sees clicks that should close the picker.
+	document.addEventListener('click', (e) => {
+		if (el.colorGrid.hidden || el.colorGrid.contains(e.target)) return;
+		closeColorGrid();
 	});
 
 	// The status dot is the Sharing toggle. Stopping (solid → off) is guarded by a
@@ -462,6 +472,7 @@ function setStatus(state, text, sub, interactive = false) {
 // matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
 // as the color legend. Newest-active Buddy first (roomView already sorts).
 function renderRoster(buddies) {
+	closeColorGrid();
 	currentRosterBuddies = buddies;
 	el.roster.textContent = '';
 	for (const b of buddies) {
@@ -473,7 +484,12 @@ function renderRoster(buddies) {
 		swatch.style.background = YTB.buddyColor(b.clientId);
 		swatch.type = 'button';
 		swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(b.clientId, b.name)}`);
-		swatch.addEventListener('click', () => openColorGrid(b.clientId));
+		// Stop this from also reaching the document-level outside-click dismissal
+		// below -- toggle/re-anchor is handled explicitly here.
+		swatch.addEventListener('click', (e) => {
+			e.stopPropagation();
+			toggleColorGrid(b.clientId, swatch, row);
+		});
 
 		const name = document.createElement('span');
 		name.className = 'buddy-name';
@@ -488,7 +504,18 @@ function renderRoster(buddies) {
 	}
 }
 
-function openColorGrid(clientId) {
+// Toggle: re-clicking the Buddy the picker is already open for closes it;
+// clicking a different Buddy re-anchors and repopulates for them instead.
+function toggleColorGrid(clientId, anchorEl, rowEl) {
+	const alreadyOpenForThis = !el.colorGrid.hidden && selectedBuddyId === clientId;
+	if (alreadyOpenForThis) {
+		closeColorGrid();
+		return;
+	}
+	openColorGrid(clientId, anchorEl, rowEl);
+}
+
+function openColorGrid(clientId, anchorEl, rowEl) {
 	selectedBuddyId = clientId;
 	el.colorGrid.textContent = '';
 	const room = YTB._buddyColors[activeRoomCode] || {};
@@ -501,23 +528,40 @@ function openColorGrid(clientId) {
 		const button = document.createElement('button');
 		button.className = 'color-choice';
 		button.type = 'button';
+		button.style.background = color;
 		button.disabled = used.has(color);
 		button.title = button.disabled ? 'Already assigned' : 'Choose color';
 		button.setAttribute('aria-label', button.disabled ? `${color}, Already assigned` : `Choose ${color}`);
 		button.setAttribute('aria-pressed', String(room[clientId] === color));
-		const chip = document.createElement('span');
-		chip.style.background = color;
-		button.appendChild(chip);
 		button.addEventListener('click', async () => {
 			if (await YTB.setBuddyColor(activeRoomCode, selectedBuddyId, color)) {
-				el.colorGrid.hidden = true;
+				closeColorGrid();
 				renderRoster(currentRosterBuddies);
 			}
 		});
 		el.colorGrid.appendChild(button);
 	}
-	el.colorGrid.hidden = false;
+	positionColorGrid(anchorEl, rowEl);
 	el.colorGrid.querySelector('[aria-pressed="true"]')?.focus();
+}
+
+function closeColorGrid() {
+	el.colorGrid.hidden = true;
+	selectedBuddyId = '';
+}
+
+// Left-align the popover to the clicked swatch and open it directly below
+// that row by default, flipping above when the popup doesn't have enough
+// remaining space below (e.g. the last roster row).
+function positionColorGrid(anchorEl, rowEl) {
+	const anchorRect = anchorEl.getBoundingClientRect();
+	const rowRect = rowEl.getBoundingClientRect();
+	const gap = 4;
+	el.colorGrid.hidden = false; // must be visible to measure its height below
+	el.colorGrid.style.left = `${anchorRect.left}px`;
+	const gridHeight = el.colorGrid.getBoundingClientRect().height;
+	const fitsBelow = rowRect.bottom + gap + gridHeight <= window.innerHeight;
+	el.colorGrid.style.top = fitsBelow ? `${rowRect.bottom + gap}px` : `${rowRect.top - gap - gridHeight}px`;
 }
 
 // Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is for
