@@ -21,7 +21,7 @@ A random stable identifier generated once per browser installation. It is what i
 _Avoid_: user id, username
 
 **Display Name**:
-The human-readable label a user types for themselves (e.g. "aidan"), shown beside their markers. Purely cosmetic — carries no identity.
+The human-readable label a user types for themselves (e.g. "aidan"), shown beside their markers. Purely cosmetic — carries no identity. The popup's field label reads "Nickname" (friendlier UI copy); the term itself stays Display Name in code, config keys, and docs.
 _Avoid_: name (alone, in code), handle
 
 **Buddy** (pl. **Buddies**):
