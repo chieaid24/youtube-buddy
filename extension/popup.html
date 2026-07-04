@@ -82,44 +82,54 @@
 			input[type='text']:focus {
 				border-color: var(--accent);
 			}
-			/* The active code shows as a read-only pretty label ("The Silly Otters"),
-         so it is a styled <span>, not an input. */
+			/* The active code shows as a read-only pretty label ("The Silly Otters") —
+         plain static text, not a boxed input. max-width caps its intrinsic
+         width so an unusually long free-typed/joined code truncates with an
+         ellipsis instead of overflowing or wrapping the popup. */
 			.code-row #code {
-				flex: 1;
+				flex: 0 1 auto;
 				min-width: 0;
+				max-width: 220px;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
-				padding: 7px 9px;
 				font-size: 13px;
-				border: 1px solid var(--line);
-				border-radius: 6px;
-				background: #fafafa;
+				font-weight: 600;
 				color: var(--fg);
 			}
 			.code-row,
 			.edit-row {
 				display: flex;
+				align-items: center;
 				gap: 6px;
 			}
-			#view-connected .code-row {
-				position: relative;
-				margin-bottom: 22px;
-			}
+			/* Left-aligned, intrinsic-width row now (code, ghost copy icon, then inline
+         feedback) — nothing stretches to the popup's far edge anymore, so the
+         bottom margin once reserved below the row for the absolutely
+         positioned feedback text is gone; .room-context's own margin-top
+         provides the gap to the status block below. */
 			.code-row input,
 			.edit-row input {
 				flex: 1;
 			}
-			/* Copy feedback is anchored under the active Room Code. */
+			/* Bare/ghost icon button — no visible border or background, matching the
+	         convention used by #name-edit; only the icon color darkens on hover. */
 			#copy-code {
 				position: relative;
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
+				flex: none;
 				width: 34px;
 				height: 30px;
 				padding: 7px;
+				border: none;
+				background: none;
 				color: var(--muted);
+			}
+			#copy-code:hover {
+				background: none;
+				color: var(--fg);
 			}
 			/* Copy/check icons overlay each other; the state class crossfades + scales
 			   between them so neither icon ever pops in/out instantly. */
@@ -148,15 +158,22 @@
 				transform: translate(-50%, -50%) scale(1);
 			}
 			.copy-feedback {
-				position: absolute;
-				top: calc(100% + 3px);
-				right: 0;
+				display: inline-block;
 				min-height: 17px;
 				font-size: 11px;
 				color: var(--paired);
 			}
 			.copy-feedback.is-error {
 				color: #c5221f;
+			}
+			/* Inline in the code row (not anchored below it anymore); shrinks with an
+	         ellipsis instead of ever overflowing the popup. */
+			#copy-feedback {
+				flex: 0 1 auto;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
 			.join-feedback {
 				position: static;
