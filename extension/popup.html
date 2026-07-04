@@ -11,9 +11,6 @@
 				--accent: #065fd4;
 				--bg: #ffffff;
 				--paired: #2ba640;
-				--waiting: #c79100;
-				--unpaired: #909090;
-				--full: #444444;
 				--danger: #c0392b;
 			}
 			* {
@@ -285,83 +282,70 @@
 			.status {
 				display: flex;
 				align-items: center;
-				gap: 8px;
 				padding: 2px 0;
 			}
-			/* The dot's color tracks the pairing state via --dot-color. */
-			.status.is-paired,
-			.status.is-inroom {
-				--dot-color: var(--paired);
-			}
-			.status.is-waiting {
-				--dot-color: var(--waiting);
-			}
-			.status.is-unpaired {
-				--dot-color: var(--unpaired);
-			}
-			.status.is-full {
-				--dot-color: var(--full);
-			}
-			.dot {
-				width: 12px;
-				height: 12px;
-				border-radius: 50%;
-				flex: 0 0 auto;
-				background: var(--dot-color, var(--unpaired));
-			}
-			.status.is-waiting .dot {
-				width: 8px;
-				height: 8px;
-			}
-			/* The dot is also the Sharing toggle: a small glyph centered in a ~28px
-         focusable hit area (replaces the old Sharing switch). Passive (disabled)
-         in the Room-full state. */
-			.sharing-dot {
-				position: relative;
+			.sharing-toggle {
 				display: inline-flex;
 				align-items: center;
-				justify-content: center;
-				width: 28px;
-				height: 28px;
-				margin: -8px 0;
 				padding: 0;
 				border: none;
 				background: none;
-				border-radius: 50%;
-				cursor: pointer;
-				flex: 0 0 auto;
-			}
-			.sharing-dot::after {
-				content: '';
-				position: absolute;
-				width: 16px;
-				height: 2px;
 				border-radius: 2px;
-				background: #fff;
-				transform: rotate(-45deg) scaleX(0);
-				transition: transform 120ms ease;
+				cursor: pointer;
+				font-size: 13px;
+				font-weight: 600;
 			}
-			.status:not(.not-sharing) .sharing-dot:hover::after,
-			.status:not(.not-sharing) .sharing-dot:focus-visible::after,
-			.status.not-sharing .sharing-dot::after {
-				transform: rotate(-45deg) scaleX(1);
+			.sharing-not {
+				display: inline-block;
+				width: 0;
+				overflow: hidden;
+				opacity: 0;
+				white-space: pre;
+				transition:
+					width 120ms ease,
+					opacity 120ms ease;
 			}
-			.status.not-sharing .sharing-dot::after {
-				background: #555;
+			.status.is-inroom.not-sharing .sharing-not,
+			.status.is-inroom:not(.not-sharing) .sharing-toggle:hover .sharing-not,
+			.status.is-inroom:not(.not-sharing) .sharing-toggle:focus-visible .sharing-not {
+				width: 2.25em;
+				opacity: 1;
 			}
-			.status.not-sharing .sharing-dot:hover,
-			.status.not-sharing .sharing-dot:focus-visible {
-				background: rgba(0, 0, 0, 0.1);
+			.status.is-inroom.not-sharing .sharing-words,
+			.status.is-inroom:not(.not-sharing) .sharing-toggle:hover .sharing-words,
+			.status.is-inroom:not(.not-sharing) .sharing-toggle:focus-visible .sharing-words {
+				text-decoration: line-through;
 			}
-			.status.not-sharing .sharing-dot:focus-visible {
-				box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.1);
+			.status.is-inroom.not-sharing .sharing-toggle:hover .sharing-not,
+			.status.is-inroom.not-sharing .sharing-toggle:focus-visible .sharing-not {
+				width: 0;
+				opacity: 0;
 			}
-			.sharing-dot:focus-visible {
+			.status.is-inroom.not-sharing .sharing-toggle:hover .sharing-words,
+			.status.is-inroom.not-sharing .sharing-toggle:focus-visible .sharing-words {
+				text-decoration: none;
+			}
+			.status.is-inroom.not-sharing .sharing-bang,
+			.status.is-inroom:not(.not-sharing) .sharing-toggle:hover .sharing-bang,
+			.status.is-inroom:not(.not-sharing) .sharing-toggle:focus-visible .sharing-bang {
+				display: none;
+			}
+			.status.is-inroom.not-sharing .sharing-toggle:hover .sharing-bang,
+			.status.is-inroom.not-sharing .sharing-toggle:focus-visible .sharing-bang {
+				display: inline;
+			}
+			.sharing-toggle:focus-visible {
 				outline: none;
 				box-shadow: 0 0 0 2px rgba(6, 95, 212, 0.4);
 			}
-			.sharing-dot:disabled {
-				cursor: default;
+			.status:not(.is-inroom) .sharing-words,
+			.status.is-inroom .waiting-label,
+			.status:not(.is-waiting):not(.is-inroom) .sharing-toggle {
+				display: none;
+			}
+			.status.is-waiting #status-text,
+			.status.is-inroom #status-text {
+				display: none;
 			}
 			#status-text {
 				font-weight: 600;
@@ -601,8 +585,11 @@
 				</div>
 				<div class="room-context">
 					<div id="status" class="status is-unpaired">
-						<button id="sharing-dot" class="sharing-dot" type="button">
-							<span class="dot"></span>
+						<button id="sharing-toggle" class="sharing-toggle" type="button">
+							<span class="sharing-words"
+								><span class="sharing-not">Not </span><span>Sharing</span><span class="sharing-bang">!</span></span
+							>
+							<span class="waiting-label">Waiting for buddies</span>
 						</button>
 						<span id="status-text">Unpaired</span>
 					</div>
