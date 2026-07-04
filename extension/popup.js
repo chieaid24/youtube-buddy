@@ -224,7 +224,7 @@ function commitName() {
 
 // Create flow: generate a code, commit it, assert presence (so I appear to a
 // Buddy who joins later even before I watch anything), then land on Connected.
-// The GET shows me as the lone member → "Waiting for buddies" with a live dot.
+// The GET shows me as the lone member → "No buddy joined yet :(" with a live dot.
 async function createAndCommit() {
 	const { code: oldCode } = await YTB.getConfig();
 	const code = generateCode();
@@ -392,7 +392,7 @@ async function refreshStatus(code) {
 	}
 
 	if (buddies.length === 0) {
-		setStatus('waiting', 'Waiting for buddies', '', true);
+		setStatus('waiting', 'No buddy joined yet :(', '', true);
 		renderRoster([]);
 		return;
 	}
