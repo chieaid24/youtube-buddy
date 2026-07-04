@@ -109,6 +109,14 @@
 				position: relative;
 				margin-bottom: 22px;
 			}
+			#view-join .code-row {
+				position: relative;
+				margin-bottom: 22px;
+			}
+			#join-error {
+				left: 0;
+				right: auto;
+			}
 			.code-row input,
 			.edit-row input {
 				flex: 1;
@@ -503,6 +511,7 @@
 				<div class="code-row">
 					<input id="join-input" type="text" placeholder="The Something Somethings" autocomplete="off" spellcheck="false" />
 					<button id="join-submit" type="button" disabled>Join</button>
+					<span id="join-error" class="copy-feedback is-error" role="alert" aria-live="polite"></span>
 				</div>
 				<button id="join-back" type="button" class="link">Back</button>
 			</div>

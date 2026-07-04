@@ -21,6 +21,7 @@ const el = {
 	chooserCancel: document.getElementById('chooser-cancel'),
 	joinInput: document.getElementById('join-input'),
 	joinSubmit: document.getElementById('join-submit'),
+	joinError: document.getElementById('join-error'),
 	joinBack: document.getElementById('join-back'),
 	code: document.getElementById('code'),
 	copyCode: document.getElementById('copy-code'),
@@ -118,6 +119,7 @@ function wireHandlers() {
 	// Chooser → Join: switch to the free-text entry view.
 	el.chooseJoin.addEventListener('click', () => {
 		el.joinInput.value = '';
+		clearJoinError();
 		updateJoinSubmit();
 		showView('join');
 		el.joinInput.focus();
@@ -135,7 +137,10 @@ function wireHandlers() {
 	// Join → submit: normalize (trim + lowercase) and commit verbatim. Pure match —
 	// no word-list validation; pairing succeeds only if it matches a real code.
 	el.joinSubmit.addEventListener('click', () => joinAndCommit());
-	el.joinInput.addEventListener('input', updateJoinSubmit);
+	el.joinInput.addEventListener('input', () => {
+		clearJoinError();
+		updateJoinSubmit();
+	});
 	el.joinInput.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') joinAndCommit();
 	});
@@ -202,6 +207,10 @@ function updateJoinSubmit() {
 	el.joinSubmit.classList.toggle('primary', enabled);
 }
 
+function clearJoinError() {
+	el.joinError.textContent = '';
+}
+
 // --- Display Name lock/edit ---------------------------------------------------
 
 /** Toggle a field between locked (value chip + pencil) and editable (input). */
@@ -243,12 +252,16 @@ async function createAndCommit() {
 	await refreshStatus(code);
 }
 
-// Join flow: commit the typed code (normalized), assert my presence, and refresh
-// status with a real GET — that GET both checks the match AND now surfaces an
-// already-present owner (who may not have watched anything yet).
+// Join flow: verify the normalized code has an existing member before committing,
+// then assert my presence and refresh status.
 async function joinAndCommit() {
 	const code = YTB.normalizeCode(el.joinInput.value);
 	if (!code) return; // Empty — stay on the entry view.
+	const records = await YTB.getRecords(code);
+	if (!YTB.roomExists(records)) {
+		el.joinError.textContent = "This room doesn't exist yet";
+		return;
+	}
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code });
 	if (oldCode && oldCode !== code) {

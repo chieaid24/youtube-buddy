@@ -65,6 +65,12 @@ describe('extension member API', () => {
 		expect(fetchMock).toHaveBeenCalledWith('http://localhost:8787/member?code=silly-otters&clientId=a1b2c3d4', { method: 'DELETE' });
 	});
 
+	it('recognizes a Room when it has presence or progress records', () => {
+		expect(window.YTB.roomExists({ progress: [], presence: [] })).toBe(false);
+		expect(window.YTB.roomExists({ progress: [], presence: [{}] })).toBe(true);
+		expect(window.YTB.roomExists({ progress: [{}], presence: [] })).toBe(true);
+	});
+
 	it('returns Notes from the Room read and deletes an owned Note', async () => {
 		const note = { id: 'note-1', clientId: 'a1b2c3d4', videoId: 'video', timestamp: 12 };
 		const fetchMock = vi
@@ -87,6 +93,7 @@ describe('extension member API', () => {
 declare global {
 	interface Window {
 		YTB: {
+			roomExists(records: { progress: object[]; presence: object[] }): boolean;
 			deleteMember(code: string, clientId: string): Promise<{ ok: true } | false>;
 			deleteNote(code: string, clientId: string, id: string): Promise<{ ok: true } | false>;
 			getRecords(code: string): Promise<{ notes: object[]; ok: boolean }>;

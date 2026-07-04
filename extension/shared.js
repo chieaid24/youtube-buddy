@@ -189,6 +189,11 @@ const YTB = {
 
 	// --- utils ---
 
+	/** Return whether a Room has ever had at least one member record. */
+	roomExists(records) {
+		return records.progress.length + records.presence.length > 0;
+	},
+
 	/**
 	 * Format seconds as "M:SS" (or "H:MM:SS" past an hour) for tooltips.
 	 * e.g. 412 -> "6:52".
