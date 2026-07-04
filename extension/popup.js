@@ -147,13 +147,14 @@ function wireHandlers() {
 	// Join → Back: abandon entry, return to the chooser (active code untouched).
 	el.joinBack.addEventListener('click', () => showView('chooser'));
 
-	// Connected → Copy: copy the pretty form and announce anchored success/failure
-	// feedback. The button is native keyboard-accessible.
+	// Connected → Copy: use the exact rendered label as the clipboard source of
+	// truth and announce anchored success/failure feedback. The button is native
+	// keyboard-accessible.
 	el.copyCode.addEventListener('click', async () => {
-		const { code } = await YTB.getConfig();
-		if (!code) return;
+		const text = el.code.textContent;
+		if (!text) return;
 		await YTBRoomCode.copy({
-			text: YTBRoomCode.pretty(code),
+			text,
 			feedback: el.copyFeedback,
 		});
 	});
