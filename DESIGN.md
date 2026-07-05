@@ -1,9 +1,13 @@
 # DESIGN.md
 
-Design system for the **YouTube Buddy action popup** (the panel that opens from the
-toolbar icon). Scope is the popup only: `extension/popup.html` (markup + inline CSS)
-and `extension/popup.js` (wiring). The on-video progress-bar markers, feed thumbnail
-bars, and the note composer are **out of scope** and keep their current look.
+Design system for **YouTube Buddy's own surfaces**: the action popup
+(`extension/popup.html` markup + inline CSS, `extension/popup.js` wiring) AND the
+whole on-video Note UI — Video Timeline Note Previews, the Expanded Note, the Add
+Note composer, the @-mention popover, and Playback Notification cards — delivered
+via the namespaced injected tokens in `extension/theme.js` (see 1.5). The on-video
+progress-bar markers and feed thumbnail bars (`renderer.js`) remain **out of
+scope** and keep their player-native look, as does the Add Note button sitting
+inside YouTube's own control bar.
 
 Personality: **soft, warm, friendly** without being childish. Cozy over corporate.
 Warmth comes from color, rounded shape, gentle-but-slightly-springy motion, and a
@@ -134,6 +138,33 @@ Two levels only, both warm-tinted (see `--e-pop`, `--e-dialog`). No glassmorphis
 blur. Cards are not the default: the popup is one warm surface with grouped content,
 not a stack of nested cards. Sub-panels (cream `--c-surface-tint`) are used sparingly
 to group the Connected-view status block, never nested.
+
+### 1.5 On-video delivery (namespaced injected tokens)
+
+The on-video Note UI consumes this system through `extension/theme.js`, loaded right
+after `shared.js` in the content-script array. It injects ONE `:root` stylesheet
+into the watch page exposing every token above under a **`--ytb-*` prefix**
+(`--ytb-accent-500`, `--ytb-ink`, `--ytb-r-lg`, `--ytb-ease-spring`, ...) so nothing
+can collide with YouTube's own custom properties, plus the `@font-face` for
+`'YTB Rounded'`. The Nunito base64 subset lives ONLY in theme.js; `popup.html`
+loads the same file as a plain `<script>` so both contexts share one blob.
+
+On-video specifics, on top of the popup values:
+
+- **Opaque over video.** Panels and cards are fully opaque (`--ytb-surface`: cream
+  in light, espresso in dark) with the elevation shadows, so text stays legible over
+  bright frames. Reaction previews/bursts are the deliberate exception — transparent
+  emoji-over-video with a text shadow, since they are not cards.
+- **Theme follows `prefers-color-scheme`**, independent of YouTube's own theme
+  toggle (the popup behaves the same way).
+- The dark block also flips the light washes (`--ytb-accent-050/100/200`) dark and
+  lifts `--ytb-danger-text`, mirroring the popup's inline dark overrides, so
+  "hover = accent-050 wash" and "errors = danger-text" read correctly in both
+  themes. `--ytb-on-accent` / `--ytb-on-fill` match the popup's fill-text contract.
+- theme.js also owns **keystroke isolation** for on-video YTB inputs (a
+  window-capture guard that replays keydowns on the Add Note / Reply textareas as
+  non-bubbling clones, so YouTube player hotkeys never fire while typing) and the
+  inline SVG icon factory (`YTBTheme.icon`) honoring the no-emoji-as-icon rule.
 
 ---
 

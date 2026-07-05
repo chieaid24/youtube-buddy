@@ -56,6 +56,7 @@ test('loads the unpacked extension and runs every content script', async () => {
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
 
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		await expect(page.locator('#ytb-theme')).toHaveCount(1);
 		await expect(page.locator('#ytb-renderer-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-composer-styles')).toHaveCount(1);
