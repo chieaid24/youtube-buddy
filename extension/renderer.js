@@ -5,6 +5,11 @@
 // thumbnails across the home/recommended/search/listing surfaces. Display-only
 // (no click-to-seek).
 //
+// It is also the Room's single poller: every refresh rebroadcasts the fetched
+// Notes + Replies as `ytb:room-data` for notes.js (which owns ALL Note
+// presentation — timeline dots, Note Previews, the Expanded Note, and Playback
+// Notifications). This file renders no Note UI itself.
+//
 // Loaded as the 3rd content-script file (after shared.js + reporter.js, before
 // content.js), so `window.YTB` exists and our `ytb:*` listeners are attached
 // synchronously at top level BEFORE content.js (loaded last) fires the initial
@@ -28,9 +33,6 @@
 	// the CSS defaults below only matter before a color is assigned.
 
 	const MARKER_CLASS = 'ytb-watch-marker';
-	const NOTE_CLASS = 'ytb-watch-note';
-	const NOTE_LOCKED_CLASS = 'ytb-watch-note-locked';
-	const NOTE_DELETE_CLASS = 'ytb-watch-note-delete';
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
 	const THUMB_BAR_CLASS = 'ytb-thumb-bar'; // segmented-bar container
 	const THUMB_SEG_CLASS = 'ytb-thumb-seg'; // one colored segment per Buddy
@@ -38,19 +40,15 @@
 	const TOAST_CLASS = 'ytb-toast'; // one "<Buddy> joined" toast
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
-	const NOTE_POPUP_MAX_DELTA_SECONDS = 2; // larger jumps are seeks, not playback
 
 	// --- state ---
 	let myClientId = null; // memoized; my own records are filtered out
 	let buddyByVideoId = new Map(); // videoId -> Buddy ProgressRecord[] (latest per Buddy)
-	let notesByVideoId = new Map(); // videoId -> Note[] (mine and Buddies')
 	let activeRoomCode = '';
 	let currentVideoId = null; // active /watch video, or null off a watch page
 	let refreshToken = 0; // guards against out-of-order async refreshes
 	let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
 	let baselineReady = false; // skip toasts on the very first read (no false "joined")
-	let lastPlaybackTime = null; // previous timeupdate for natural Note crossings
-	let poppedNoteIds = new Set(); // once per Note for this video-open
 
 	injectStyle();
 
@@ -69,9 +67,9 @@
 		const { code } = await YTB.getConfig();
 		if (!code) {
 			buddyByVideoId = new Map();
-			notesByVideoId = new Map();
 			activeRoomCode = '';
 			resetPresenceBaseline();
+			broadcastRoomData([], [], false);
 			return;
 		}
 		myClientId = myClientId || (await YTB.ensureClientId());
@@ -91,7 +89,7 @@
 		// Locked out of a full Room: I'm not a member and 5 others already are.
 		if (view.locked) {
 			buddyByVideoId = new Map();
-			notesByVideoId = new Map();
+			broadcastRoomData([], [], true);
 			return;
 		}
 
@@ -114,13 +112,18 @@
 		}
 		buddyByVideoId = next;
 
-		const nextNotes = new Map();
-		for (const note of records.notes) {
-			if (!note || !note.id || !note.videoId) continue;
-			if (!nextNotes.has(note.videoId)) nextNotes.set(note.videoId, []);
-			nextNotes.get(note.videoId).push(note);
-		}
-		notesByVideoId = nextNotes;
+		broadcastRoomData(records.notes, records.replies, false);
+	}
+
+	// Hand every refreshed Note + Reply to notes.js (the sole Note-presentation
+	// owner) so it can reconcile the Video Timeline, Reply counts, and Playback
+	// Notifications without polling the Room itself.
+	function broadcastRoomData(notes, replies, locked) {
+		document.dispatchEvent(
+			new CustomEvent('ytb:room-data', {
+				detail: { notes: notes || [], replies: replies || [], roomCode: activeRoomCode, myClientId, locked: Boolean(locked) },
+			}),
+		);
 	}
 
 	// Reset the toast baseline when there is no code (so re-joining later doesn't
@@ -202,84 +205,6 @@
 			marker.style.background = YTB.buddyColor(cid);
 			const who = YTB.buddyName(record.clientId, record.name);
 			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' · ' + YTB.formatTime(record.timestamp);
-		}
-	}
-
-	/** Reconcile all Notes for the active video against the watch progress bar. */
-	function renderWatchNotes(videoId) {
-		const bar = document.querySelector('.ytp-progress-bar');
-		const video = document.querySelector('video');
-		if (!bar || !video) return;
-
-		const duration = Number(video.duration);
-		const desired = new Map();
-		if (videoId && Number.isFinite(duration) && duration > 0) {
-			for (const note of notesByVideoId.get(videoId) || []) {
-				const timestamp = Number(note.timestamp);
-				if (!Number.isFinite(timestamp)) continue;
-				desired.set(note.id, {
-					note,
-					fraction: Math.max(0, Math.min(1, timestamp / duration)),
-					locked: Boolean(note.spoiler) && Number(video.currentTime) < timestamp,
-				});
-			}
-		}
-
-		const existing = new Map();
-		for (const dot of bar.querySelectorAll(':scope > .' + NOTE_CLASS)) {
-			const id = dot.dataset.ytbNoteId;
-			if (desired.has(id)) existing.set(id, dot);
-			else dot.remove();
-		}
-		if (desired.size === 0) return;
-		if (getComputedStyle(bar).position === 'static') bar.style.position = 'relative';
-
-		for (const [id, { note, fraction, locked }] of desired) {
-			let dot = existing.get(id);
-			if (!dot) {
-				dot = document.createElement('div');
-				dot.className = NOTE_CLASS;
-				dot.dataset.ytbNoteId = id;
-				dot.appendChild(document.createElement('div')).className = TOOLTIP_CLASS;
-				bar.appendChild(dot);
-			}
-			dot.style.left = (fraction * 100).toFixed(3) + '%';
-			dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
-			dot.classList.toggle(NOTE_LOCKED_CLASS, locked);
-			const signature = JSON.stringify([locked, note.clientId, note.name, note.body]);
-			if (dot.dataset.ytbNoteSig === signature) continue;
-			dot.dataset.ytbNoteSig = signature;
-			const tooltip = dot.querySelector('.' + TOOLTIP_CLASS);
-			tooltip.replaceChildren();
-			if (locked) {
-				tooltip.textContent = '(spoiler)';
-				continue;
-			}
-			const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
-			const content = document.createElement('span');
-			content.textContent = who + ' - ' + note.body;
-			tooltip.appendChild(content);
-			if (note.clientId === myClientId) {
-				const button = document.createElement('button');
-				button.type = 'button';
-				button.className = NOTE_DELETE_CLASS;
-				button.textContent = 'Delete';
-				button.addEventListener('click', async (event) => {
-					event.stopPropagation();
-					button.disabled = true;
-					if (!(await YTB.deleteNote(activeRoomCode, myClientId, id))) {
-						button.disabled = false;
-						return;
-					}
-					const notes = notesByVideoId.get(videoId) || [];
-					notesByVideoId.set(
-						videoId,
-						notes.filter((item) => item.id !== id),
-					);
-					renderWatchNotes(videoId);
-				});
-				tooltip.appendChild(button);
-			}
 		}
 	}
 
@@ -417,34 +342,6 @@
 		}, 4000);
 	}
 
-	/** Show each Note crossed by ordinary forward playback once per video-open. */
-	function popCrossedNotes(video) {
-		const currentTime = Number(video.currentTime);
-		if (!currentVideoId || !Number.isFinite(currentTime)) {
-			lastPlaybackTime = null;
-			return;
-		}
-
-		const previousTime = lastPlaybackTime;
-		lastPlaybackTime = currentTime;
-		if (
-			previousTime === null ||
-			video.seeking ||
-			currentTime <= previousTime ||
-			currentTime - previousTime > NOTE_POPUP_MAX_DELTA_SECONDS
-		) {
-			return;
-		}
-
-		for (const note of notesByVideoId.get(currentVideoId) || []) {
-			const timestamp = Number(note.timestamp);
-			if (!Number.isFinite(timestamp) || timestamp <= previousTime || timestamp > currentTime || poppedNoteIds.has(note.id)) continue;
-			poppedNoteIds.add(note.id);
-			const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
-			showToast(who + ' - ' + note.body);
-		}
-	}
-
 	/** Inject the renderer's CSS once (no separate stylesheet file). */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
@@ -462,22 +359,6 @@
         z-index: 40;
         cursor: default;
       }
-	  .${NOTE_CLASS} {
-		position: absolute;
-		top: 50%;
-		width: 9px;
-		height: 9px;
-		margin: -4.5px 0 0 -4.5px;
-		border: 1px solid rgba(0, 0, 0, 0.7);
-		border-radius: 50%;
-		box-sizing: border-box;
-		z-index: 41;
-		cursor: default;
-	  }
-	  .${NOTE_LOCKED_CLASS} {
-		filter: grayscale(1);
-		opacity: 0.55;
-	  }
       .${TOOLTIP_CLASS} {
         position: absolute;
         bottom: 18px;
@@ -496,25 +377,9 @@
         z-index: 1;
       }
       .${MARKER_CLASS}:hover .${TOOLTIP_CLASS},
-	  .${NOTE_CLASS}:hover .${TOOLTIP_CLASS},
       .${THUMB_SEG_CLASS}:hover .${TOOLTIP_CLASS} {
         opacity: 1;
       }
-	  .${NOTE_CLASS} .${TOOLTIP_CLASS} {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		pointer-events: auto;
-	  }
-	  .${NOTE_DELETE_CLASS} {
-		border: 0;
-		border-radius: 3px;
-		padding: 2px 5px;
-		background: #d93025;
-		color: #fff;
-		font: inherit;
-		cursor: pointer;
-	  }
       .${THUMB_BAR_CLASS} {
         position: absolute;
         left: 0;
@@ -571,13 +436,10 @@
 
 	document.addEventListener('ytb:navigate', async (e) => {
 		currentVideoId = (e.detail && e.detail.videoId) || null;
-		lastPlaybackTime = null;
-		poppedNoteIds = new Set();
 		const token = ++refreshToken;
 		await refresh();
 		if (token !== refreshToken) return; // a newer navigate superseded this one
 		renderWatchMarker(currentVideoId);
-		renderWatchNotes(currentVideoId);
 		renderThumbnails();
 	});
 
@@ -586,7 +448,6 @@
 		// Use the cached records — no re-GET. Re-apply the markers too, since the
 		// progress bar may have only just appeared after the last navigate.
 		renderWatchMarker(currentVideoId);
-		renderWatchNotes(currentVideoId);
 		renderThumbnails();
 	});
 
@@ -594,7 +455,6 @@
 		if (area !== 'local' || !changes.buddyColors) return;
 		YTB._buddyColors = changes.buddyColors.newValue || {};
 		renderWatchMarker(currentVideoId);
-		renderWatchNotes(currentVideoId);
 		renderThumbnails();
 	});
 
@@ -606,27 +466,6 @@
 		await refresh();
 		if (token !== refreshToken) return;
 		renderWatchMarker(currentVideoId);
-		renderWatchNotes(currentVideoId);
 		renderThumbnails();
 	}, PRESENCE_POLL_MS);
-
-	// Spoiler state follows the active playhead. Note pop-ups only follow small,
-	// natural forward crossings; seeking explicitly rebases the crossing window.
-	document.addEventListener(
-		'seeking',
-		(event) => {
-			if (event.target instanceof HTMLVideoElement) lastPlaybackTime = Number(event.target.currentTime);
-		},
-		true,
-	);
-
-	document.addEventListener(
-		'timeupdate',
-		(event) => {
-			if (!(event.target instanceof HTMLVideoElement)) return;
-			renderWatchNotes(currentVideoId);
-			popCrossedNotes(event.target);
-		},
-		true,
-	);
 })();
