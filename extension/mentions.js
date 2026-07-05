@@ -202,6 +202,8 @@
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
+		// Consumes the namespaced --ytb-* tokens injected by theme.js (the shared
+		// on-video apricot foundation), matching the composer/panel it floats in.
 		style.textContent = `
       .${POPOVER_CLASS} {
         position: absolute;
@@ -209,23 +211,24 @@
         min-width: 160px;
         max-width: 240px;
         padding: 4px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 8px;
-        background: #212121;
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
-        font: 13px/1.4 Roboto, Arial, sans-serif;
-        color: #fff;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-md);
+        background: var(--ytb-surface);
+        box-shadow: var(--ytb-e-pop);
+        font: 13px/1.4 var(--ytb-font);
+        color: var(--ytb-ink);
       }
       .${OPTION_CLASS} {
         padding: 6px 9px;
         border-left: 3px solid transparent;
-        border-radius: 5px;
+        border-radius: var(--ytb-r-sm);
+        font-weight: 600;
         cursor: pointer;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .${OPTION_CLASS}.is-active { background: rgba(255, 255, 255, 0.14); }
+      .${OPTION_CLASS}.is-active { background: var(--ytb-accent-050); }
     `;
 		(document.head || document.documentElement).appendChild(style);
 	}

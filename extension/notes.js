@@ -7,10 +7,19 @@
 //   - hover/focus Note Previews (two-line body, author beneath, Reply count,
 //     corner timestamp) reachable across a transparent hover bridge;
 //   - the Expanded Note: a pinned conversation panel with Replies, a Reply
-//     composer, and the author-only delete confirmation;
+//     composer (paper-plane send), a "Go here" seek-and-play control, and the
+//     author-only delete confirmation;
+//   - click-to-seek on locked Spoiler dots (Go here without opening — the Note
+//     reveals through its natural crossing, never early);
 //   - Playback Notifications: bottom-center note cards (~4s, clickable) and
 //     animated Reaction bursts (~2s, non-interactive) on every NATURAL forward
 //     crossing — rewind-and-replay triggers again, direct seeks stay silent.
+//
+// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
+// by theme.js (the shared on-video apricot foundation); theme.js also isolates
+// keystrokes in the Reply textarea from YouTube's player hotkeys by replaying
+// them as non-bubbling clones, so the plain keydown listeners below only ever
+// see events the player cannot.
 //
 // Pure consumer per ADR-0001: content.js owns navigation/mutation events and
 // renderer.js owns Room polling (rebroadcast here as `ytb:room-data`). The only
@@ -208,7 +217,7 @@
 			dot.setAttribute(
 				'aria-label',
 				locked
-					? `Spoiler note at ${at}`
+					? `Spoiler note at ${at}. Jump to just before it`
 					: isReaction
 						? `Reaction ${note.body} by ${who} at ${at}`
 						: `Note by ${who} at ${at}. Open conversation`,
@@ -218,14 +227,34 @@
 	}
 
 	// A text Note opens on click/Enter/Space; a Reaction only exposes its
-	// preview on hover/focus; a locked Spoiler does nothing until unlocked.
+	// preview on hover/focus; a locked Spoiler performs Go here — it seeks to
+	// just before its moment and plays, so the Note reveals through the natural
+	// crossing. It is still never previewed or expanded while locked.
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
-		if (!note || note.kind === 'emoji') return;
+		if (!note) return;
 		const video = document.querySelector('video');
 		const locked = Boolean(note.spoiler) && video && Number(video.currentTime) < Number(note.timestamp);
-		if (locked) return;
+		if (locked) {
+			goHere(note);
+			return;
+		}
+		if (note.kind === 'emoji') return;
 		openPanel(note);
+	}
+
+	/**
+	 * Go here: seek to roughly one second before the Note and resume playback,
+	 * so the Note reveals through its own Playback Notification on the natural
+	 * forward crossing. Local playback control only (no write), so it works
+	 * regardless of Sharing. If an Expanded Note is open, the resulting 'play'
+	 * event closes it via the existing manual-resume path.
+	 */
+	function goHere(note) {
+		const video = document.querySelector('video');
+		if (!video) return;
+		video.currentTime = YTB.goHereTarget(Number(note.timestamp));
+		video.play();
 	}
 
 	function findNote(id) {
@@ -239,12 +268,16 @@
 	function buildPreview(preview, note, who, locked, count) {
 		preview.replaceChildren();
 		preview.classList.toggle('ytb-preview-reaction', note.kind === 'emoji' && !locked);
-		// A locked Spoiler can never be previewed: no author, no timestamp.
+		// A locked Spoiler can never be previewed: no author, no timestamp —
+		// only the click-to-seek affordance is hinted.
 		if (locked) {
 			const label = document.createElement('div');
 			label.className = 'ytb-preview-spoiler';
 			label.textContent = 'Spoiler';
-			preview.append(label);
+			const hint = document.createElement('div');
+			hint.className = 'ytb-preview-spoiler-hint';
+			hint.textContent = 'Click to jump here';
+			preview.append(label, hint);
 			return;
 		}
 		// The Note's video timestamp, pinned in the top-right corner — replaces the
@@ -261,17 +294,20 @@
 			const author = document.createElement('div');
 			author.className = 'ytb-preview-emoji-author';
 			author.textContent = who;
+			if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 			preview.append(emoji, author);
 			return;
 		}
-		// Text Note: body first, author beneath it, Reply count last.
+		// Text Note: the body is the hero, author small beneath it (own
+		// authorship stays a neutral "You" — the stylesheet's muted default),
+		// Reply count last.
 		const body = document.createElement('div');
 		body.className = 'ytb-preview-body';
 		body.textContent = note.body;
 		const author = document.createElement('div');
 		author.className = 'ytb-preview-author';
 		author.textContent = who;
-		author.style.color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		preview.append(body, author);
 		if (count > 0) {
 			const replies = document.createElement('div');
@@ -338,25 +374,42 @@
 		panel.setAttribute('aria-label', `Note by ${who}`);
 		panel.tabIndex = -1;
 
-		const author = document.createElement('div');
-		author.className = 'ytb-panel-author';
-		author.textContent = who;
-		author.style.color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
-
+		// The Note text is the hero; the author renders small beneath it (own
+		// authorship stays a neutral "You" via the stylesheet's muted default).
 		const body = document.createElement('p');
 		body.className = 'ytb-panel-body';
 		body.textContent = note.body;
 
-		const meta = document.createElement('div');
-		meta.className = 'ytb-panel-meta';
-		const at = document.createElement('span');
-		at.textContent = `At ${YTB.formatTime(note.timestamp)} in video`;
+		const byline = document.createElement('div');
+		byline.className = 'ytb-panel-byline';
+		const author = document.createElement('span');
+		author.className = 'ytb-panel-author';
+		author.textContent = who;
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		const posted = document.createElement('span');
-		posted.className = 'ytb-rel';
+		posted.className = 'ytb-rel ytb-panel-posted';
 		posted.dataset.ytbCreatedAt = String(note.createdAt || Date.now());
 		posted.dataset.ytbPrefix = 'Posted ';
 		posted.textContent = 'Posted ' + YTB.relativeTime(Number(posted.dataset.ytbCreatedAt));
-		meta.append(at, posted);
+		byline.append(author, posted);
+
+		// Note actions: Go here (always — it is local playback control), and the
+		// author-only deemphasized delete with its in-panel confirmation.
+		const actions = document.createElement('div');
+		actions.className = 'ytb-panel-actions';
+		const atLabel = YTB.formatTime(note.timestamp);
+		const goHereButton = document.createElement('button');
+		goHereButton.type = 'button';
+		goHereButton.className = 'ytb-panel-gohere';
+		goHereButton.setAttribute('aria-label', `Go here: play from just before ${atLabel}`);
+		const goHereText = document.createElement('span');
+		goHereText.textContent = 'Go here';
+		const goHereTime = document.createElement('span');
+		goHereTime.className = 'ytb-panel-gohere-time';
+		goHereTime.textContent = atLabel;
+		goHereButton.append(YTBTheme.icon('play'), goHereText, goHereTime);
+		goHereButton.addEventListener('click', () => goHere(note));
+		actions.append(goHereButton);
 
 		const replies = document.createElement('div');
 		replies.className = 'ytb-panel-replies';
@@ -369,11 +422,10 @@
 		error.className = 'ytb-panel-error';
 		error.setAttribute('role', 'status');
 
-		panel.append(author, body, meta, replies, replyArea, error);
+		panel.append(body, byline, actions, replies, replyArea, error);
 
-		// Author-only, deemphasized delete with an in-panel confirmation.
 		if (note.clientId === myClientId) {
-			panel.append(buildDeleteFooter(panel, note));
+			panel.append(buildDeleteConfirm(panel, note, actions));
 		}
 
 		// Keep panel interactions inside the panel (no player seeks/toggles).
@@ -394,14 +446,18 @@
 		return panel;
 	}
 
-	function buildDeleteFooter(panel, note) {
-		const footer = document.createElement('div');
-		footer.className = 'ytb-panel-footer';
-
+	/**
+	 * The author-only delete flow: a deemphasized "Delete" in the Note actions
+	 * row that swaps to an in-panel confirmation ("Really delete it?", naming
+	 * how many Replies cascade with it). Returns the confirm block; the trigger
+	 * is appended to `actions` directly.
+	 */
+	function buildDeleteConfirm(panel, note, actions) {
 		const remove = document.createElement('button');
 		remove.type = 'button';
 		remove.className = 'ytb-panel-delete';
-		remove.textContent = 'Delete note';
+		remove.textContent = 'Delete';
+		actions.append(remove);
 
 		const confirm = document.createElement('div');
 		confirm.className = 'ytb-panel-confirm';
@@ -410,8 +466,8 @@
 		const text = document.createElement('p');
 		text.className = 'ytb-panel-confirm-text';
 
-		const actions = document.createElement('div');
-		actions.className = 'ytb-panel-confirm-actions';
+		const confirmActions = document.createElement('div');
+		confirmActions.className = 'ytb-panel-confirm-actions';
 		const yes = document.createElement('button');
 		yes.type = 'button';
 		yes.className = 'ytb-panel-confirm-delete';
@@ -420,14 +476,11 @@
 		cancel.type = 'button';
 		cancel.className = 'ytb-panel-confirm-cancel';
 		cancel.textContent = 'Cancel';
-		actions.append(yes, cancel);
-		confirm.append(text, actions);
+		confirmActions.append(yes, cancel);
+		confirm.append(text, confirmActions);
 
 		remove.addEventListener('click', () => {
-			const count = replyCount(note.id);
-			text.textContent =
-				'Really delete your note? No Buddy will be able to see it.' +
-				(count > 0 ? ` This will also delete ${count === 1 ? '1 reply' : `${count} replies`}.` : '');
+			text.textContent = YTB.deleteConfirmCopy(replyCount(note.id));
 			confirm.hidden = false;
 			remove.hidden = true;
 			yes.focus();
@@ -454,8 +507,7 @@
 			dismissPanel({ refocusDot: false });
 		});
 
-		footer.append(remove, confirm);
-		return footer;
+		return confirm;
 	}
 
 	function removeNoteEverywhere(note) {
@@ -468,31 +520,40 @@
 		renderDots();
 	}
 
-	/** Rebuild the Reply list (oldest → newest), keeping a bottom-pinned scroll. */
+	/**
+	 * Rebuild the Reply list (oldest → newest), keeping a bottom-pinned scroll.
+	 * Reply text is the hero with the author small beneath it (matching the
+	 * Note itself); rows that were not in the previous render settle in with a
+	 * mild spring — except on the very first render, which seeds silently.
+	 */
 	function renderReplies(panel, replies) {
 		const wrap = panel.querySelector('.ytb-panel-replies');
 		if (!wrap) return;
 		const pinned = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 24;
+		const seen = wrap._ytbSeenReplies || (wrap._ytbSeenReplies = new Set());
+		const initial = seen.size === 0;
 		wrap.replaceChildren();
 		for (const reply of replies) {
 			const row = document.createElement('div');
 			row.className = 'ytb-panel-reply';
-			const head = document.createElement('div');
-			head.className = 'ytb-panel-reply-head';
+			if (!initial && !seen.has(reply.id)) row.classList.add('ytb-new');
+			seen.add(reply.id);
+			const body = document.createElement('p');
+			body.className = 'ytb-panel-reply-body';
+			body.textContent = reply.body;
+			const byline = document.createElement('div');
+			byline.className = 'ytb-panel-reply-byline';
 			const author = document.createElement('span');
 			author.className = 'ytb-panel-reply-author';
 			author.textContent = reply.clientId === myClientId ? 'You' : YTB.buddyName(reply.clientId, reply.name);
-			author.style.color = reply.clientId === myClientId ? '#fff' : YTB.buddyColor(reply.clientId);
+			if (reply.clientId !== myClientId) author.style.color = YTB.buddyColor(reply.clientId);
 			const when = document.createElement('span');
 			when.className = 'ytb-rel ytb-panel-reply-time';
 			when.dataset.ytbCreatedAt = String(reply.createdAt || Date.now());
 			when.dataset.ytbPrefix = '';
 			when.textContent = YTB.relativeTime(Number(when.dataset.ytbCreatedAt));
-			head.append(author, when);
-			const body = document.createElement('p');
-			body.className = 'ytb-panel-reply-body';
-			body.textContent = reply.body;
-			row.append(head, body);
+			byline.append(author, when);
+			row.append(body, byline);
 			wrap.append(row);
 		}
 		if (pinned) wrap.scrollTop = wrap.scrollHeight;
@@ -515,6 +576,8 @@
 			return;
 		}
 
+		const composer = document.createElement('div');
+		composer.className = 'ytb-panel-composer';
 		const textarea = document.createElement('textarea');
 		textarea.className = 'ytb-panel-reply-input';
 		textarea.maxLength = YTB.NOTE_MAX_CHARS;
@@ -523,10 +586,30 @@
 		textarea.setAttribute('aria-label', 'Write a reply');
 		// The @-mention popover must attach BEFORE our own keydown listener so an
 		// open popover consumes Enter/Escape instead of posting/dismissing.
+		// (theme.js's capture guard replays keydowns on this textarea as
+		// non-bubbling clones, so both listeners run while YouTube sees nothing.)
 		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
-		textarea.addEventListener('input', () => autosize(textarea));
+
+		// Paper-plane send: springs in once the field is non-empty. Enter still
+		// posts and Shift+Enter still inserts a newline.
+		const send = document.createElement('button');
+		send.type = 'button';
+		send.className = 'ytb-panel-send';
+		send.setAttribute('aria-label', 'Send reply');
+		send.append(YTBTheme.icon('send'));
+		const syncSend = () => {
+			const filled = textarea.value.trim() !== '';
+			send.classList.toggle('show', filled);
+			send.tabIndex = filled ? 0 : -1;
+			send.setAttribute('aria-hidden', String(!filled));
+		};
+		send.addEventListener('click', () => submitReply(panel, note, textarea, mentionCtl));
+
+		textarea.addEventListener('input', () => {
+			autosize(textarea);
+			syncSend();
+		});
 		textarea.addEventListener('keydown', (event) => {
-			event.stopPropagation(); // never feed YouTube's player hotkeys
 			if (event.key === 'Escape') {
 				dismissPanel({ refocusDot: true });
 				return;
@@ -537,7 +620,9 @@
 				submitReply(panel, note, textarea, mentionCtl);
 			}
 		});
-		area.append(textarea);
+		composer.append(textarea, send);
+		area.append(composer);
+		syncSend();
 	}
 
 	async function submitReply(panel, note, textarea, mentionCtl) {
@@ -562,10 +647,11 @@
 		textarea.disabled = false;
 
 		if (result.ok) {
-			// Success appends immediately, oldest → newest, without closing.
+			// Success appends immediately, oldest → newest, without closing. The
+			// synthetic input resizes the field and retracts the send button.
 			textarea.value = '';
 			mentionCtl?.reset();
-			autosize(textarea);
+			textarea.dispatchEvent(new Event('input', { bubbles: true }));
 			appendLocalReply(panel, note, result.reply);
 			textarea.focus();
 			return;
@@ -664,11 +750,12 @@
 		const left = Math.max(8, Math.min(center - width / 2, hostRect.width - width - 8));
 		panel.style.left = left + 'px';
 
-		// Never taller than the player: the Reply list absorbs the squeeze.
+		// Never taller than the player: the Reply list absorbs the squeeze (the
+		// 190 covers the panel's fixed chrome — body, byline, actions, composer).
 		const replies = panel.querySelector('.ytb-panel-replies');
 		if (replies) {
 			const spare = hostRect.height - parseFloat(panel.style.bottom) - 16;
-			replies.style.maxHeight = Math.max(64, Math.min(180, spare - 170)) + 'px';
+			replies.style.maxHeight = Math.max(64, Math.min(180, spare - 190)) + 'px';
 		}
 	}
 
@@ -784,7 +871,7 @@
 		const author = document.createElement('div');
 		author.className = 'ytb-alert-author';
 		author.textContent = who;
-		author.style.color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		// Author beneath the content, matching the Note Preview (no timestamp here —
 		// a Playback Notification fires exactly as playback crosses the moment).
 		card.append(body, author);
@@ -815,6 +902,9 @@
 		const author = document.createElement('div');
 		author.className = 'ytb-alert-burst-author';
 		author.textContent = who;
+		// Over the raw video (no card): Buddy Color with a shadow keeps identity
+		// legible; own bursts stay the default white "You".
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		burst.append(emoji, author);
 		wrap.append(burst);
 		setTimeout(() => burst.remove(), REACTION_BURST_MS);
@@ -916,13 +1006,18 @@
       }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {
-        outline: 2px solid #3ea6ff;
+        outline: 2px solid var(--ytb-accent-500);
         outline-offset: 1px;
       }
+      /* Locked Spoilers stay visually obscured but are click-to-seek (Go here). */
       .${DOT_LOCKED_CLASS} {
         filter: grayscale(1);
         opacity: 0.55;
+        cursor: pointer;
       }
+      .${DOT_LOCKED_CLASS}:hover, .${DOT_LOCKED_CLASS}:focus-visible { opacity: 0.85; }
+
+      /* --- Note Preview: opaque warm card (apricot system) --- */
       .${PREVIEW_CLASS} {
         position: absolute;
         bottom: 18px;
@@ -930,15 +1025,17 @@
         transform: translateX(-50%);
         width: max-content;
         max-width: 240px;
-        padding: 8px 10px;
-        border-radius: 6px;
-        background: rgba(0, 0, 0, 0.88);
-        color: #fff;
-        font: 12px/1.35 Roboto, Arial, sans-serif;
+        padding: 9px 11px;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-md);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
+        box-shadow: var(--ytb-e-pop);
+        font: 12px/1.4 var(--ytb-font);
         text-align: left;
         opacity: 0;
         pointer-events: none;
-        transition: opacity 0.1s;
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
         z-index: 60;
       }
       /* Transparent hover bridge: spans the gap between the preview and the dot so
@@ -966,8 +1063,12 @@
         pointer-events: auto;
         cursor: pointer;
       }
+      /* Reactions keep the transparent over-video treatment (not a card). */
       .${PREVIEW_CLASS}.ytb-preview-reaction {
+        border: 0;
         background: transparent;
+        box-shadow: none;
+        color: #fff;
         padding-top: 18px;
         min-width: 52px;
         text-align: center;
@@ -977,116 +1078,201 @@
          text card and the transparent Reaction preview. */
       .ytb-preview-time {
         position: absolute;
-        top: 6px;
-        right: 8px;
-        color: #bbb;
+        top: 7px;
+        right: 9px;
+        color: var(--ytb-ink-faint);
         font-size: 11px;
+        font-weight: 600;
         font-variant-numeric: tabular-nums;
       }
       .ytb-preview-reaction .ytb-preview-time { color: #eee; }
-      .ytb-preview-author { font-weight: 600; margin-top: 4px; }
+      /* Content is the hero; the author sits small beneath it (own authorship
+         stays the muted neutral "You"; Buddies get their Buddy Color inline). */
       .ytb-preview-body {
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
         padding-right: 34px;
-        color: #e8e8e8;
+        font-weight: 600;
         overflow-wrap: anywhere;
       }
-      .ytb-preview-replies { margin-top: 4px; color: #3ea6ff; font-weight: 500; }
-      .ytb-preview-spoiler { color: #aaa; font-style: italic; }
+      .ytb-preview-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-preview-replies { margin-top: 4px; color: var(--ytb-accent-800); font-size: 11px; font-weight: 700; }
+      .ytb-preview-spoiler { color: var(--ytb-ink-muted); font-style: italic; font-weight: 600; }
+      .ytb-preview-spoiler-hint { margin-top: 2px; color: var(--ytb-ink-faint); font-size: 10.5px; }
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
-      .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; }
+      .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
       /* Suppress ONLY YouTube's native scrubber time while a dot/preview is
          hovered; its storyboard thumbnail (.ytp-tooltip-bg) is left intact. */
       .${SCRUB_HIDE_CLASS} .ytp-tooltip-text { visibility: hidden !important; }
 
+      /* --- the Expanded Note: opaque warm surface (cream / espresso) --- */
       #${PANEL_ID} {
         position: absolute;
         z-index: 2100;
         box-sizing: border-box;
-        padding: 12px 14px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 10px;
-        background: #212121;
-        color: #fff;
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
-        font: 13px/1.4 Roboto, Arial, sans-serif;
+        padding: 14px 16px;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-lg);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
+        box-shadow: var(--ytb-e-dialog);
+        font: 13px/1.45 var(--ytb-font);
         text-align: left;
+        animation: ytb-pop-in var(--ytb-dur-base) var(--ytb-ease-spring);
       }
       #${PANEL_ID}:focus { outline: none; }
-      .ytb-panel-author { font-weight: 600; font-size: 14px; }
-      .ytb-panel-body { margin: 6px 0 4px; overflow-wrap: anywhere; }
-      .ytb-panel-meta {
+      @keyframes ytb-pop-in {
+        from { opacity: 0; transform: scale(0.96) translateY(4px); }
+      }
+      .ytb-panel-body { margin: 0; font-size: 15px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+      .ytb-panel-byline {
         display: flex;
+        align-items: baseline;
         justify-content: space-between;
         gap: 10px;
-        margin-bottom: 8px;
-        color: #aaa;
-        font-size: 11px;
+        margin-top: 4px;
       }
+      .ytb-panel-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-panel-posted { color: var(--ytb-ink-faint); font-size: 11px; white-space: nowrap; }
+      .ytb-panel-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      /* Go here: the one apricot primary in the panel. */
+      .ytb-panel-gohere {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 0;
+        border-radius: var(--ytb-r-pill);
+        background: var(--ytb-accent-500);
+        color: var(--ytb-on-accent);
+        font: 700 12px/1 var(--ytb-font);
+        cursor: pointer;
+        transition:
+          background var(--ytb-dur-quick) var(--ytb-ease-out),
+          transform var(--ytb-dur-quick) var(--ytb-ease-spring);
+      }
+      .ytb-panel-gohere:hover { background: var(--ytb-accent-600); }
+      .ytb-panel-gohere:active { transform: scale(0.97); }
+      .ytb-panel-gohere:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      .ytb-panel-gohere svg { width: 12px; height: 12px; }
+      .ytb-panel-gohere-time { font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.72; }
+      .ytb-panel-delete {
+        padding: 6px 8px;
+        border: 0;
+        border-radius: var(--ytb-r-sm);
+        background: transparent;
+        color: var(--ytb-ink-faint);
+        font: 600 12px/1 var(--ytb-font);
+        cursor: pointer;
+        transition: color var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      .ytb-panel-delete:hover, .ytb-panel-delete:focus-visible { color: var(--ytb-danger-text); outline: none; }
+      .ytb-panel-delete:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
       .ytb-panel-replies {
         max-height: 180px;
         overflow-y: auto;
-        border-top: 1px solid rgba(255, 255, 255, 0.12);
+        margin-top: 10px;
+        border-top: 1px solid var(--ytb-line);
       }
-      .ytb-panel-replies:empty { border-top: 0; }
-      .ytb-panel-reply { padding: 7px 0 2px; }
-      .ytb-panel-reply-head { display: flex; justify-content: space-between; gap: 8px; }
-      .ytb-panel-reply-author { font-weight: 600; font-size: 12px; }
-      .ytb-panel-reply-time { color: #aaa; font-size: 11px; }
-      .ytb-panel-reply-body { margin: 2px 0 0; color: #e8e8e8; overflow-wrap: anywhere; }
-      .ytb-panel-reply-area { margin-top: 8px; }
+      .ytb-panel-replies:empty { margin-top: 0; border-top: 0; }
+      .ytb-panel-reply { padding: 8px 0 2px; }
+      .ytb-panel-reply.ytb-new { animation: ytb-pop-in var(--ytb-dur-slow) var(--ytb-ease-spring); }
+      .ytb-panel-reply-body { margin: 0; overflow-wrap: anywhere; }
+      .ytb-panel-reply-byline { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
+      .ytb-panel-reply-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-panel-reply-time { color: var(--ytb-ink-faint); font-size: 11px; white-space: nowrap; }
+      .ytb-panel-reply-area { margin-top: 10px; }
+      .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 6px; }
       .ytb-panel-reply-input {
-        display: block;
-        width: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
         box-sizing: border-box;
-        padding: 7px 9px;
-        border: 1px solid #555;
-        border-radius: 6px;
-        background: #181818;
-        color: #fff;
-        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid var(--ytb-line-strong);
+        border-radius: var(--ytb-r-sm);
+        background: var(--ytb-surface-sunk);
+        color: var(--ytb-ink);
+        font: 13px/1.4 var(--ytb-font);
         resize: none;
         overflow: hidden;
+        transition:
+          border-color var(--ytb-dur-quick) var(--ytb-ease-out),
+          box-shadow var(--ytb-dur-quick) var(--ytb-ease-out);
       }
-      .ytb-panel-reply-input:focus { border-color: #3ea6ff; outline: none; }
-      .ytb-panel-reply-note { margin: 4px 0 0; color: #aaa; font-size: 12px; }
-      .ytb-panel-error { min-height: 16px; margin-top: 6px; color: #ff8a80; font-size: 12px; }
-      .ytb-panel-footer { margin-top: 4px; }
-      .ytb-panel-delete {
+      .ytb-panel-reply-input::placeholder { color: var(--ytb-ink-faint); }
+      .ytb-panel-reply-input:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
+      /* Paper-plane send: springs in once the field is non-empty. */
+      .ytb-panel-send {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
         padding: 0;
         border: 0;
-        background: transparent;
-        color: #888;
-        font: 12px Roboto, Arial, sans-serif;
+        border-radius: 50%;
+        background: var(--ytb-accent-500);
+        color: var(--ytb-on-accent);
         cursor: pointer;
+        opacity: 0;
+        transform: scale(0.5);
+        pointer-events: none;
+        transition:
+          opacity var(--ytb-dur-quick) var(--ytb-ease-out),
+          transform var(--ytb-dur-base) var(--ytb-ease-spring),
+          background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
-      .ytb-panel-delete:hover, .ytb-panel-delete:focus-visible { color: #ff8a80; text-decoration: underline; outline: none; }
-      .ytb-panel-confirm-text { margin: 6px 0; color: #fff; }
+      .ytb-panel-send.show { opacity: 1; transform: scale(1); pointer-events: auto; }
+      .ytb-panel-send:hover { background: var(--ytb-accent-600); }
+      .ytb-panel-send:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      .ytb-panel-send svg { width: 15px; height: 15px; }
+      .ytb-panel-reply-note { margin: 4px 0 0; color: var(--ytb-ink-muted); font-size: 12px; }
+      .ytb-panel-error { min-height: 16px; margin-top: 6px; color: var(--ytb-danger-text); font-size: 12px; font-weight: 600; }
+      /* Delete confirmation: cream sub-panel with the danger-button treatment. */
+      .ytb-panel-confirm {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: var(--ytb-r-md);
+        background: var(--ytb-surface-tint);
+        animation: ytb-pop-in var(--ytb-dur-base) var(--ytb-ease-spring);
+      }
+      .ytb-panel-confirm-text { margin: 0 0 8px; font-weight: 600; }
       .ytb-panel-confirm-actions { display: flex; gap: 8px; }
       .ytb-panel-confirm-delete {
-        padding: 5px 12px;
+        padding: 6px 14px;
         border: 0;
-        border-radius: 14px;
-        background: #d93025;
-        color: #fff;
-        font: 600 12px Roboto, Arial, sans-serif;
+        border-radius: var(--ytb-r-pill);
+        background: var(--ytb-danger);
+        color: var(--ytb-on-fill);
+        font: 700 12px/1.3 var(--ytb-font);
         cursor: pointer;
+        transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
+      .ytb-panel-confirm-delete:hover { background: var(--ytb-danger-hover); }
       .ytb-panel-confirm-cancel {
-        padding: 5px 12px;
-        border: 1px solid #555;
-        border-radius: 14px;
-        background: transparent;
-        color: #fff;
-        font: 600 12px Roboto, Arial, sans-serif;
+        padding: 6px 14px;
+        border: 1px solid var(--ytb-line-strong);
+        border-radius: var(--ytb-r-pill);
+        background: var(--ytb-surface-tint);
+        color: var(--ytb-ink);
+        font: 600 12px/1.3 var(--ytb-font);
         cursor: pointer;
+        transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
+      .ytb-panel-confirm-cancel:hover { background: var(--ytb-accent-050); }
       .ytb-panel-confirm-delete:disabled, .ytb-panel-confirm-cancel:disabled { opacity: 0.5; cursor: default; }
-      .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: 2px solid #3ea6ff; }
+      .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
 
+      /* --- Playback Notifications --- */
       #${ALERTS_ID} {
         position: absolute;
         left: 50%;
@@ -1103,30 +1289,32 @@
         width: max-content;
         max-width: 260px;
         box-sizing: border-box;
-        padding: 8px 12px;
-        border: 0;
-        border-radius: 8px;
-        background: rgba(0, 0, 0, 0.85);
-        color: #fff;
-        font: 12px/1.35 Roboto, Arial, sans-serif;
+        padding: 9px 12px;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-md);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
+        font: 12px/1.4 var(--ytb-font);
         text-align: left;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--ytb-e-pop);
         cursor: pointer;
         opacity: 0;
-        transform: translateY(8px);
-        transition: opacity 0.25s, transform 0.25s;
+        transform: translateY(10px) scale(0.97);
+        transition:
+          opacity var(--ytb-dur-base) var(--ytb-ease-out),
+          transform var(--ytb-dur-slow) var(--ytb-ease-spring);
       }
-      .ytb-alert-card.show { opacity: 1; transform: translateY(0); }
-      .ytb-alert-card:focus-visible { outline: 2px solid #3ea6ff; }
-      .ytb-alert-author { font-weight: 600; margin-top: 3px; }
+      .ytb-alert-card.show { opacity: 1; transform: translateY(0) scale(1); }
+      .ytb-alert-card:focus-visible { outline: none; box-shadow: var(--ytb-e-pop), 0 0 0 3px var(--ytb-ring); }
       .ytb-alert-body {
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        color: #e8e8e8;
+        font-weight: 600;
         overflow-wrap: anywhere;
       }
+      .ytb-alert-author { margin-top: 3px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-alert-burst {
         pointer-events: none;
         text-align: center;
@@ -1135,12 +1323,28 @@
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
       .ytb-alert-burst-emoji { font-size: 34px; line-height: 1.1; }
-      .ytb-alert-burst-author { color: #fff; font: 11px Roboto, Arial, sans-serif; }
+      .ytb-alert-burst-author { color: #fff; font: 700 11px var(--ytb-font); }
       @keyframes ytb-burst {
         0%   { opacity: 0; translate: 0 10px; }
         15%  { opacity: 1; translate: 0 0; }
         70%  { opacity: 1; translate: 0 -18px; }
         100% { opacity: 0; translate: 0 -30px; }
+      }
+      @keyframes ytb-burst-fade {
+        0%   { opacity: 0; }
+        15%  { opacity: 1; }
+        70%  { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
+      @media (prefers-reduced-motion: reduce) {
+        #${PANEL_ID}, .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        .ytb-panel-send, .ytb-alert-card {
+          transform: none;
+          transition: opacity var(--ytb-dur-base) linear;
+        }
+        .ytb-panel-send.show, .ytb-alert-card.show { transform: none; }
+        .ytb-alert-burst { animation-name: ytb-burst-fade; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);

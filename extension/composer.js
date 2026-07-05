@@ -12,6 +12,10 @@
 // Escape, the button toggle, any outside click — discards the draft without
 // confirmation. Successful posts hand the complete server record to notes.js
 // via `ytb:note-posted` for immediate Video Timeline reconciliation.
+//
+// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
+// by theme.js (the shared on-video apricot foundation); theme.js also isolates
+// keystrokes in the Note textarea from YouTube's player hotkeys.
 
 (function () {
 	'use strict';
@@ -22,6 +26,10 @@
 	let openToken = 0;
 	let pauseLeaseActive = false; // opening the composer paused a playing video
 
+	// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face
+	// injected by theme.js (the shared on-video apricot foundation). The Add
+	// Note BUTTON stays player-native white — it lives inside YouTube's own
+	// control bar, where an apricot chip would clash.
 	function ensureStyles() {
 		if (document.getElementById('ytb-composer-styles')) return;
 		const style = document.createElement('style');
@@ -29,25 +37,105 @@
 		style.textContent = `
       #${BUTTON_ID} { flex: 0 0 auto; width: 34px; height: 100%; margin: 0 2px; padding: 0; border: 0; background: transparent; color: #fff; cursor: pointer; opacity: .9; font: 700 18px/1 Arial,sans-serif; }
       #${BUTTON_ID}:hover, #${BUTTON_ID}:focus-visible { opacity: 1; background: rgba(255,255,255,.12); outline: none; }
-      #${COMPOSER_ID} { position: absolute; z-index: 2100; box-sizing: border-box; padding: 12px 14px; border: 1px solid rgba(255,255,255,.18); border-radius: 10px; background: #212121; color: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.55); font: 13px/1.4 Roboto,Arial,sans-serif; text-align: left; }
+      #${COMPOSER_ID} {
+        position: absolute;
+        z-index: 2100;
+        box-sizing: border-box;
+        padding: 14px 16px;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-lg);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
+        box-shadow: var(--ytb-e-dialog);
+        font: 13px/1.45 var(--ytb-font);
+        text-align: left;
+        animation: ytb-composer-in var(--ytb-dur-base) var(--ytb-ease-spring);
+      }
+      @keyframes ytb-composer-in {
+        from { opacity: 0; transform: scale(0.96) translateY(4px); }
+      }
       #${COMPOSER_ID} .ytb-note-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-      #${COMPOSER_ID} .ytb-note-title { font-weight: 600; font-size: 15px; }
-      #${COMPOSER_ID} .ytb-note-time { margin-left: auto; color: #aaa; font-variant-numeric: tabular-nums; }
-      #${COMPOSER_ID} .ytb-note-close { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: #aaa; font: 16px/1 Arial,sans-serif; cursor: pointer; }
-      #${COMPOSER_ID} .ytb-note-close:hover, #${COMPOSER_ID} .ytb-note-close:focus-visible { background: rgba(255,255,255,.12); color: #fff; outline: none; }
+      #${COMPOSER_ID} .ytb-note-title { font-weight: 800; font-size: 15px; }
+      #${COMPOSER_ID} .ytb-note-time { margin-left: auto; color: var(--ytb-ink-muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #${COMPOSER_ID} .ytb-note-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ytb-ink-faint);
+        cursor: pointer;
+        transition:
+          color var(--ytb-dur-quick) var(--ytb-ease-out),
+          background var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${COMPOSER_ID} .ytb-note-close:hover, #${COMPOSER_ID} .ytb-note-close:focus-visible { background: var(--ytb-accent-050); color: var(--ytb-ink); outline: none; }
+      #${COMPOSER_ID} .ytb-note-close:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${COMPOSER_ID} .ytb-note-close svg { width: 14px; height: 14px; }
       #${COMPOSER_ID} .ytb-note-emojis { display: flex; gap: 6px; margin: 0 0 10px; }
-      #${COMPOSER_ID} .ytb-note-emoji { flex: 1 1 0; height: 42px; border: 1px solid #555; border-radius: 8px; background: #303030; cursor: pointer; font-size: 22px; }
-      #${COMPOSER_ID} .ytb-note-emoji:hover, #${COMPOSER_ID} .ytb-note-emoji:focus-visible { border-color: #3ea6ff; background: #16476b; outline: none; }
+      #${COMPOSER_ID} .ytb-note-emoji {
+        flex: 1 1 0;
+        height: 42px;
+        border: 1px solid var(--ytb-line-strong);
+        border-radius: var(--ytb-r-md);
+        background: var(--ytb-surface-tint);
+        cursor: pointer;
+        font-size: 22px;
+        transition:
+          background var(--ytb-dur-quick) var(--ytb-ease-out),
+          border-color var(--ytb-dur-quick) var(--ytb-ease-out),
+          transform var(--ytb-dur-quick) var(--ytb-ease-spring);
+      }
+      #${COMPOSER_ID} .ytb-note-emoji:hover, #${COMPOSER_ID} .ytb-note-emoji:focus-visible { border-color: var(--ytb-accent-500); background: var(--ytb-accent-100); outline: none; }
+      #${COMPOSER_ID} .ytb-note-emoji:active { transform: scale(0.95); }
       #${COMPOSER_ID} .ytb-note-emoji:disabled { opacity: .5; cursor: default; }
-      #${COMPOSER_ID} textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid #555; border-radius: 6px; background: #181818; color: #fff; font: inherit; resize: none; overflow: hidden; }
-      #${COMPOSER_ID} textarea:focus { border-color: #3ea6ff; outline: none; }
-      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 2px; text-align: right; color: #aaa; font-size: 12px; }
+      #${COMPOSER_ID} textarea {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border: 1px solid var(--ytb-line-strong);
+        border-radius: var(--ytb-r-sm);
+        background: var(--ytb-surface-sunk);
+        color: var(--ytb-ink);
+        font: inherit;
+        resize: none;
+        overflow: hidden;
+        transition:
+          border-color var(--ytb-dur-quick) var(--ytb-ease-out),
+          box-shadow var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${COMPOSER_ID} textarea::placeholder { color: var(--ytb-ink-faint); }
+      #${COMPOSER_ID} textarea:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
+      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 2px; text-align: right; color: var(--ytb-ink-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
       #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-      #${COMPOSER_ID} label { display: flex; align-items: center; gap: 6px; }
-      #${COMPOSER_ID} .ytb-note-post { padding: 7px 14px; border: 0; border-radius: 18px; background: #3ea6ff; color: #0f0f0f; font-weight: 600; cursor: pointer; }
-      #${COMPOSER_ID} .ytb-note-post:disabled { background: #555; color: #aaa; cursor: default; }
-      #${COMPOSER_ID} .ytb-note-message { margin: 0 0 10px; color: #f2c94c; }
-      #${COMPOSER_ID} .ytb-note-error { min-height: 18px; margin-top: 7px; color: #ff8a80; }
+      #${COMPOSER_ID} label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ytb-ink-muted); }
+      #${COMPOSER_ID} input[type='checkbox'] { accent-color: var(--ytb-accent-600); }
+      #${COMPOSER_ID} .ytb-note-post {
+        padding: 7px 16px;
+        border: 0;
+        border-radius: var(--ytb-r-pill);
+        background: var(--ytb-accent-500);
+        color: var(--ytb-on-accent);
+        font: 700 13px/1.3 var(--ytb-font);
+        cursor: pointer;
+        transition:
+          background var(--ytb-dur-quick) var(--ytb-ease-out),
+          transform var(--ytb-dur-quick) var(--ytb-ease-spring);
+      }
+      #${COMPOSER_ID} .ytb-note-post:hover:not(:disabled) { background: var(--ytb-accent-600); }
+      #${COMPOSER_ID} .ytb-note-post:active:not(:disabled) { transform: scale(0.97); }
+      #${COMPOSER_ID} .ytb-note-post:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${COMPOSER_ID} .ytb-note-post:disabled { background: var(--ytb-surface-sunk); color: var(--ytb-ink-faint); cursor: default; }
+      #${COMPOSER_ID} .ytb-note-message { margin: 0 0 10px; color: var(--ytb-accent-800); font-weight: 600; }
+      #${COMPOSER_ID} .ytb-note-error { min-height: 18px; margin-top: 7px; color: var(--ytb-danger-text); font-size: 12px; font-weight: 600; }
+      @media (prefers-reduced-motion: reduce) {
+        #${COMPOSER_ID} { animation: none; }
+      }
     `;
 		(document.head || document.documentElement).appendChild(style);
 	}
@@ -118,7 +206,7 @@
 		const close = document.createElement('button');
 		close.type = 'button';
 		close.className = 'ytb-note-close';
-		close.textContent = '✕';
+		close.append(YTBTheme.icon('close'));
 		close.setAttribute('aria-label', 'Close without posting');
 		close.addEventListener('click', () => closeComposer());
 		head.append(title, time, close);
@@ -251,8 +339,9 @@
 		}
 
 		textarea.addEventListener('input', updateMeta);
+		// theme.js's window-capture guard replays keydowns on this textarea as
+		// non-bubbling clones, so YouTube's player hotkeys never see them.
 		textarea.addEventListener('keydown', (event) => {
-			event.stopPropagation(); // never feed YouTube's player hotkeys
 			if (event.key === 'Escape') {
 				closeComposer();
 				return;
