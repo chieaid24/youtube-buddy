@@ -252,11 +252,38 @@ describe('note presentation helpers', () => {
 	});
 });
 
+describe('extension context lifecycle', () => {
+	it('keeps unrelated Chrome API failures observable', async () => {
+		const failure = new Error('storage unavailable');
+		vi.mocked(chrome.storage.local.get).mockRejectedValueOnce(failure);
+
+		await expect(window.YTB.getConfig()).rejects.toBe(failure);
+		expect(window.YTB.isContextActive()).toBe(true);
+	});
+
+	it('stops stale work and consumes only extension-context invalidation', async () => {
+		const stop = vi.fn();
+		window.YTB.onContextInvalidated(stop);
+		vi.mocked(chrome.storage.local.get).mockRejectedValueOnce(new Error('Extension context invalidated.'));
+
+		await expect(window.YTB.getConfig()).resolves.toEqual({ name: '', code: '', clientId: '', sharing: true });
+		expect(stop).toHaveBeenCalledOnce();
+		expect(window.YTB.isContextActive()).toBe(false);
+
+		const callsAfterInvalidation = vi.mocked(chrome.storage.local.get).mock.calls.length;
+		await expect(window.YTB.getConfig()).resolves.toEqual({ name: '', code: '', clientId: '', sharing: true });
+		expect(chrome.storage.local.get).toHaveBeenCalledTimes(callsAfterInvalidation);
+	});
+});
+
 type WriteResult<K extends string, V> = ({ ok: true } & Record<K, V>) | { ok: false; category: string };
 
 declare global {
 	interface Window {
 		YTB: {
+			getConfig(): Promise<{ name: string; code: string; clientId: string; sharing: boolean }>;
+			isContextActive(): boolean;
+			onContextInvalidated(callback: () => void): () => void;
 			roomExists(records: { progress: object[]; presence: object[] }): boolean;
 			deleteMember(code: string, clientId: string): Promise<{ ok: true } | false>;
 			deleteNote(code: string, clientId: string, id: string): Promise<{ ok: true } | false>;
