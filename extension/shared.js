@@ -466,6 +466,30 @@ const YTB = {
 	},
 
 	/**
+	 * Copy for the author-only delete confirmation in the Expanded Note.
+	 * Deleting a Note cascades to its whole conversation, so the confirmation
+	 * says exactly how many Replies go with it (correct singular/plural).
+	 * @param {number} replyCount
+	 * @returns {string}
+	 */
+	deleteConfirmCopy(replyCount) {
+		const count = Math.max(0, Math.floor(Number(replyCount) || 0));
+		if (count === 0) return 'Really delete it?';
+		return `Really delete it? This will also delete ${count === 1 ? '1 reply' : `${count} replies`}.`;
+	},
+
+	/**
+	 * The playback position "Go here" seeks to: roughly one second BEFORE the
+	 * Note's timestamp (clamped at 0), so resuming playback crosses the Note
+	 * naturally and its own Playback Notification fires on the crossing.
+	 * @param {number} timestamp the Note's video timestamp in seconds
+	 * @returns {number}
+	 */
+	goHereTarget(timestamp) {
+		return Math.max(0, (Number(timestamp) || 0) - 1);
+	},
+
+	/**
 	 * Spread timeline dots that would overlap. Dots whose timestamps chain
 	 * within SPREAD_WINDOW_SECONDS form a group; each group is spread
 	 * horizontally by `minGap` around its natural center — chronological order

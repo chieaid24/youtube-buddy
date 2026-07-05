@@ -209,6 +209,24 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.errorCopy('unexpected', 'reaction')).toBe("We couldn't post your reaction. Try again.");
 	});
 
+	it('writes the delete confirmation with the exact Reply cascade count', () => {
+		expect(window.YTB.deleteConfirmCopy(0)).toBe('Really delete it?');
+		expect(window.YTB.deleteConfirmCopy(1)).toBe('Really delete it? This will also delete 1 reply.');
+		expect(window.YTB.deleteConfirmCopy(2)).toBe('Really delete it? This will also delete 2 replies.');
+		expect(window.YTB.deleteConfirmCopy(10)).toBe('Really delete it? This will also delete 10 replies.');
+		// Defensive coercion: junk counts read as "no Replies".
+		expect(window.YTB.deleteConfirmCopy(-3)).toBe('Really delete it?');
+		expect(window.YTB.deleteConfirmCopy(Number.NaN)).toBe('Really delete it?');
+	});
+
+	it('targets Go here at one second before the Note, clamped at zero', () => {
+		expect(window.YTB.goHereTarget(42)).toBe(41);
+		expect(window.YTB.goHereTarget(1)).toBe(0);
+		expect(window.YTB.goHereTarget(0.4)).toBe(0);
+		expect(window.YTB.goHereTarget(0)).toBe(0);
+		expect(window.YTB.goHereTarget(Number.NaN)).toBe(0);
+	});
+
 	it('spreads dots within the 2-second window, preserving order and clamping to the bar', () => {
 		// Two dots 1s apart at the same spot: separated by >= the gap, in order.
 		const pair = window.YTB.spreadFractions([
