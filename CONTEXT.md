@@ -63,3 +63,31 @@ _Avoid_: Note (a Reply has no independent timeline position), Reaction, generic 
 **Playback Notification**:
 The transient bottom-center presentation triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment.
 _Avoid_: Note Preview, Expanded Note, popup (ambiguous)
+
+**Room Home Section**:
+The compact panel the extension injects at the top of the YouTube **home page** (the recommendations grid on `youtube.com`), above the grid, which shifts down. It holds the Room Feed on the left and the Shared Playlist on the right, styled to match YouTube's home layout and kept deliberately short — small and scrollable, never a tall block. It is a distinct surface from the action popup and the Video Timeline (see ADR-0005). When Unpaired it shows a compact Create/Join prompt instead of the Feed + Playlist.
+_Avoid_: home widget, dashboard, feed (alone)
+
+**Shared Playlist**:
+One Room-level list of videos — at most one Shared Playlist per Room — holding up to 30 Playlist Items, newest-added first. Any member may add or remove any video; there is no per-item ownership. Adding a video already present is a no-op; adding when the list is full is rejected (a member must remove one first). Rendered as a horizontal row of thumbnails on the right of the Room Home Section.
+_Avoid_: queue, watch later, saved videos
+
+**Playlist Item**:
+One video in the Shared Playlist: its videoId, a title captured at add time, and the adding member's Client ID plus a timestamp. Under each item the Room Home Section shows who has watched it ("watched by You, Bob, and 1 other"), derived live from the Room's Progress Records for that videoId — so "watched" means "has a Progress Record" (started, not finished), and the attribution disappears when a member leaves or their record expires. Naming rule: "You" first (only when you personally have a record), then up to two Buddy Display Names, then "and N other(s)"; blank-name members use the "<Adjective> Buddy" fallback.
+_Avoid_: playlist entry, video record
+
+**Room Feed**:
+The personalized, chronological, chat-like feed on the left of the Room Home Section. For the viewer it shows: Replies to Notes the viewer authored, and Notes or Replies that Mention the viewer — plus deemphasized System Messages for Shared Playlist changes. Items are grouped under day dividers (Today / Yesterday / date), oldest at the top and newest at the bottom, auto-scrolled to newest like a chat. There is **no** read/unread state: the Feed simply shows the most recent activity. It is derived entirely on the client from the Room read plus Playlist Events; nothing is stored per-recipient.
+_Avoid_: inbox, notifications (as a stored entity), activity log
+
+**Mention**:
+An @-reference inside a Note or Reply that targets a specific Room member. Because Display Names are non-unique and cosmetic (identity is the Client ID), a Mention is resolved to and stored as the target's Client ID, never matched by name text (see ADR-0006). The author types "@", picks from a fuzzy-searchable roster of current Room members shown below the field, and the resulting Note/Reply carries a mentions list of Client IDs. A member is Mentioned when their Client ID appears in that list; the inline text still renders "@<Display Name>".
+_Avoid_: tag, ping, at-name (as the stored form)
+
+**System Message**:
+A small, deemphasized Room Feed line describing a Shared Playlist change — a video added or removed, and by whom ("Bob added <title>", "You removed <title>"). Rendered visually quieter than personal Feed items. Backed by Playlist Events.
+_Avoid_: notification, alert, toast
+
+**Playlist Event**:
+The backend event-log record behind System Messages: one row per Shared Playlist add or removal (`{ type: 'added' | 'removed', videoId, actorClientId, at }`), aged out on the shared 14-day TTL and capped to the newest ~50, returned alongside the Room read. Distinct from a Playlist Item (the current membership of the list) — an Event is the immutable history of a change.
+_Avoid_: log entry, activity record
