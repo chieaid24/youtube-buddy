@@ -500,11 +500,11 @@ describe('GET /?code=', () => {
 		expect(data.notes).toEqual([]);
 	});
 
-	it('always answers 200 with empty progress/presence/notes arrays for a Room with no records', async () => {
+	it('always answers 200 with empty progress/presence/notes/replies arrays for a Room with no records', async () => {
 		const res = await SELF.fetch('https://example.com/?code=get-shape-empty-room');
 		expect(res.status).toBe(200);
-		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[] };
-		expect(data).toEqual({ progress: [], presence: [], notes: [] });
+		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[]; replies: unknown[] };
+		expect(data).toEqual({ progress: [], presence: [], notes: [], replies: [] });
 	});
 
 	it('includes Notes without mixing them into progress', async () => {
