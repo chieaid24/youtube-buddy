@@ -41,5 +41,25 @@ Whether this installation currently reports its own Progress Records. Pausing sh
 _Avoid_: broadcasting, syncing (which also covers reads)
 
 **Note**:
-A Buddy's timestamped comment or emoji, pinned to one moment in one video, visible to the whole Room (like Progress Records). One entity with two content kinds: a text Note, or an emoji **Reaction** (chosen from a small curated set, parallel to the eight curated Buddy Colors). Distinct from a Buddy's position **marker** (marker = live watch position; Note = authored content left at a moment). A Note may be marked a **Spoiler**, showing only an obscured dot on the timeline until the viewer's own playhead passes its timestamp.
+A Buddy's timestamped comment or emoji, pinned to one moment in one video, visible to the whole Room (like Progress Records). One entity with two content kinds: a text Note (limited to 100 characters), or an emoji **Reaction** (chosen from a small curated set, parallel to the eight curated Buddy Colors). Distinct from a Buddy's position **marker** (marker = live watch position; Note = authored content left at a moment). A text Note may be marked a **Spoiler**, showing only an obscured dot on the timeline until the viewer's own playhead passes its timestamp; while locked, it cannot be previewed or expanded. Reactions are never Spoilers.
 _Avoid_: comment (alone, ambiguous with generic web comments), tag, marker, pin
+
+**Video Timeline**:
+The active YouTube player's progress bar, where Progress Record markers and timestamped Notes appear. This is distinct from YouTube's home, search, recommended, and subscription feed surfaces. A newly posted Note appears immediately on the current Video Timeline after the post succeeds, without waiting for a refresh or polling cycle.
+_Avoid_: feed (when referring to the active player's progress bar), scrubber
+
+**Note Preview**:
+The compact, hover-only summary shown above a Note on the Video Timeline. It identifies the author before the Note text and may summarize how many Replies the Note has. It is not an interactive editing surface.
+_Avoid_: expanded mode, popup (ambiguous with the composer and playback notifications)
+
+**Expanded Note**:
+The pinned, interactive panel opened from a Note's dot or Note Preview. It shows the full Note conversation and Note actions. Opening it pauses the video at the viewer's current playhead position; it does not seek to the Note's timestamp.
+_Avoid_: hover state, Note Preview
+
+**Reply**:
+A text-only message appended to one parent Note and shown as part of that Note's conversation in the Expanded Note. Replies are limited to 100 characters, and one Note can have at most 10 Replies. Reactions are standalone timeline events and cannot have Replies.
+_Avoid_: Note (a Reply has no independent timeline position), Reaction, generic comment
+
+**Playback Notification**:
+The transient bottom-center presentation triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment.
+_Avoid_: Note Preview, Expanded Note, popup (ambiguous)
