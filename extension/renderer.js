@@ -72,7 +72,7 @@
 			buddyByVideoId = new Map();
 			activeRoomCode = '';
 			resetPresenceBaseline();
-			broadcastRoomData([], [], false);
+			broadcastRoomData(null, false);
 			return;
 		}
 		myClientId = myClientId || (await YTB.ensureClientId());
@@ -94,7 +94,7 @@
 		// Locked out of a full Room: I'm not a member and 5 others already are.
 		if (view.locked) {
 			buddyByVideoId = new Map();
-			broadcastRoomData([], [], true);
+			broadcastRoomData(null, true);
 			return;
 		}
 
@@ -117,18 +117,27 @@
 		}
 		buddyByVideoId = next;
 
-		broadcastRoomData(records.notes, records.replies, false);
+		broadcastRoomData(records, false);
 	}
 
-	// Hand every refreshed Note + Reply to notes.js (the sole Note-presentation
-	// owner) so it can reconcile the Video Timeline, Reply counts, and Playback
-	// Notifications without polling the Room itself.
-	function broadcastRoomData(notes, replies, locked) {
+	// Hand every refreshed Room read to the other modules: notes.js (the sole
+	// Note-presentation owner) reconciles the Video Timeline, Reply counts, and
+	// Playback Notifications; home-section.js renders the Room Home Section
+	// (Feed + Shared Playlist); mentions.js keeps the roster for @-autocomplete;
+	// playlist-add.js reflects "already in the playlist" state. None of them
+	// polls the Room itself — this stays the single poller. Pass `null` records
+	// for the empty broadcast (no code, or locked out of a full Room).
+	function broadcastRoomData(records, locked) {
+		const r = records || {};
 		document.dispatchEvent(
 			new CustomEvent('ytb:room-data', {
 				detail: {
-					notes: notes || [],
-					replies: replies || [],
+					notes: r.notes || [],
+					replies: r.replies || [],
+					progress: r.progress || [],
+					presence: r.presence || [],
+					playlist: r.playlist || [],
+					events: r.events || [],
 					roomCode: activeRoomCode,
 					myClientId,
 					locked: Boolean(locked),

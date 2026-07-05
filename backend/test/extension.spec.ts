@@ -252,6 +252,214 @@ describe('note presentation helpers', () => {
 	});
 });
 
+describe('shared playlist client API', () => {
+	it('posts a Playlist add with the canonical payload and returns the complete item', async () => {
+		storage = { code: 'silly-otters' };
+		const item = { videoId: 'v1', title: 'A Great Video', addedBy: 'a1b2c3d4', addedByName: 'Sam', addedAt: 9 };
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, item }) });
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(window.YTB.postPlaylistAdd({ clientId: 'a1b2c3d4', name: 'Sam', videoId: 'v1', title: 'A Great Video' })).resolves.toEqual({
+			ok: true,
+			item,
+		});
+		expect(fetchMock).toHaveBeenCalledWith('http://localhost:8787/playlist?code=silly-otters', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ clientId: 'a1b2c3d4', name: 'Sam', videoId: 'v1', title: 'A Great Video' }),
+		});
+	});
+
+	it('requires a Room Code but ignores the Sharing toggle (curation is not position reporting)', async () => {
+		storage = { code: 'silly-otters', sharing: false };
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, item: {} }) }));
+		await expect(window.YTB.postPlaylistAdd({ clientId: 'a', videoId: 'v', title: 't' })).resolves.toMatchObject({ ok: true });
+
+		storage = {};
+		await expect(window.YTB.postPlaylistAdd({ clientId: 'a', videoId: 'v', title: 't' })).resolves.toEqual({
+			ok: false,
+			category: 'unpaired',
+		});
+	});
+
+	it('surfaces playlist_full as a machine-readable category', async () => {
+		storage = { code: 'silly-otters' };
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: 'playlist full', category: 'playlist_full' }) }),
+		);
+		await expect(window.YTB.postPlaylistAdd({ clientId: 'a', videoId: 'v', title: 't' })).resolves.toEqual({
+			ok: false,
+			category: 'playlist_full',
+		});
+		expect(window.YTB.MAX_PLAYLIST_ITEMS).toBe(30);
+	});
+
+	it('deletes a Playlist Item attributing the acting member', async () => {
+		storage = { code: 'silly-otters' };
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(window.YTB.deletePlaylistItem({ clientId: 'a1b2c3d4', videoId: 'v1' })).resolves.toEqual({ ok: true });
+		expect(fetchMock).toHaveBeenCalledWith('http://localhost:8787/playlist?code=silly-otters&clientId=a1b2c3d4&videoId=v1', {
+			method: 'DELETE',
+		});
+	});
+
+	it('includes playlist and events in Room reads', async () => {
+		const playlist = [{ videoId: 'v1' }];
+		const events = [{ type: 'added', videoId: 'v1' }];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({ ok: true, json: async () => ({ progress: [], presence: [], notes: [], replies: [], playlist, events }) }),
+		);
+		await expect(window.YTB.getRecords('silly-otters')).resolves.toMatchObject({ playlist, events, ok: true });
+	});
+
+	it('sends mentions on Notes and Replies only when nonempty (wire format stays stable)', async () => {
+		storage = { code: 'silly-otters' };
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+		vi.stubGlobal('fetch', fetchMock);
+
+		await window.YTB.postNote({ clientId: 'a', videoId: 'v', timestamp: 1, kind: 'text', body: 'hi @Bob', mentions: ['buddy222'] });
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).mentions).toEqual(['buddy222']);
+
+		await window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x', mentions: [] });
+		expect('mentions' in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
+	});
+});
+
+describe('room home section helpers', () => {
+	const me = 'me111111';
+	const roomRead = {
+		progress: [
+			{ clientId: me, name: 'Aidan', videoId: 'v1', timestamp: 10, duration: 100, updatedAt: 1000 },
+			{ clientId: 'bob22222', name: 'Bob', videoId: 'v1', timestamp: 20, duration: 100, updatedAt: 2000 },
+			{ clientId: 'ana33333', name: 'Ana', videoId: 'v1', timestamp: 30, duration: 100, updatedAt: 3000 },
+			{ clientId: 'cid44444', name: 'Cid', videoId: 'v1', timestamp: 40, duration: 100, updatedAt: 4000 },
+			{ clientId: 'bob22222', name: 'Bobby', videoId: 'v2', timestamp: 5, duration: 100, updatedAt: 5000 },
+		],
+		presence: [{ clientId: 'eve55555', name: '', updatedAt: 6000 }],
+		notes: [],
+		replies: [],
+		playlist: [{ videoId: 'v9', title: 'Queued', addedBy: 'pia66666', addedByName: 'Pia', addedAt: 7000 }],
+		events: [{ id: 'e1', type: 'removed', videoId: 'v9', actorClientId: 'ana33333', at: 8000 }],
+	};
+
+	it('derives the roster from every record kind, latest nonblank name winning', () => {
+		const roster = window.YTB.roomRoster(roomRead);
+		const byId = new Map(roster.map((m) => [m.clientId, m.name]));
+		// Union across progress + presence + playlist + events.
+		expect([...byId.keys()].sort()).toEqual(['ana33333', 'bob22222', 'cid44444', 'eve55555', me, 'pia66666'].sort());
+		// Bob renamed to Bobby on his newer record; Ana's nameless Event at 8000
+		// must NOT blank her name from the 3000 progress record.
+		expect(byId.get('bob22222')).toBe('Bobby');
+		expect(byId.get('ana33333')).toBe('Ana');
+		expect(byId.get('eve55555')).toBe('');
+		// Newest activity first: Ana's Event (8000) outranks Pia's add (7000).
+		expect(roster[0].clientId).toBe('ana33333');
+	});
+
+	it('fuzzy-searches the roster: prefix, then substring, then subsequence', () => {
+		const roster = [
+			{ clientId: 'a', name: 'Bob' },
+			{ clientId: 'b', name: 'Bobby Tables' },
+			{ clientId: 'c', name: 'Ana' },
+			{ clientId: 'd', name: '' },
+		];
+		expect(window.YTB.filterRoster(roster, 'bo').map((m) => m.clientId)).toEqual(['a', 'b']);
+		// Prefix outranks substring: "Ana" before "Bobby Tables" (a in "Tables").
+		expect(window.YTB.filterRoster(roster, 'a').map((m) => m.clientId)).toEqual(['c', 'b']);
+		// In-order subsequence: "bbt" finds Bobby Tables only.
+		expect(window.YTB.filterRoster(roster, 'bbt').map((m) => m.clientId)).toEqual(['b']);
+		expect(window.YTB.filterRoster(roster, 'zzz')).toEqual([]);
+		// Empty query returns the whole roster in roster order.
+		expect(window.YTB.filterRoster(roster, '').map((m) => m.clientId)).toEqual(['a', 'b', 'c', 'd']);
+	});
+
+	it('resolves a Mention to the current Display Name, falling back to the Buddy token', () => {
+		const roster = window.YTB.roomRoster(roomRead);
+		expect(window.YTB.mentionName(roster, 'bob22222')).toBe('Bobby');
+		// A member who left resolves to the stable "<Adjective> Buddy", never a raw id.
+		expect(window.YTB.mentionName(roster, 'gone9999')).toBe(window.YTB.buddyName('gone9999'));
+		expect(window.YTB.mentionName(roster, 'eve55555')).toBe(window.YTB.buddyName('eve55555'));
+	});
+
+	it('labels watched-by: You first, up to two Buddy names, then a collapsed count', () => {
+		const progress = roomRead.progress;
+		// You + 3 Buddies: two names (most recent first), remainder collapsed.
+		expect(window.YTB.watchedByLabel(progress, 'v1', me)).toBe('You, Cid, Ana, and 1 other');
+		// Single foreign watcher: bare name (his latest Display Name).
+		expect(window.YTB.watchedByLabel(progress, 'v2', me)).toBe('Bobby');
+		// Another viewer's perspective: their own "You" first, then the two most
+		// recent foreign names, and the last watcher collapsed.
+		expect(window.YTB.watchedByLabel(progress, 'v1', 'cid44444')).toBe('You, Ana, Bob, and 1 other');
+		expect(
+			window.YTB.watchedByLabel(
+				[
+					{ clientId: me, videoId: 'v3', updatedAt: 1 },
+					{ clientId: 'bob22222', name: 'Bob', videoId: 'v3', updatedAt: 2 },
+				],
+				'v3',
+				me,
+			),
+		).toBe('You and Bob');
+		// Blank-name watcher uses the stable Buddy fallback.
+		expect(window.YTB.watchedByLabel([{ clientId: 'eve55555', name: '', videoId: 'v4', updatedAt: 1 }], 'v4', me)).toBe(
+			window.YTB.buddyName('eve55555'),
+		);
+		// Nobody watched: empty label.
+		expect(window.YTB.watchedByLabel(progress, 'unwatched', me)).toBe('');
+	});
+
+	it('builds the personalized Feed: replies to mine, mentions of me, and System Messages', () => {
+		const base = new Date(2026, 6, 4, 12, 0, 0).getTime(); // local noon — no midnight straddle
+		const notes = [
+			{ id: 'n1', clientId: me, name: 'Aidan', videoId: 'v1', timestamp: 5, kind: 'text', body: 'mine', createdAt: base },
+			{ id: 'n2', clientId: 'bob22222', name: 'Bob', videoId: 'v1', timestamp: 6, kind: 'text', body: 'hey @Aidan', mentions: [me], createdAt: base + 1000 },
+			{ id: 'n3', clientId: 'bob22222', name: 'Bob', videoId: 'v1', timestamp: 7, kind: 'text', body: 'unrelated', createdAt: base + 1500 },
+		];
+		const replies = [
+			{ id: 'r1', noteId: 'n1', clientId: 'bob22222', name: 'Bob', body: 'reply to yours', createdAt: base + 2000 },
+			{ id: 'r2', noteId: 'n1', clientId: me, name: 'Aidan', body: 'my own reply', createdAt: base + 3000 },
+			{ id: 'r3', noteId: 'n3', clientId: 'ana33333', name: 'Ana', body: '@Aidan look', mentions: [me], createdAt: base + 4000 },
+			{ id: 'r4', noteId: 'n1', clientId: 'ana33333', name: 'Ana', body: 'both', mentions: [me], createdAt: base + 5000 },
+			{ id: 'r5', noteId: 'n3', clientId: 'cid44444', name: 'Cid', body: 'not for me', createdAt: base + 6000 },
+		];
+		const events = [
+			{ id: 'e1', type: 'added', videoId: 'v9', actorClientId: 'bob22222', at: base + 7000 },
+			{ id: 'e2', type: 'removed', videoId: 'v9', actorClientId: 'ana33333', at: base + 26 * 3600_000 },
+		];
+
+		const groups = window.YTB.buildFeed({ notes, replies, events }, me);
+		// Two local days -> two divider groups, both ascending.
+		expect(groups).toHaveLength(2);
+		const first = groups[0].items;
+		// My own note (n1), my own reply (r2), the unrelated note (n3), and the
+		// not-for-me reply (r5) are all absent. r4 (reply-to-mine AND mention)
+		// appears exactly once, as a reply.
+		expect(first.map((item) => item.type)).toEqual(['mention', 'reply', 'mention', 'reply', 'system']);
+		expect(first.map((item) => item.at)).toEqual([base + 1000, base + 2000, base + 4000, base + 5000, base + 7000]);
+		expect(first[1].note.id).toBe('n1'); // a reply item carries its parent Note
+		expect(groups[1].items.map((item) => item.type)).toEqual(['system']);
+		expect(groups[0].dayKey).not.toBe(groups[1].dayKey);
+
+		// There is NO read/unread state anywhere on the items.
+		for (const item of [...first, ...groups[1].items]) {
+			expect('read' in item).toBe(false);
+			expect('unread' in item).toBe(false);
+		}
+	});
+
+	it('labels Feed day dividers as Today / Yesterday / short date', () => {
+		const now = new Date(2026, 6, 5, 15, 0, 0).getTime();
+		const keyOf = (ms: number) => window.YTB.buildFeed({ events: [{ id: 'e', type: 'added', videoId: 'v', actorClientId: 'a', at: ms }] }, 'me')[0].dayKey;
+		expect(window.YTB.dayLabel(keyOf(now), now)).toBe('Today');
+		expect(window.YTB.dayLabel(keyOf(now - 24 * 3600_000), now)).toBe('Yesterday');
+		expect(window.YTB.dayLabel(keyOf(new Date(2026, 6, 3, 12).getTime()), now)).toMatch(/Jul/);
+	});
+});
+
 describe('extension context lifecycle', () => {
 	it('keeps unrelated Chrome API failures observable', async () => {
 		const failure = new Error('storage unavailable');
@@ -291,7 +499,20 @@ declare global {
 			postReply(reply: object): Promise<WriteResult<'reply', object>>;
 			getConversation(code: string, noteId: string): Promise<WriteResult<'note', object> & { replies?: object[] }>;
 			NOTE_EMOJIS: string[];
-			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; ok: boolean }>;
+			MAX_PLAYLIST_ITEMS: number;
+			postPlaylistAdd(item: object): Promise<WriteResult<'item', object>>;
+			deletePlaylistItem(target: { clientId: string; videoId: string }): Promise<{ ok: true } | { ok: false; category: string }>;
+			buddyName(clientId: string, name?: string): string;
+			roomRoster(records: object): Array<{ clientId: string; name: string }>;
+			filterRoster(roster: Array<{ clientId: string; name: string }>, query: string): Array<{ clientId: string; name: string }>;
+			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
+			watchedByLabel(progress: object[], videoId: string, myClientId: string): string;
+			buildFeed(
+				records: object,
+				myClientId: string,
+			): Array<{ dayKey: string; items: Array<{ type: string; at: number; note?: { id: string } | null; reply?: object; event?: object }> }>;
+			dayLabel(dayKey: string, nowMs?: number): string;
+			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
 			syncBuddyColors(code: string, ids: string[], successful: boolean, random?: () => number): Promise<Record<string, string>>;
 			setBuddyColor(code: string, clientId: string, color: string): Promise<boolean>;
 			clearRoomColors(code: string): Promise<void>;

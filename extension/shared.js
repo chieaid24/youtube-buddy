@@ -97,6 +97,10 @@ const YTB = {
 	NOTE_MAX_CHARS: 100,
 	MAX_REPLIES: 10,
 
+	// Mirrors the backend cap: the Shared Playlist holds at most this many
+	// distinct videos per Room.
+	MAX_PLAYLIST_ITEMS: 30,
+
 	// Two timeline dots whose timestamps fall within this window would overlap;
 	// spreadFractions separates them. Mirrored by the Playback Notification
 	// "natural crossing" delta in notes.js.
@@ -191,13 +195,7 @@ const YTB = {
 	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>, notes: Array<{id: string, clientId: string, name: string, videoId: string, timestamp: number, kind: string, body: string, spoiler: boolean, createdAt: number}>}>}
 	 */
 	async getRecords(code) {
-		const empty = {
-			progress: [],
-			presence: [],
-			notes: [],
-			replies: [],
-			ok: false,
-		};
+		const empty = { progress: [], presence: [], notes: [], replies: [], playlist: [], events: [], ok: false };
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) {
@@ -213,6 +211,8 @@ const YTB = {
 				presence: Array.isArray(data && data.presence) ? data.presence : [],
 				notes: Array.isArray(data && data.notes) ? data.notes : [],
 				replies: Array.isArray(data && data.replies) ? data.replies : [],
+				playlist: Array.isArray(data && data.playlist) ? data.playlist : [],
+				events: Array.isArray(data && data.events) ? data.events : [],
 				ok: true,
 			};
 		} catch (err) {
@@ -264,7 +264,7 @@ const YTB = {
 	 * `{ ok: false, category }`. Sharing gates all writes client-side.
 	 * @returns {Promise<{ok: true, note: object}|{ok: false, category: string}>}
 	 */
-	async postNote({ clientId, name, videoId, timestamp, kind, body, spoiler }) {
+	async postNote({ clientId, name, videoId, timestamp, kind, body, spoiler, mentions }) {
 		const { code, sharing } = await YTB.getConfig();
 		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
 		return YTB._postJson('/notes?code=' + encodeURIComponent(code), {
@@ -275,6 +275,9 @@ const YTB = {
 			kind,
 			body,
 			spoiler,
+			// Mentions are stored Client IDs picked from the roster (ADR-0006).
+			// Omitted entirely when empty, keeping the pre-mentions wire format.
+			...(Array.isArray(mentions) && mentions.length > 0 ? { mentions } : {}),
 		});
 	},
 
@@ -285,7 +288,7 @@ const YTB = {
 	 * 'room_full', or 'sharing_off'.
 	 * @returns {Promise<{ok: true, reply: object}|{ok: false, category: string}>}
 	 */
-	async postReply({ clientId, name, noteId, body }) {
+	async postReply({ clientId, name, noteId, body, mentions }) {
 		const { code, sharing } = await YTB.getConfig();
 		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
 		return YTB._postJson('/replies?code=' + encodeURIComponent(code), {
@@ -293,7 +296,43 @@ const YTB = {
 			name,
 			noteId,
 			body,
+			...(Array.isArray(mentions) && mentions.length > 0 ? { mentions } : {}),
 		});
+	},
+
+	/**
+	 * Add a video to the Room's Shared Playlist. Reads the Room Code from
+	 * config. NOT gated by Sharing: curating the Room's list is an explicit
+	 * act, not position reporting (Sharing only covers Progress Records).
+	 * Re-adding an existing video is a server-side no-op. Resolves
+	 * `{ ok: true, item }` with the complete server record, or
+	 * `{ ok: false, category }` — notably 'playlist_full' and 'room_full'.
+	 * @returns {Promise<{ok: true, item: object}|{ok: false, category: string}>}
+	 */
+	async postPlaylistAdd({ clientId, name, videoId, title }) {
+		const { code } = await YTB.getConfig();
+		if (!code) return { ok: false, category: 'unpaired' };
+		return YTB._postJson('/playlist?code=' + encodeURIComponent(code), { clientId, name, videoId, title });
+	},
+
+	/**
+	 * Remove a video from the Shared Playlist. Any member may remove any item
+	 * (the list is Room-communal); idempotent on the server. The clientId is
+	 * the acting member — it attributes the `removed` System Message.
+	 * @returns {Promise<{ok: true}|{ok: false, category: string}>}
+	 */
+	async deletePlaylistItem({ clientId, videoId }) {
+		const { code } = await YTB.getConfig();
+		if (!code || !clientId || !videoId) return { ok: false, category: 'validation' };
+		try {
+			const query = new URLSearchParams({ code, clientId, videoId });
+			const res = await fetch(YTB.BACKEND_URL + '/playlist?' + query, { method: 'DELETE' });
+			if (res.ok) return { ok: true };
+			const data = await res.json().catch(() => null);
+			return { ok: false, category: (data && data.category) || 'unexpected' };
+		} catch {
+			return { ok: false, category: 'unexpected' };
+		}
 	},
 
 	/**
@@ -479,6 +518,199 @@ const YTB = {
 				return Number.isFinite(t) && t > previousTime && t <= currentTime;
 			})
 			.sort((a, b) => a.timestamp - b.timestamp);
+	},
+
+	// --- Room Home Section helpers (pure — tested at the shared.js seam) ---
+
+	/**
+	 * The Room's current roster derived from one Room read: one entry per
+	 * distinct Client ID across every record kind (progress, presence, Notes,
+	 * Replies, Playlist Items, Playlist Events), carrying that member's LATEST
+	 * nonblank Display Name (display falls back via buddyName). Sorted by most
+	 * recent activity, newest first.
+	 * @param {{progress?: Array, presence?: Array, notes?: Array, replies?: Array, playlist?: Array, events?: Array}} records
+	 * @returns {Array<{clientId: string, name: string}>}
+	 */
+	roomRoster(records) {
+		const byId = new Map(); // clientId -> { clientId, name, nameAt, at }
+		const consider = (clientId, name, at) => {
+			if (!clientId) return;
+			const t = Number(at) || 0;
+			let entry = byId.get(clientId);
+			if (!entry) {
+				entry = { clientId, name: '', nameAt: -1, at: 0 };
+				byId.set(clientId, entry);
+			}
+			if (t > entry.at) entry.at = t;
+			// Only a record that CARRIES a name can update the name — Events are
+			// nameless and must never blank out a known Display Name.
+			if (typeof name === 'string' && name.trim() !== '' && t > entry.nameAt) {
+				entry.name = name.trim();
+				entry.nameAt = t;
+			}
+		};
+		for (const r of (records && records.progress) || []) consider(r.clientId, r.name, r.updatedAt);
+		for (const p of (records && records.presence) || []) consider(p.clientId, p.name, p.updatedAt);
+		for (const n of (records && records.notes) || []) consider(n.clientId, n.name, n.createdAt);
+		for (const reply of (records && records.replies) || []) consider(reply.clientId, reply.name, reply.createdAt);
+		for (const item of (records && records.playlist) || []) consider(item.addedBy, item.addedByName, item.addedAt);
+		for (const event of (records && records.events) || []) consider(event.actorClientId, undefined, event.at);
+		return [...byId.values()].sort((a, b) => b.at - a.at).map(({ clientId, name }) => ({ clientId, name }));
+	},
+
+	/**
+	 * Fuzzy-search the roster for the @-mention autocomplete. Matches each
+	 * member's display label (buddyName fallback included) case-insensitively:
+	 * prefix matches rank first, then substring, then in-order subsequence
+	 * ("sly" finds "Silly Buddy"); ties keep roster order. An empty query
+	 * returns the whole roster.
+	 * @param {Array<{clientId: string, name: string}>} roster
+	 * @param {string} query
+	 * @returns {Array<{clientId: string, name: string}>}
+	 */
+	filterRoster(roster, query) {
+		const q = String(query ?? '')
+			.trim()
+			.toLowerCase();
+		const isSubsequence = (needle, haystack) => {
+			let i = 0;
+			for (const ch of haystack) if (ch === needle[i]) i++;
+			return i >= needle.length;
+		};
+		const scored = [];
+		(roster || []).forEach((member, index) => {
+			const label = YTB.buddyName(member.clientId, member.name).toLowerCase();
+			let rank;
+			if (!q || label.startsWith(q)) rank = 0;
+			else if (label.includes(q)) rank = 1;
+			else if (isSubsequence(q, label)) rank = 2;
+			else return;
+			scored.push({ member, rank, index });
+		});
+		scored.sort((a, b) => a.rank - b.rank || a.index - b.index);
+		return scored.map((s) => s.member);
+	},
+
+	/**
+	 * Resolve a stored Mention target (a Client ID) to that member's CURRENT
+	 * Display Name for inline "@Bob" rendering. A member who left the Room (or
+	 * never set a name) falls back to the stable "<Adjective> Buddy" token —
+	 * never a raw Client ID (ADR-0006).
+	 * @param {Array<{clientId: string, name: string}>} roster
+	 * @param {string} clientId
+	 * @returns {string}
+	 */
+	mentionName(roster, clientId) {
+		const member = (roster || []).find((m) => m.clientId === clientId);
+		return YTB.buddyName(clientId, member && member.name);
+	},
+
+	/**
+	 * "Watched by" attribution for one Shared Playlist video, derived live from
+	 * the Room's Progress Records: "You" first (only when you have a record for
+	 * the video), then up to two Buddy Display Names most-recent first (blank
+	 * names via the buddyName fallback), then "and N other(s)". Returns '' when
+	 * nobody in the Room has a Progress Record for the video.
+	 * @param {Array<object>} progress Room read progress records (all members).
+	 * @param {string} videoId
+	 * @param {string} myClientId
+	 * @returns {string} e.g. "You, Bob, and 1 other"
+	 */
+	watchedByLabel(progress, videoId, myClientId) {
+		const latest = new Map(); // clientId -> latest record (for its name)
+		for (const r of progress || []) {
+			if (!r || !r.clientId || r.videoId !== videoId) continue;
+			const prev = latest.get(r.clientId);
+			if (!prev || r.updatedAt > prev.updatedAt) latest.set(r.clientId, r);
+		}
+		const parts = [];
+		if (latest.has(myClientId)) {
+			parts.push('You');
+			latest.delete(myClientId);
+		}
+		const buddies = [...latest.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+		for (const record of buddies.slice(0, 2)) parts.push(YTB.buddyName(record.clientId, record.name));
+		const rest = buddies.length - Math.min(buddies.length, 2);
+		if (rest > 0) parts.push(`and ${rest} other${rest === 1 ? '' : 's'}`);
+		if (parts.length === 0) return '';
+		if (parts.length === 1) return parts[0];
+		if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+		// Three or more: Oxford-comma list; the collapsed tail already says "and".
+		const last = parts[parts.length - 1];
+		return parts.slice(0, -1).join(', ') + ', ' + (last.startsWith('and ') ? last : 'and ' + last);
+	},
+
+	/** Local calendar day of an epoch-ms instant, e.g. "2026-07-05". */
+	_dayKey(ms) {
+		const d = new Date(Number(ms) || 0);
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	},
+
+	/**
+	 * Human label for a Feed day divider: "Today", "Yesterday", or a short
+	 * date ("Jul 3").
+	 * @param {string} dayKey as produced by _dayKey / buildFeed
+	 * @param {number} [nowMs]
+	 * @returns {string}
+	 */
+	dayLabel(dayKey, nowMs = Date.now()) {
+		if (dayKey === YTB._dayKey(nowMs)) return 'Today';
+		if (dayKey === YTB._dayKey(nowMs - 24 * 3600_000)) return 'Yesterday';
+		const [y, m, d] = String(dayKey)
+			.split('-')
+			.map((part) => Number(part));
+		return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	},
+
+	/**
+	 * Derive the viewer's personalized Room Feed from one Room read:
+	 *   - Replies by Buddies to Notes the viewer authored;
+	 *   - Notes/Replies whose `mentions` include the viewer (a Reply that is
+	 *     both "to my Note" and "mentions me" appears exactly once);
+	 *   - Playlist Events as System Messages.
+	 * Items are sorted oldest -> newest (chat order) and grouped under day
+	 * dividers. There is deliberately NO read/unread state — the Feed just
+	 * shows recent activity (records age out server-side after 14 days).
+	 * @param {{notes?: Array, replies?: Array, events?: Array}} records
+	 * @param {string} myClientId
+	 * @returns {Array<{dayKey: string, items: Array<{type: 'reply'|'mention'|'system', at: number, note?: object, reply?: object, event?: object}>}>}
+	 */
+	buildFeed(records, myClientId) {
+		const notes = (records && records.notes) || [];
+		const replies = (records && records.replies) || [];
+		const events = (records && records.events) || [];
+		const noteById = new Map(notes.map((note) => [note.id, note]));
+		const mentionsMe = (record) => Array.isArray(record.mentions) && record.mentions.includes(myClientId);
+
+		const items = [];
+		for (const reply of replies) {
+			if (!reply || reply.clientId === myClientId) continue; // my own writes are not news to me
+			const parent = noteById.get(reply.noteId);
+			const toMyNote = Boolean(parent) && parent.clientId === myClientId;
+			if (!toMyNote && !mentionsMe(reply)) continue;
+			items.push({ type: toMyNote ? 'reply' : 'mention', at: Number(reply.createdAt) || 0, reply, note: parent || null });
+		}
+		for (const note of notes) {
+			if (!note || note.clientId === myClientId || !mentionsMe(note)) continue;
+			items.push({ type: 'mention', at: Number(note.createdAt) || 0, note });
+		}
+		for (const event of events) {
+			if (!event) continue;
+			items.push({ type: 'system', at: Number(event.at) || 0, event });
+		}
+		items.sort((a, b) => a.at - b.at);
+
+		const groups = [];
+		let current = null;
+		for (const item of items) {
+			const dayKey = YTB._dayKey(item.at);
+			if (!current || current.dayKey !== dayKey) {
+				current = { dayKey, items: [] };
+				groups.push(current);
+			}
+			current.items.push(item);
+		}
+		return groups;
 	},
 
 	/**

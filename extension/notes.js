@@ -505,6 +505,9 @@
 		textarea.rows = 1;
 		textarea.placeholder = 'Reply...';
 		textarea.setAttribute('aria-label', 'Write a reply');
+		// The @-mention popover must attach BEFORE our own keydown listener so an
+		// open popover consumes Enter/Escape instead of posting/dismissing.
+		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
 		textarea.addEventListener('input', () => autosize(textarea));
 		textarea.addEventListener('keydown', (event) => {
 			event.stopPropagation(); // never feed YouTube's player hotkeys
@@ -515,13 +518,13 @@
 			// Enter posts; Shift+Enter inserts a newline.
 			if (event.key === 'Enter' && !event.shiftKey) {
 				event.preventDefault();
-				submitReply(panel, note, textarea);
+				submitReply(panel, note, textarea, mentionCtl);
 			}
 		});
 		area.append(textarea);
 	}
 
-	async function submitReply(panel, note, textarea) {
+	async function submitReply(panel, note, textarea, mentionCtl) {
 		const body = textarea.value.trim();
 		if (!body || pendingReply) return; // no duplicate submission while pending
 		pendingReply = true;
@@ -537,6 +540,7 @@
 			name,
 			noteId: note.id,
 			body,
+			mentions: mentionCtl ? mentionCtl.mentions() : [],
 		});
 		pendingReply = false;
 		textarea.disabled = false;
@@ -544,6 +548,7 @@
 		if (result.ok) {
 			// Success appends immediately, oldest → newest, without closing.
 			textarea.value = '';
+			mentionCtl?.reset();
 			autosize(textarea);
 			appendLocalReply(panel, note, result.reply);
 			textarea.focus();
