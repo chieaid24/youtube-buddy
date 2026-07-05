@@ -121,7 +121,13 @@ const YTB = {
 		const empty = { progress: [], presence: [], notes: [], ok: false };
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
-			if (!res.ok) return empty;
+			if (!res.ok) {
+				// Minimal error handling by design (see PRD): we still render nothing this
+				// cycle, but a non-2xx must not vanish silently — an unlogged GET failure
+				// is a total Buddy blackout (no markers, no thumbnail bars) with no trace.
+				console.warn('[youtube-buddy] getRecords: backend GET returned HTTP', res.status, '- rendering no Buddies this cycle');
+				return empty;
+			}
 			const data = await res.json();
 			return {
 				progress: Array.isArray(data && data.progress) ? data.progress : [],
@@ -129,7 +135,9 @@ const YTB = {
 				notes: Array.isArray(data && data.notes) ? data.notes : [],
 				ok: true,
 			};
-		} catch {
+		} catch (err) {
+			// Network drop or malformed JSON - same silent-blackout risk as a non-2xx.
+			console.warn('[youtube-buddy] getRecords: backend GET failed -', err);
 			return empty;
 		}
 	},

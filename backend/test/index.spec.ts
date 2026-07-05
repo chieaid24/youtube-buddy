@@ -439,6 +439,34 @@ describe('GET /?code=', () => {
 		expect(clientIds).toEqual(['c1', 'c2']);
 	});
 
+	// Regression guard for #50 (silent Buddy blackout). The renderer reads
+	// `{ progress, presence, notes }` from this response; if the GET ever drops a
+	// field or answers non-2xx, `getRecords` swallows it into empty arrays and BOTH
+	// surfaces (timeline markers + thumbnail bars) go blank with no error. Pin the
+	// exact shape/status for the two Rooms most likely to expose an omission: one
+	// with progress but no Notes, and a wholly empty Room.
+	it('always answers 200 with progress/presence/notes as arrays (progress-but-no-notes Room)', async () => {
+		const code = 'get-shape-progress-only';
+		await post(code, body({ clientId: 'p1', videoId: 'v1' }));
+
+		const res = await SELF.fetch(`https://example.com/?code=${code}`);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[] };
+		expect(Array.isArray(data.progress)).toBe(true);
+		expect(Array.isArray(data.presence)).toBe(true);
+		expect(Array.isArray(data.notes)).toBe(true);
+		expect(data.progress).toHaveLength(1);
+		expect(data.presence).toEqual([]);
+		expect(data.notes).toEqual([]);
+	});
+
+	it('always answers 200 with empty progress/presence/notes arrays for a Room with no records', async () => {
+		const res = await SELF.fetch('https://example.com/?code=get-shape-empty-room');
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[] };
+		expect(data).toEqual({ progress: [], presence: [], notes: [] });
+	});
+
 	it('includes Notes without mixing them into progress', async () => {
 		const code = 'get-notes';
 		await post(code, body());
