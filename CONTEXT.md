@@ -49,7 +49,7 @@ The active YouTube player's progress bar, where Progress Record markers and time
 _Avoid_: feed (when referring to the active player's progress bar), scrubber
 
 **Note Preview**:
-The compact, hover-only summary shown above a Note on the Video Timeline. It identifies the author before the Note text and may summarize how many Replies the Note has. It is not an interactive editing surface.
+The compact, hover-only summary shown above a Note on the Video Timeline. Content comes first with the author name beneath it (text body then author; Reaction emoji then author), the Note's video timestamp is pinned in the top-right corner, and it may summarize how many Replies the Note has. A transparent hover bridge keeps it alive so the pointer can travel from the dot onto the card to open the Expanded Note. It is not an interactive editing surface. A locked Spoiler shows only "Spoiler" — no author or timestamp.
 _Avoid_: expanded mode, popup (ambiguous with the composer and playback notifications)
 
 **Expanded Note**:
