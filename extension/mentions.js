@@ -14,7 +14,8 @@
 //                           whose inline "@Name" text is still present at
 //                           submit time (deleting the text drops the Mention).
 //
-// attach() must be called BEFORE the caller adds its own keydown listener:
+// attach() must be called BEFORE the caller adds its own ytb:keydown listener
+// (the re-dispatch theme.js's keystroke guard emits for on-video inputs):
 // while the popover is open, navigation/pick keys are consumed with
 // stopImmediatePropagation so Enter picks a member instead of posting.
 //
@@ -148,23 +149,26 @@
 			setActive(0);
 		}
 
-		// Registered before the host's own keydown listener (attach() is called
-		// first), so stopImmediatePropagation keeps Enter/Escape from ALSO
-		// posting the reply or closing the panel while the popover is open.
-		textarea.addEventListener('keydown', (event) => {
+		// Key events arrive as `ytb:keydown` re-dispatches from theme.js's
+		// capture guard (YouTube's player hotkeys never see the real events).
+		// Registered before the host's own ytb:keydown listener (attach() is
+		// called first), so stopImmediatePropagation keeps Enter/Escape from
+		// ALSO posting the reply or closing the panel while the popover is open;
+		// preventDefault on detail.original cancels the caret/newline default.
+		textarea.addEventListener('ytb:keydown', (event) => {
 			if (!popover || !popover.isConnected) return;
-			if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-				event.preventDefault();
+			const key = event.detail.original;
+			if (key.key === 'ArrowDown' || key.key === 'ArrowUp') {
+				key.preventDefault();
 				event.stopImmediatePropagation();
-				setActive(activeIndex + (event.key === 'ArrowDown' ? 1 : -1));
-			} else if (event.key === 'Enter' || event.key === 'Tab') {
-				event.preventDefault();
+				setActive(activeIndex + (key.key === 'ArrowDown' ? 1 : -1));
+			} else if (key.key === 'Enter' || key.key === 'Tab') {
+				key.preventDefault();
 				event.stopImmediatePropagation();
 				const option = options[activeIndex];
 				if (option) pick(option.member);
-			} else if (event.key === 'Escape') {
+			} else if (key.key === 'Escape') {
 				event.stopImmediatePropagation();
-				event.stopPropagation();
 				close();
 			}
 		});
@@ -202,6 +206,8 @@
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
+		// Consumes the namespaced --ytb-* tokens injected by theme.js (the shared
+		// on-video apricot foundation), matching the composer/panel it floats in.
 		style.textContent = `
       .${POPOVER_CLASS} {
         position: absolute;
@@ -209,23 +215,24 @@
         min-width: 160px;
         max-width: 240px;
         padding: 4px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 8px;
-        background: #212121;
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
-        font: 13px/1.4 Roboto, Arial, sans-serif;
-        color: #fff;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-md);
+        background: var(--ytb-surface);
+        box-shadow: var(--ytb-e-pop);
+        font: 13px/1.4 var(--ytb-font);
+        color: var(--ytb-ink);
       }
       .${OPTION_CLASS} {
         padding: 6px 9px;
         border-left: 3px solid transparent;
-        border-radius: 5px;
+        border-radius: var(--ytb-r-sm);
+        font-weight: 600;
         cursor: pointer;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .${OPTION_CLASS}.is-active { background: rgba(255, 255, 255, 0.14); }
+      .${OPTION_CLASS}.is-active { background: var(--ytb-accent-050); }
     `;
 		(document.head || document.documentElement).appendChild(style);
 	}

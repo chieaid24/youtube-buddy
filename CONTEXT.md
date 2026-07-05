@@ -41,7 +41,7 @@ Whether this installation currently reports its own Progress Records. Pausing sh
 _Avoid_: broadcasting, syncing (which also covers reads)
 
 **Note**:
-A Buddy's timestamped comment or emoji, pinned to one moment in one video, visible to the whole Room (like Progress Records). One entity with two content kinds: a text Note (limited to 100 characters), or an emoji **Reaction** (chosen from a small curated set, parallel to the eight curated Buddy Colors). Distinct from a Buddy's position **marker** (marker = live watch position; Note = authored content left at a moment). A text Note may be marked a **Spoiler**, showing only an obscured dot on the timeline until the viewer's own playhead passes its timestamp; while locked, it cannot be previewed or expanded. Reactions are never Spoilers.
+A Buddy's timestamped comment or emoji, pinned to one moment in one video, visible to the whole Room (like Progress Records). One entity with two content kinds: a text Note (limited to 100 characters), or an emoji **Reaction** (chosen from a small curated set, parallel to the eight curated Buddy Colors). Distinct from a Buddy's position **marker** (marker = live watch position; Note = authored content left at a moment). A text Note may be marked a **Spoiler**, showing only an obscured dot on the timeline until the viewer's own playhead passes its timestamp; while locked, it cannot be previewed or expanded. Clicking a locked Spoiler dot performs **Go here** (seeks to just before its timestamp and resumes playback) instead of doing nothing, so the viewer can jump to the moment and let the Note reveal naturally as the playhead crosses it; it is still neither previewed nor expanded while locked. Reactions are never Spoilers.
 _Avoid_: comment (alone, ambiguous with generic web comments), tag, marker, pin
 
 **Video Timeline**:
@@ -53,7 +53,7 @@ The compact, hover-only summary shown above a Note on the Video Timeline. Conten
 _Avoid_: expanded mode, popup (ambiguous with the composer and playback notifications)
 
 **Expanded Note**:
-The pinned, interactive panel opened from a Note's dot or Note Preview. It shows the full Note conversation and Note actions. Opening it pauses the video at the viewer's current playhead position; it does not seek to the Note's timestamp.
+The pinned, interactive panel opened from a Note's dot or Note Preview. It shows the full Note conversation and Note actions. Opening it pauses the video at the viewer's current playhead position; it does not seek to the Note's timestamp. One of its Note actions is **Go here**: an explicit control that seeks playback to roughly one second before the Note's timestamp and resumes playing (then closes the panel), so the Note reveals through its own Playback Notification as playback reaches it. This is distinct from merely opening the Expanded Note, which still never seeks.
 _Avoid_: hover state, Note Preview
 
 **Reply**:
