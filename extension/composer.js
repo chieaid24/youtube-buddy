@@ -176,6 +176,9 @@
 		textarea.rows = 1;
 		textarea.placeholder = 'Write a Note...';
 		textarea.setAttribute('aria-label', 'Note text');
+		// The @-mention popover must attach BEFORE our own keydown listener so an
+		// open popover consumes Enter/Escape instead of posting/closing.
+		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
 		const counter = document.createElement('div');
 		counter.className = 'ytb-note-meta';
 
@@ -230,6 +233,9 @@
 				kind,
 				body,
 				spoiler: kind === 'emoji' ? false : spoiler.checked,
+				// Only Mentions whose inline "@Name" text survived editing count;
+				// a one-click Reaction discards the draft, so it mentions nobody.
+				mentions: kind === 'text' && mentionCtl ? mentionCtl.mentions() : [],
 			});
 			if (result.ok) {
 				// Immediate Video Timeline reconciliation, then close (resuming only

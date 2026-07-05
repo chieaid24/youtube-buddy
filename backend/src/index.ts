@@ -23,6 +23,7 @@ interface NoteBody {
 	kind: 'text' | 'emoji';
 	body: string;
 	spoiler: boolean;
+	mentions?: string[];
 }
 
 interface ReplyBody {
@@ -30,6 +31,14 @@ interface ReplyBody {
 	name: string;
 	noteId: string;
 	body: string;
+	mentions?: string[];
+}
+
+interface PlaylistBody {
+	clientId: string;
+	name: string;
+	videoId: string;
+	title: string;
 }
 
 export const NOTE_EMOJIS = ['\u{1F44D}', '\u{1F602}', '\u{1F62E}', '\u{2764}\u{FE0F}', '\u{1F525}', '\u{1F44F}'] as const;
@@ -53,9 +62,22 @@ const NOTE_MAX_CHARS = 100;
 // client tolerates the rare overage.
 const MAX_REPLIES = 10;
 
+// The Shared Playlist holds at most this many distinct videos per Room; a
+// member must remove one before another fits. Best-effort like every other
+// cap here (no KV transactions).
+const MAX_PLAYLIST_ITEMS = 30;
+
+// Playlist Events (the log behind System Messages) keep only the newest ~50;
+// older ones are pruned best-effort on each write. They also share TTL_SECONDS.
+const MAX_EVENTS = 50;
+
+// A Playlist Item's title is captured at add time; YouTube titles top out
+// around 100 chars, so this bound only rejects abuse, never real titles.
+const TITLE_MAX_CHARS = 200;
+
 // Stable machine-readable error categories. The extension branches on these —
 // never on the prose in `error`.
-type ErrorCategory = 'validation' | 'room_full' | 'reply_cap' | 'missing_parent' | 'forbidden' | 'not_allowed' | 'unexpected';
+type ErrorCategory = 'validation' | 'room_full' | 'reply_cap' | 'missing_parent' | 'forbidden' | 'not_allowed' | 'unexpected' | 'playlist_full';
 
 const corsHeaders: Record<string, string> = {
 	'Access-Control-Allow-Origin': '*',
@@ -143,6 +165,70 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true });
 	}
 
+	// The Shared Playlist: one Room-level list keyed by videoId
+	// (`${code}:playlist:${videoId}`), so re-adding dedups naturally and removal
+	// is a point delete. Items are Room-communal — no per-item ownership.
+	if (req.method === 'POST' && path === '/playlist') {
+		const body = (await req.json()) as Partial<PlaylistBody>;
+		const error = validatePlaylist(body);
+		if (error) {
+			return fail(log, 400, 'validation', error);
+		}
+
+		const members = await currentMembers(env, prefix);
+		if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+			return fail(log, 409, 'room_full', 'room full');
+		}
+
+		const key = `${prefix}playlist:${body.videoId}`;
+		const existingRaw = await env.PROGRESS.get(key);
+		if (existingRaw !== null) {
+			// Re-adding an existing video is a no-op: no duplicate, no new Event.
+			return json({ ok: true, item: JSON.parse(existingRaw) });
+		}
+
+		const listing = await env.PROGRESS.list({ prefix: `${prefix}playlist:` });
+		if (listing.keys.length >= MAX_PLAYLIST_ITEMS) {
+			return fail(log, 409, 'playlist_full', 'playlist full');
+		}
+
+		// addedAt is server-authoritative; name is optional (coerced to "").
+		const item = {
+			videoId: body.videoId,
+			title: body.title,
+			addedBy: body.clientId,
+			addedByName: typeof body.name === 'string' ? body.name : '',
+			addedAt: Date.now(),
+		};
+		await env.PROGRESS.put(key, JSON.stringify(item), { expirationTtl: TTL_SECONDS });
+		await recordPlaylistEvent(env, prefix, 'added', body.videoId!, body.clientId!);
+		return json({ ok: true, item });
+	}
+
+	// Any member may remove any Playlist Item (the list belongs to the Room).
+	// Idempotent: deleting an absent video is ok with no Event. The actor's
+	// clientId is required for the `removed` Event, and a brand-new clientId is
+	// still cap-gated so a locked-out 6th person cannot curate the list.
+	if (req.method === 'DELETE' && path === '/playlist') {
+		const clientId = url.searchParams.get('clientId');
+		const videoId = url.searchParams.get('videoId');
+		if (!clientId || !videoId) {
+			return fail(log, 400, 'validation', `missing ${!clientId ? 'clientId' : 'videoId'}`);
+		}
+
+		const members = await currentMembers(env, prefix);
+		if (!members.has(clientId) && members.size >= MAX_MEMBERS) {
+			return fail(log, 409, 'room_full', 'room full');
+		}
+
+		const key = `${prefix}playlist:${videoId}`;
+		const existing = await env.PROGRESS.get(key);
+		if (existing === null) return json({ ok: true });
+		await env.PROGRESS.delete(key);
+		await recordPlaylistEvent(env, prefix, 'removed', videoId, clientId);
+		return json({ ok: true });
+	}
+
 	if (req.method === 'POST' && path === '/notes') {
 		const body = (await req.json()) as Partial<NoteBody>;
 		const error = validateNote(body);
@@ -165,6 +251,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			kind: body.kind,
 			body: body.body,
 			spoiler: body.spoiler ?? false,
+			// Mentions are stored Client IDs, never display-name text (ADR-0006).
+			// Absent means no mentions — older clients and records stay valid.
+			...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
 			createdAt: Date.now(),
 		};
 		await env.PROGRESS.put(`${prefix}note:${body.clientId}:${body.videoId}:${id}`, JSON.stringify(record), {
@@ -236,6 +325,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			clientId: body.clientId,
 			name: typeof body.name === 'string' ? body.name : '',
 			body: body.body,
+			...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
 			createdAt: Date.now(),
 		};
 		await env.PROGRESS.put(`${replyPrefix}${body.clientId}:${id}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
@@ -303,7 +393,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	if (req.method === 'GET' && path === '/') {
 		// One prefix scan over every kind; partition by key shape. Presence keys
 		// carry the "presence" infix (`${code}:presence:${id}`), Notes the "note"
-		// infix, Replies the "reply" infix; everything else is a progress key
+		// infix, Replies the "reply" infix, Playlist Items the "playlist" infix,
+		// Playlist Events the "event" infix; everything else is a progress key
 		// (`${code}:${id}:${videoId}`). Replies ride along so the client can pair
 		// them with parent Notes and show Reply counts on Note Previews.
 		const list = await env.PROGRESS.list({ prefix });
@@ -311,39 +402,81 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		const presence: unknown[] = [];
 		const notes: unknown[] = [];
 		const replies: unknown[] = [];
+		const playlist: unknown[] = [];
+		const events: unknown[] = [];
+		const buckets: Record<string, unknown[]> = { presence, note: notes, reply: replies, playlist, event: events };
 		await Promise.all(
 			list.keys.map(async (k) => {
 				const value = await env.PROGRESS.get(k.name);
 				if (value === null) return;
 				const kind = k.name.slice(prefix.length).split(':')[0];
-				const bucket = kind === 'presence' ? presence : kind === 'note' ? notes : kind === 'reply' ? replies : progress;
-				bucket.push(JSON.parse(value));
+				(buckets[kind] ?? progress).push(JSON.parse(value));
 			}),
 		);
-		return json({ progress, presence, notes, replies });
+		return json({ progress, presence, notes, replies, playlist, events });
 	}
 
 	return fail(log, 405, 'not_allowed', 'method not allowed');
 }
 
-// Derives the Room's current distinct Client IDs from existing key names under
-// the Code's prefix — no value reads. Every key kind reserves a slot: progress
-// keys are `${code}:${clientId}:${videoId}` (member id is the first segment),
-// presence keys are `${code}:presence:${clientId}`, note keys are
+// Derives the Room's current distinct Client IDs under the Code's prefix.
+// Every key kind reserves a slot: progress keys are
+// `${code}:${clientId}:${videoId}` (member id is the first segment), presence
+// keys are `${code}:presence:${clientId}`, note keys are
 // `${code}:note:${clientId}:${videoId}:${id}`, and reply keys are
-// `${code}:reply:${noteId}:${clientId}:${id}` (member id is the third segment).
-// The infixes can never collide with a Client ID (8 hex chars). KV is
-// eventually consistent with no transactions, so a simultaneous-join race (or
-// a >1000-key code whose listing truncates) can momentarily admit a 6th
-// member; acceptable for a friends-only weak-secret app.
+// `${code}:reply:${noteId}:${clientId}:${id}` (member id is the third segment)
+// — all readable from the key name alone. Playlist keys
+// (`${code}:playlist:${videoId}`) and event keys (`${code}:event:${ts}:${id}`)
+// carry no member id, so those few values (<= 30 + ~50, both capped) are read
+// for their `addedBy` / `actorClientId` — keeping a locked-out 6th person from
+// curating the list. The infixes can never collide with a Client ID (8 hex
+// chars). KV is eventually consistent with no transactions, so a
+// simultaneous-join race (or a >1000-key code whose listing truncates) can
+// momentarily admit a 6th member; acceptable for a friends-only weak-secret app.
 async function currentMembers(env: Env, prefix: string): Promise<Set<string>> {
 	const existing = await env.PROGRESS.list({ prefix });
 	const members = new Set<string>();
+	const valueReads: string[] = [];
 	for (const k of existing.keys) {
 		const parts = k.name.slice(prefix.length).split(':');
+		if (parts[0] === 'playlist' || parts[0] === 'event') {
+			valueReads.push(k.name);
+			continue;
+		}
 		members.add(parts[0] === 'reply' ? parts[2] : parts[0] === 'presence' || parts[0] === 'note' ? parts[1] : parts[0]);
 	}
+	await Promise.all(
+		valueReads.map(async (name) => {
+			const raw = await env.PROGRESS.get(name);
+			if (raw === null) return;
+			const record = JSON.parse(raw) as { addedBy?: unknown; actorClientId?: unknown };
+			const id = record.addedBy ?? record.actorClientId;
+			if (typeof id === 'string' && id !== '') members.add(id);
+		}),
+	);
 	return members;
+}
+
+// One Playlist Event backs one System Message in the Room Feed. The key embeds
+// a zero-padded millisecond timestamp so KV's lexicographic listing order is
+// chronological; the log keeps only the newest MAX_EVENTS, pruned best-effort
+// from the front on each write, and ages out on the shared TTL. The timestamp
+// is bumped past the newest existing event when two writes land in the same
+// millisecond, so sequential adds/removes always order correctly (best-effort
+// under concurrency, like every cap here).
+async function recordPlaylistEvent(env: Env, prefix: string, type: 'added' | 'removed', videoId: string, actorClientId: string): Promise<void> {
+	const eventPrefix = `${prefix}event:`;
+	const listing = await env.PROGRESS.list({ prefix: eventPrefix });
+	const lastKey = listing.keys.length > 0 ? listing.keys[listing.keys.length - 1].name : null;
+	const lastAt = lastKey ? Number(lastKey.slice(eventPrefix.length).split(':')[0]) || 0 : 0;
+	const at = Math.max(Date.now(), lastAt + 1);
+	const id = crypto.randomUUID();
+	const record = { id, type, videoId, actorClientId, at };
+	await env.PROGRESS.put(`${eventPrefix}${String(at).padStart(14, '0')}:${id}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
+	const excess = listing.keys.length + 1 - MAX_EVENTS;
+	if (excess > 0) {
+		await Promise.all(listing.keys.slice(0, excess).map(({ name }) => env.PROGRESS.delete(name)));
+	}
 }
 
 async function deleteMember(env: Env, prefix: string, clientId: string): Promise<void> {
@@ -465,7 +598,7 @@ function validateNote(body: Partial<NoteBody>): string | null {
 	if (body.kind === 'emoji' && body.spoiler === true) {
 		return 'a reaction cannot be a spoiler';
 	}
-	return null;
+	return validateMentions(body.mentions);
 }
 
 function validateReply(body: Partial<ReplyBody>): string | null {
@@ -476,6 +609,30 @@ function validateReply(body: Partial<ReplyBody>): string | null {
 	}
 	if (body.body!.length > NOTE_MAX_CHARS) {
 		return `reply body exceeds ${NOTE_MAX_CHARS} characters`;
+	}
+	return validateMentions(body.mentions);
+}
+
+// Mentions are OPTIONAL (absent = none, keeping older clients and stored
+// records valid). When present: an array of nonempty Client ID strings,
+// bounded by the Room cap — a Note can never mention more people than a Room
+// holds (ADR-0006).
+function validateMentions(mentions: unknown): string | null {
+	if (mentions === undefined) return null;
+	if (!Array.isArray(mentions) || mentions.length > MAX_MEMBERS || mentions.some((m) => typeof m !== 'string' || m === '')) {
+		return 'missing or invalid field: mentions';
+	}
+	return null;
+}
+
+function validatePlaylist(body: Partial<PlaylistBody>): string | null {
+	for (const field of ['clientId', 'videoId', 'title'] as const) {
+		if (typeof body[field] !== 'string' || body[field] === '') {
+			return `missing or invalid field: ${field}`;
+		}
+	}
+	if (body.title!.length > TITLE_MAX_CHARS) {
+		return `title exceeds ${TITLE_MAX_CHARS} characters`;
 	}
 	return null;
 }

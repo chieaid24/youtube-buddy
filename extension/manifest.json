@@ -11,7 +11,19 @@
 	"content_scripts": [
 		{
 			"matches": ["*://*.youtube.com/*"],
-			"js": ["shared.js", "reporter.js", "renderer.js", "notes.js", "presence.js", "composer.js", "content.js"],
+			"js": [
+				"shared.js",
+				"room-code.js",
+				"mentions.js",
+				"reporter.js",
+				"renderer.js",
+				"notes.js",
+				"presence.js",
+				"composer.js",
+				"home-section.js",
+				"playlist-add.js",
+				"content.js"
+			],
 			"run_at": "document_idle"
 		}
 	]
