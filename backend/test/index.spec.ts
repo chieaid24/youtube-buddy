@@ -58,6 +58,28 @@ function deleteMember(code: string, clientId?: string) {
 	return SELF.fetch(`https://example.com/member?${qs}`, { method: 'DELETE' });
 }
 
+function replyBody(noteId: string, overrides: Record<string, unknown> = {}) {
+	return { clientId: 'a1b2c3d4', name: 'aidan', noteId, body: 'nice one', ...overrides };
+}
+
+function postReply(code: string, payload: unknown) {
+	return SELF.fetch(`https://example.com/replies?code=${code}`, {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	});
+}
+
+function getConversation(code: string, noteId: string) {
+	return SELF.fetch(`https://example.com/conversation?code=${code}&noteId=${noteId}`);
+}
+
+// Create a Note through the API and return its complete server record.
+async function createNote(code: string, overrides: Record<string, unknown> = {}): Promise<{ id: string; clientId: string }> {
+	const res = await postNote(code, noteBody(overrides));
+	expect(res.status).toBe(200);
+	return ((await res.json()) as { note: { id: string; clientId: string } }).note;
+}
+
 describe('POST /?code=', () => {
 	it('stores a Progress Record and returns ok', async () => {
 		const code = 'post-stores';
@@ -139,7 +161,7 @@ describe('POST /?code=', () => {
 			body: JSON.stringify(body()),
 		});
 		expect(res.status).toBe(400);
-		expect(await res.json()).toEqual({ error: 'missing code' });
+		expect(await res.json()).toEqual({ error: 'missing code', category: 'validation' });
 	});
 });
 
@@ -161,7 +183,7 @@ describe('Room cap (POST)', () => {
 		}
 		const res = await post(code, body({ clientId: 'm6', videoId: 'v' }));
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: 'room full' });
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
 		// The rejected member left no record behind.
 		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
 	});
@@ -218,6 +240,7 @@ describe('POST /presence?code=', () => {
 		expect(res.status).toBe(400);
 		expect(await res.json()).toEqual({
 			error: 'missing or invalid field: clientId',
+			category: 'validation',
 		});
 	});
 
@@ -256,7 +279,7 @@ describe('DELETE /member?code=', () => {
 		const code = 'member-delete-no-client';
 		const res = await deleteMember(code);
 		expect(res.status).toBe(400);
-		expect(await res.json()).toEqual({ error: 'missing clientId' });
+		expect(await res.json()).toEqual({ error: 'missing clientId', category: 'validation' });
 	});
 
 	it('does not retain the removed member across paginated listings', async () => {
@@ -306,13 +329,13 @@ describe('DELETE /member?code=', () => {
 });
 
 describe('POST /notes?code=', () => {
-	it('stores a Note with server fields and returns its id', async () => {
+	it('stores a Note with server fields and returns the complete record', async () => {
 		const code = 'note-stores';
 		const before = Date.now();
 		const res = await postNote(code, noteBody({ spoiler: true, createdAt: 1, id: 'forged' }));
 		const after = Date.now();
 		expect(res.status).toBe(200);
-		const result = (await res.json()) as { ok: boolean; id: string };
+		const result = (await res.json()) as { ok: boolean; id: string; note: Record<string, unknown> };
 		expect(result.ok).toBe(true);
 		expect(result.id).not.toBe('forged');
 
@@ -321,6 +344,23 @@ describe('POST /notes?code=', () => {
 		expect(note).toMatchObject({ id: result.id, clientId: 'a1b2c3d4', body: 'great moment', spoiler: true });
 		expect(note.createdAt).toBeGreaterThanOrEqual(before);
 		expect(note.createdAt).toBeLessThanOrEqual(after);
+		// The response carries the complete server-authoritative record — the
+		// extension renders it on the Video Timeline without a refresh.
+		expect(result.note).toEqual(note);
+	});
+
+	it('accepts a text body of exactly 100 characters and rejects 101', async () => {
+		const code = 'note-boundary';
+		expect((await postNote(code, noteBody({ body: 'x'.repeat(100) }))).status).toBe(200);
+		const res = await postNote(code, noteBody({ body: 'x'.repeat(101) }));
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'text body exceeds 100 characters', category: 'validation' });
+	});
+
+	it('rejects a Spoiler Reaction instead of persisting the contradiction', async () => {
+		const res = await postNote('note-spoiler-emoji', noteBody({ kind: 'emoji', body: '\u{1F44D}', spoiler: true }));
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'a reaction cannot be a spoiler', category: 'validation' });
 	});
 
 	it.each([
@@ -329,7 +369,7 @@ describe('POST /notes?code=', () => {
 		['missing timestamp', noteBody({ timestamp: undefined })],
 		['missing body', noteBody({ body: '' })],
 		['invalid kind', noteBody({ kind: 'gif' })],
-		['oversized text', noteBody({ body: 'x'.repeat(201) })],
+		['oversized text', noteBody({ body: 'x'.repeat(101) })],
 		['non-curated emoji', noteBody({ kind: 'emoji', body: '\u{1F4A9}' })],
 	])('rejects %s', async (_name, payload) => {
 		const res = await postNote('note-invalid', payload);
@@ -350,7 +390,7 @@ describe('POST /notes?code=', () => {
 		for (const clientId of ['m1', 'm2', 'm3', 'm4', 'm5']) await postPresence(code, { clientId });
 		const res = await postNote(code, noteBody({ clientId: 'm6' }));
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: 'room full' });
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
 	});
 });
 
@@ -390,7 +430,7 @@ describe('Room cap counts presence rows', () => {
 		}
 		const res = await postPresence(code, { clientId: 'm6' });
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: 'room full' });
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
 		expect(await env.PROGRESS.get(`${code}:presence:m6`)).toBeNull();
 	});
 
@@ -401,7 +441,7 @@ describe('Room cap counts presence rows', () => {
 		}
 		const res = await post(code, body({ clientId: 'm6', videoId: 'v' }));
 		expect(res.status).toBe(409);
-		expect(await res.json()).toEqual({ error: 'room full' });
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
 		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
 	});
 
@@ -497,7 +537,7 @@ describe('GET /?code=', () => {
 	it('rejects a missing code with 400', async () => {
 		const res = await SELF.fetch('https://example.com/');
 		expect(res.status).toBe(400);
-		expect(await res.json()).toEqual({ error: 'missing code' });
+		expect(await res.json()).toEqual({ error: 'missing code', category: 'validation' });
 	});
 });
 
@@ -525,6 +565,245 @@ describe('cross-cutting', () => {
 			method: 'PUT',
 		});
 		expect(res.status).toBe(405);
-		expect(await res.json()).toEqual({ error: 'method not allowed' });
+		expect(await res.json()).toEqual({ error: 'method not allowed', category: 'not_allowed' });
+	});
+});
+
+describe('POST /replies?code=', () => {
+	it('stores a Reply with server fields and returns the complete record', async () => {
+		const code = 'reply-stores';
+		const note = await createNote(code);
+		const before = Date.now();
+		const res = await postReply(code, replyBody(note.id, { clientId: 'buddy222', name: 'sam', id: 'forged', createdAt: 1 }));
+		const after = Date.now();
+		expect(res.status).toBe(200);
+		const { ok, reply } = (await res.json()) as { ok: boolean; reply: Record<string, unknown> };
+		expect(ok).toBe(true);
+		expect(reply.id).not.toBe('forged');
+		expect(reply).toMatchObject({ noteId: note.id, clientId: 'buddy222', name: 'sam', body: 'nice one' });
+		expect(reply.createdAt as number).toBeGreaterThanOrEqual(before);
+		expect(reply.createdAt as number).toBeLessThanOrEqual(after);
+
+		const raw = await env.PROGRESS.get(`${code}:reply:${note.id}:buddy222:${reply.id}`);
+		expect(JSON.parse(raw!)).toEqual(reply);
+	});
+
+	it.each([
+		['missing clientId', { clientId: undefined }],
+		['missing body', { body: '' }],
+		['oversized body', { body: 'x'.repeat(101) }],
+	])('rejects %s with a validation category', async (_name, overrides) => {
+		const code = 'reply-invalid';
+		const note = await createNote(code);
+		const res = await postReply(code, replyBody(note.id, overrides));
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { category: string }).category).toBe('validation');
+	});
+
+	it('accepts a body of exactly 100 characters', async () => {
+		const code = 'reply-boundary';
+		const note = await createNote(code);
+		expect((await postReply(code, replyBody(note.id, { body: 'x'.repeat(100) }))).status).toBe(200);
+	});
+
+	it('404s with missing_parent for an absent parent Note', async () => {
+		const res = await postReply('reply-no-parent', replyBody('no-such-note'));
+		expect(res.status).toBe(404);
+		expect(await res.json()).toEqual({ error: 'note not found', category: 'missing_parent' });
+	});
+
+	it('rejects a Reply to a Reaction (emoji Note)', async () => {
+		const code = 'reply-to-emoji';
+		const note = await createNote(code, { kind: 'emoji', body: '\u{1F44D}' });
+		const res = await postReply(code, replyBody(note.id));
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'replies are only allowed on text notes', category: 'validation' });
+	});
+
+	it('coerces a missing name to ""', async () => {
+		const code = 'reply-missing-name';
+		const note = await createNote(code);
+		const { name, ...payload } = replyBody(note.id);
+		const res = await postReply(code, payload);
+		const { reply } = (await res.json()) as { reply: { name: string } };
+		expect(reply.name).toBe('');
+	});
+
+	it('caps a conversation at 10 Replies with reply_cap', async () => {
+		const code = 'reply-cap';
+		const note = await createNote(code);
+		for (let i = 0; i < 10; i++) {
+			expect((await postReply(code, replyBody(note.id, { body: `reply ${i}` }))).status).toBe(200);
+		}
+		const res = await postReply(code, replyBody(note.id, { body: 'the eleventh' }));
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'reply limit reached', category: 'reply_cap' });
+	});
+
+	it('best-effort cap: concurrent Replies may briefly overshoot 10 (accepted KV limitation)', async () => {
+		const code = 'reply-cap-concurrent';
+		const note = await createNote(code);
+		for (let i = 0; i < 9; i++) {
+			await postReply(code, replyBody(note.id, { body: `reply ${i}` }));
+		}
+		// Three concurrent writers each list ~9 existing Replies: with no KV
+		// transactions the cap cannot be strictly serialized, so anywhere from 1
+		// to all 3 may land. The invariant is only "at least the cap, bounded by
+		// the concurrency" — the client tolerates the rare overage.
+		const results = await Promise.all([1, 2, 3].map((i) => postReply(code, replyBody(note.id, { body: `concurrent ${i}` }))));
+		const successes = results.filter((r) => r.status === 200).length;
+		expect(successes).toBeGreaterThanOrEqual(1);
+		const stored = await env.PROGRESS.list({ prefix: `${code}:reply:${note.id}:` });
+		expect(stored.keys.length).toBe(9 + successes);
+		expect(stored.keys.length).toBeGreaterThanOrEqual(10);
+		expect(stored.keys.length).toBeLessThanOrEqual(12);
+	});
+
+	it('rejects a brand-new member when the Room is full', async () => {
+		const code = 'reply-room-full';
+		const note = await createNote(code, { clientId: 'm1' });
+		for (const clientId of ['m2', 'm3', 'm4', 'm5']) await postPresence(code, { clientId });
+		const res = await postReply(code, replyBody(note.id, { clientId: 'm6' }));
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
+	});
+
+	it('extends the whole conversation lifetime from the latest Reply', async () => {
+		const code = 'reply-ttl';
+		const note = await createNote(code);
+		const noteKey = `${code}:note:${note.clientId}:abc123:${note.id}`;
+		// Shrink the parent's TTL to an hour, then post a Reply: the conversation
+		// must be re-put together with a fresh 14-day horizon.
+		await env.PROGRESS.put(noteKey, (await env.PROGRESS.get(noteKey))!, { expirationTtl: 3600 });
+		await postReply(code, replyBody(note.id));
+
+		const floor = Date.now() / 1000 + 13 * 24 * 3600;
+		const noteListing = await env.PROGRESS.list({ prefix: `${code}:note:` });
+		const replyListing = await env.PROGRESS.list({ prefix: `${code}:reply:${note.id}:` });
+		for (const key of [...noteListing.keys, ...replyListing.keys]) {
+			expect(key.expiration).toBeGreaterThan(floor);
+		}
+	});
+});
+
+describe('GET /conversation?code=', () => {
+	it('returns the Note and its Replies oldest first', async () => {
+		const code = 'conversation-read';
+		const note = await createNote(code, { body: 'the parent' });
+		for (const text of ['first', 'second', 'third']) {
+			await postReply(code, replyBody(note.id, { body: text }));
+		}
+
+		const res = await getConversation(code, note.id);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { note: { id: string; body: string }; replies: { body: string; createdAt: number }[] };
+		expect(data.note.id).toBe(note.id);
+		expect(data.note.body).toBe('the parent');
+		expect(data.replies.map((r) => r.body)).toEqual(['first', 'second', 'third']);
+		const times = data.replies.map((r) => r.createdAt);
+		expect([...times].sort((a, b) => a - b)).toEqual(times);
+	});
+
+	it('rejects a missing noteId with 400', async () => {
+		const res = await SELF.fetch('https://example.com/conversation?code=conversation-no-id');
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'missing noteId', category: 'validation' });
+	});
+
+	it('404s with missing_parent when the Note is gone', async () => {
+		const res = await getConversation('conversation-absent', 'no-such-note');
+		expect(res.status).toBe(404);
+		expect(await res.json()).toEqual({ error: 'note not found', category: 'missing_parent' });
+	});
+});
+
+describe('Reply lifecycles', () => {
+	it('GET / returns replies separately from notes and progress', async () => {
+		const code = 'get-replies';
+		await post(code, body());
+		const note = await createNote(code);
+		await postReply(code, replyBody(note.id, { clientId: 'buddy222' }));
+
+		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
+			progress: unknown[];
+			notes: unknown[];
+			replies: { noteId: string; clientId: string }[];
+		};
+		expect(data.progress).toHaveLength(1);
+		expect(data.notes).toHaveLength(1);
+		expect(data.replies).toHaveLength(1);
+		expect(data.replies[0]).toMatchObject({ noteId: note.id, clientId: 'buddy222' });
+	});
+
+	it('deleting a parent Note cascades to its Replies', async () => {
+		const code = 'delete-cascades';
+		const note = await createNote(code);
+		await postReply(code, replyBody(note.id, { clientId: 'buddy222' }));
+		await postReply(code, replyBody(note.id, { clientId: 'buddy333' }));
+
+		const res = await deleteNote(code, note.clientId, note.id);
+		expect(res.status).toBe(200);
+		expect((await env.PROGRESS.list({ prefix: `${code}:reply:` })).keys).toHaveLength(0);
+	});
+
+	it("keeps the forbidden category on another member's delete attempt", async () => {
+		const code = 'delete-forbidden-category';
+		const note = await createNote(code);
+		const res = await deleteNote(code, 'someone-else', note.id);
+		expect(res.status).toBe(403);
+		expect(((await res.json()) as { category: string }).category).toBe('forbidden');
+	});
+
+	it("leaving a Room deletes the member's Notes with their whole conversations", async () => {
+		const code = 'leave-cascades-own';
+		const note = await createNote(code, { clientId: 'author11' });
+		await postReply(code, replyBody(note.id, { clientId: 'buddy222' }));
+
+		await deleteMember(code, 'author11');
+		expect((await env.PROGRESS.list({ prefix: `${code}:note:` })).keys).toHaveLength(0);
+		expect((await env.PROGRESS.list({ prefix: `${code}:reply:` })).keys).toHaveLength(0);
+	});
+
+	it("leaving a Room deletes only the member's Replies under other authors' Notes", async () => {
+		const code = 'leave-prunes-replies';
+		const note = await createNote(code, { clientId: 'author11' });
+		await postReply(code, replyBody(note.id, { clientId: 'leaver55', body: 'mine goes' }));
+		await postReply(code, replyBody(note.id, { clientId: 'buddy222', body: 'this stays' }));
+
+		await deleteMember(code, 'leaver55');
+		expect((await env.PROGRESS.list({ prefix: `${code}:note:` })).keys).toHaveLength(1);
+		const remaining = await env.PROGRESS.list({ prefix: `${code}:reply:${note.id}:` });
+		expect(remaining.keys.map(({ name }) => name.split(':')[3])).toEqual(['buddy222']);
+	});
+
+	it('reply cleanup on leave crosses paginated listings', async () => {
+		const code = 'leave-replies-paginated';
+		await Promise.all(
+			Array.from({ length: 501 }, (_, i) =>
+				env.PROGRESS.put(
+					`${code}:reply:note-${String(i).padStart(4, '0')}:leaver55:reply-${i}`,
+					JSON.stringify({ id: `reply-${i}`, noteId: `note-${i}`, clientId: 'leaver55', name: '', body: 'x', createdAt: Date.now() }),
+				),
+			),
+		);
+		await env.PROGRESS.put(
+			`${code}:reply:note-keep:buddy222:reply-keep`,
+			JSON.stringify({ id: 'reply-keep', noteId: 'note-keep', clientId: 'buddy222', name: '', body: 'x', createdAt: Date.now() }),
+		);
+
+		const res = await deleteMember(code, 'leaver55');
+		expect(res.status).toBe(200);
+		const remaining = await env.PROGRESS.list({ prefix: `${code}:reply:` });
+		expect(remaining.keys.map(({ name }) => name)).toEqual([`${code}:reply:note-keep:buddy222:reply-keep`]);
+	}, 30_000);
+
+	it('counts a Reply author as a Room member for the cap', async () => {
+		const code = 'reply-author-counts';
+		const note = await createNote(code, { clientId: 'author11' });
+		await postReply(code, replyBody(note.id, { clientId: 'replier2' }));
+		for (const clientId of ['m3', 'm4', 'm5']) await postPresence(code, { clientId });
+
+		const res = await postPresence(code, { clientId: 'm6' });
+		expect(res.status).toBe(409);
 	});
 });
