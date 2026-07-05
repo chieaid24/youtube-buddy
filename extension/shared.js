@@ -16,6 +16,68 @@
 // setConfig), so the API client passes the code through verbatim.
 
 const YTB = {
+	// A Chrome extension reload/update leaves already-injected content scripts in
+	// the page, but revokes their access to extension APIs. Treat that one error
+	// as a terminal lifecycle event for the stale script. Popup documents are
+	// destroyed by Chrome, so the same helpers are harmless there.
+	_contextActive: true,
+	_contextInvalidationCallbacks: new Set(),
+
+	isExtensionContextInvalidation(error) {
+		return /extension context invalidated/i.test(String(error && error.message ? error.message : error));
+	},
+
+	isContextActive() {
+		return YTB._contextActive;
+	},
+
+	onContextInvalidated(callback) {
+		if (!YTB._contextActive) {
+			callback();
+			return () => {};
+		}
+		YTB._contextInvalidationCallbacks.add(callback);
+		return () => YTB._contextInvalidationCallbacks.delete(callback);
+	},
+
+	_handleContextInvalidation(error) {
+		if (!YTB.isExtensionContextInvalidation(error)) return false;
+		if (!YTB._contextActive) return true;
+		YTB._contextActive = false;
+		let callbackError;
+		for (const callback of YTB._contextInvalidationCallbacks) {
+			try {
+				callback();
+			} catch (error) {
+				callbackError ||= error;
+			}
+		}
+		YTB._contextInvalidationCallbacks.clear();
+		if (callbackError) throw callbackError;
+		return true;
+	},
+
+	async _storageGet(keys) {
+		if (!YTB._contextActive) return {};
+		try {
+			return await chrome.storage.local.get(keys);
+		} catch (error) {
+			if (YTB._handleContextInvalidation(error)) return {};
+			throw error;
+		}
+	},
+
+	async _storageSet(values) {
+		if (!YTB._contextActive) return false;
+		try {
+			await chrome.storage.local.set(values);
+			return true;
+		} catch (error) {
+			if (YTB._handleContextInvalidation(error)) return false;
+			throw error;
+		}
+	},
+
 	// --- config ---
 	// PLACEHOLDER backend URL — replace with the deployed …workers.dev URL from
 	// task 02 (also update the matching entry in manifest.json host_permissions).
@@ -50,7 +112,7 @@ const YTB = {
 	 * @returns {Promise<{name: string, code: string, clientId: string, sharing: boolean}>}
 	 */
 	async getConfig() {
-		const stored = await chrome.storage.local.get(['name', 'code', 'clientId', 'sharing']);
+		const stored = await YTB._storageGet(['name', 'code', 'clientId', 'sharing']);
 		return {
 			name: stored.name ?? '',
 			code: stored.code ?? '',
@@ -70,7 +132,7 @@ const YTB = {
 		for (const key of ['name', 'code', 'sharing']) {
 			if (key in partial) next[key] = partial[key];
 		}
-		await chrome.storage.local.set(next);
+		await YTB._storageSet(next);
 	},
 
 	/**
@@ -79,12 +141,13 @@ const YTB = {
 	 * @returns {Promise<string>}
 	 */
 	async ensureClientId() {
-		const { clientId } = await chrome.storage.local.get('clientId');
+		const { clientId } = await YTB._storageGet('clientId');
 		if (clientId) return clientId;
+		if (!YTB.isContextActive()) return '';
 		const bytes = new Uint8Array(4); // 4 bytes -> 8 hex chars
 		crypto.getRandomValues(bytes);
 		const id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-		await chrome.storage.local.set({ clientId: id });
+		await YTB._storageSet({ clientId: id });
 		return id;
 	},
 
@@ -128,7 +191,13 @@ const YTB = {
 	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>, notes: Array<{id: string, clientId: string, name: string, videoId: string, timestamp: number, kind: string, body: string, spoiler: boolean, createdAt: number}>}>}
 	 */
 	async getRecords(code) {
-		const empty = { progress: [], presence: [], notes: [], replies: [], ok: false };
+		const empty = {
+			progress: [],
+			presence: [],
+			notes: [],
+			replies: [],
+			ok: false,
+		};
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) {
@@ -219,7 +288,12 @@ const YTB = {
 	async postReply({ clientId, name, noteId, body }) {
 		const { code, sharing } = await YTB.getConfig();
 		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
-		return YTB._postJson('/replies?code=' + encodeURIComponent(code), { clientId, name, noteId, body });
+		return YTB._postJson('/replies?code=' + encodeURIComponent(code), {
+			clientId,
+			name,
+			noteId,
+			body,
+		});
 	},
 
 	/**
@@ -236,7 +310,11 @@ const YTB = {
 			const res = await fetch(YTB.BACKEND_URL + '/conversation?' + query);
 			const data = await res.json().catch(() => null);
 			if (res.ok && data && data.note) {
-				return { ok: true, note: data.note, replies: Array.isArray(data.replies) ? data.replies : [] };
+				return {
+					ok: true,
+					note: data.note,
+					replies: Array.isArray(data.replies) ? data.replies : [],
+				};
 			}
 			return { ok: false, category: (data && data.category) || 'unexpected' };
 		} catch {
@@ -256,6 +334,7 @@ const YTB = {
 		if (!code) return false; // Unpaired — nobody to appear to.
 		const { name } = await YTB.getConfig();
 		const clientId = await YTB.ensureClientId();
+		if (!YTB.isContextActive()) return false;
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/presence?code=' + encodeURIComponent(code), {
 				method: 'POST',
@@ -434,7 +513,8 @@ const YTB = {
 	_activeRoomCode: '',
 
 	async syncBuddyColors(code, buddyIds, successful, random = Math.random) {
-		const stored = await chrome.storage.local.get('buddyColors');
+		const stored = await YTB._storageGet('buddyColors');
+		if (!YTB.isContextActive()) return {};
 		const all = stored.buddyColors || {};
 		const room = { ...(all[code] || {}) };
 		if (successful) {
@@ -447,7 +527,7 @@ const YTB = {
 				room[id] = available[Math.floor(random() * available.length)];
 			}
 			all[code] = room;
-			await chrome.storage.local.set({ buddyColors: all });
+			await YTB._storageSet({ buddyColors: all });
 		}
 		YTB._buddyColors = all;
 		YTB._activeRoomCode = code;
@@ -456,7 +536,8 @@ const YTB = {
 
 	async setBuddyColor(code, clientId, color) {
 		if (!YTB.BUDDY_COLORS.includes(color)) return false;
-		const stored = await chrome.storage.local.get('buddyColors');
+		const stored = await YTB._storageGet('buddyColors');
+		if (!YTB.isContextActive()) return false;
 		const all = stored.buddyColors || {};
 		const room = { ...(all[code] || {}) };
 		if (Object.entries(room).some(([id, assigned]) => id !== clientId && assigned === color)) return false;
@@ -464,16 +545,17 @@ const YTB = {
 		all[code] = room;
 		YTB._buddyColors = all;
 		YTB._activeRoomCode = code;
-		await chrome.storage.local.set({ buddyColors: all });
+		await YTB._storageSet({ buddyColors: all });
 		return true;
 	},
 
 	async clearRoomColors(code) {
-		const stored = await chrome.storage.local.get('buddyColors');
+		const stored = await YTB._storageGet('buddyColors');
+		if (!YTB.isContextActive()) return;
 		const all = stored.buddyColors || {};
 		delete all[code];
 		YTB._buddyColors = all;
-		await chrome.storage.local.set({ buddyColors: all });
+		await YTB._storageSet({ buddyColors: all });
 	},
 
 	// Playful adjectives for unnamed Buddies (see buddyName). 16 entries spread

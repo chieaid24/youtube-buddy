@@ -81,6 +81,7 @@
 	}
 
 	async function openComposer(button) {
+		if (!YTB.isContextActive()) return;
 		if (document.getElementById(COMPOSER_ID)) {
 			closeComposer(); // the Add Note button toggles: dismiss + discard
 			return;
@@ -99,7 +100,7 @@
 
 		const token = ++openToken;
 		const config = await YTB.getConfig();
-		if (token !== openToken || !button.isConnected) return;
+		if (!YTB.isContextActive() || token !== openToken || !button.isConnected) return;
 
 		const composer = document.createElement('section');
 		composer.id = COMPOSER_ID;
@@ -220,6 +221,7 @@
 			setPending(true);
 			error.textContent = '';
 			const clientId = await YTB.ensureClientId();
+			if (!YTB.isContextActive()) return;
 			const result = await YTB.postNote({
 				clientId,
 				name: config.name,
@@ -259,6 +261,7 @@
 	}
 
 	function ensureButton() {
+		if (!YTB.isContextActive()) return;
 		ensureStyles();
 		if (!currentVideoId) {
 			closeComposer({ resume: false });
@@ -314,5 +317,10 @@
 	// stop propagation, so they never land here).
 	document.addEventListener('click', () => {
 		if (document.getElementById(COMPOSER_ID)) closeComposer();
+	});
+
+	YTB.onContextInvalidated(() => {
+		closeComposer({ resume: false });
+		document.getElementById(BUTTON_ID)?.remove();
 	});
 })();

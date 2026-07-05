@@ -37,7 +37,7 @@
     document.dispatchEvent(
       new CustomEvent("ytb:navigate", {
         detail: { url, videoId: videoIdFromUrl(url) },
-      })
+      }),
     );
   }
 
@@ -50,6 +50,7 @@
   // --- throttled ytb:mutation ---
   let trailingTimer = null;
   let lastMutationEmit = 0;
+  let urlPollTimer = null;
 
   function emitMutation() {
     lastMutationEmit = Date.now();
@@ -84,7 +85,16 @@
 
   // Last-resort nav fallback: a cheap URL poll for transitions the observer
   // somehow misses.
-  setInterval(emitNavigateIfUrlChanged, URL_POLL_MS);
+  urlPollTimer = setInterval(emitNavigateIfUrlChanged, URL_POLL_MS);
+
+  YTB.onContextInvalidated(() => {
+    document.removeEventListener("yt-navigate-finish", emitNavigate);
+    observer.disconnect();
+    if (trailingTimer !== null) clearTimeout(trailingTimer);
+    if (urlPollTimer !== null) clearInterval(urlPollTimer);
+    trailingTimer = null;
+    urlPollTimer = null;
+  });
 
   // Initial navigate — synchronous on load. The reporter/renderer registered
   // their listeners earlier in the `js` array, so they receive this.

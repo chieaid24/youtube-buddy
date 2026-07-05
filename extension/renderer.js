@@ -49,6 +49,7 @@
 	let refreshToken = 0; // guards against out-of-order async refreshes
 	let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
 	let baselineReady = false; // skip toasts on the very first read (no false "joined")
+	let pollTimer = null;
 
 	injectStyle();
 
@@ -64,7 +65,9 @@
 	 * already drops records older than 14 days, so no age filter is needed here.
 	 */
 	async function refresh() {
+		if (!YTB.isContextActive()) return;
 		const { code } = await YTB.getConfig();
+		if (!YTB.isContextActive()) return;
 		if (!code) {
 			buddyByVideoId = new Map();
 			activeRoomCode = '';
@@ -73,6 +76,7 @@
 			return;
 		}
 		myClientId = myClientId || (await YTB.ensureClientId());
+		if (!YTB.isContextActive()) return;
 		activeRoomCode = code;
 		const records = await YTB.getRecords(code);
 		const view = YTB.roomView(records, myClientId);
@@ -81,6 +85,7 @@
 			view.buddies.map((buddy) => buddy.clientId),
 			records.ok,
 		);
+		if (!YTB.isContextActive()) return;
 
 		// Toast new arrivals (presence OR progress). Diff against last refresh; the
 		// first read just seeds the baseline so existing Buddies never "join".
@@ -121,7 +126,13 @@
 	function broadcastRoomData(notes, replies, locked) {
 		document.dispatchEvent(
 			new CustomEvent('ytb:room-data', {
-				detail: { notes: notes || [], replies: replies || [], roomCode: activeRoomCode, myClientId, locked: Boolean(locked) },
+				detail: {
+					notes: notes || [],
+					replies: replies || [],
+					roomCode: activeRoomCode,
+					myClientId,
+					locked: Boolean(locked),
+				},
 			}),
 		);
 	}
@@ -435,6 +446,7 @@
 	// ---------------------------------------------------------------------------
 
 	document.addEventListener('ytb:navigate', async (e) => {
+		if (!YTB.isContextActive()) return;
 		currentVideoId = (e.detail && e.detail.videoId) || null;
 		const token = ++refreshToken;
 		await refresh();
@@ -444,6 +456,7 @@
 	});
 
 	document.addEventListener('ytb:mutation', () => {
+		if (!YTB.isContextActive()) return;
 		// The feed lazy-loaded more tiles (and/or the player finished building).
 		// Use the cached records — no re-GET. Re-apply the markers too, since the
 		// progress bar may have only just appeared after the last navigate.
@@ -461,11 +474,18 @@
 	// Live updates: re-GET every ~60s so a Buddy who joins or moves shows up (and
 	// arrival toasts fire) without a navigation. ~1 GET/min per open tab. Uses the
 	// same refreshToken guard so a poll can't clobber a fresher navigate render.
-	setInterval(async () => {
+	pollTimer = setInterval(async () => {
+		if (!YTB.isContextActive()) return;
 		const token = ++refreshToken;
 		await refresh();
 		if (token !== refreshToken) return;
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	}, PRESENCE_POLL_MS);
+
+	YTB.onContextInvalidated(() => {
+		refreshToken++;
+		if (pollTimer !== null) clearInterval(pollTimer);
+		pollTimer = null;
+	});
 })();

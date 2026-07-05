@@ -40,7 +40,9 @@
   // An embedded player runs in an iframe, or is a top-level /embed/ page. Either
   // way the content script must not report from it.
   function isEmbed() {
-    return window.top !== window.self || location.pathname.startsWith("/embed/");
+    return (
+      window.top !== window.self || location.pathname.startsWith("/embed/")
+    );
   }
 
   // During an ad the player carries `ad-showing`, and `video.currentTime` is the
@@ -108,6 +110,7 @@
   }
 
   function bind() {
+    if (!YTB.isContextActive()) return;
     unbind();
     const v = mainVideo();
     if (!v) return;
@@ -133,6 +136,7 @@
   // --- navigation (Contract C) -------------------------------------------
 
   document.addEventListener("ytb:navigate", (e) => {
+    if (!YTB.isContextActive()) return;
     const nextVideoId = (e.detail && e.detail.videoId) || null;
 
     // Leaving the current video (to another video, or off /watch entirely):
@@ -148,4 +152,6 @@
     if (currentVideoId) bind();
     else unbind();
   });
+
+  YTB.onContextInvalidated(unbind);
 })();

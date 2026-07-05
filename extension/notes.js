@@ -138,7 +138,11 @@
 					// the video is revisited from an earlier point.
 					locked: Boolean(note.spoiler) && playhead < timestamp,
 				});
-				naturals.push({ id: note.id, timestamp, fraction: Math.max(0, Math.min(1, timestamp / duration)) });
+				naturals.push({
+					id: note.id,
+					timestamp,
+					fraction: Math.max(0, Math.min(1, timestamp / duration)),
+				});
 			}
 		}
 
@@ -299,7 +303,7 @@
 
 		openNote = note;
 		const config = await YTB.getConfig();
-		if (openNote !== note) return; // replaced while awaiting config
+		if (!YTB.isContextActive() || openNote !== note) return; // stopped/replaced while awaiting config
 
 		const panel = buildPanel(note, config);
 		host.appendChild(panel);
@@ -527,7 +531,13 @@
 
 		const clientId = await YTB.ensureClientId();
 		const { name } = await YTB.getConfig();
-		const result = await YTB.postReply({ clientId, name, noteId: note.id, body });
+		if (!YTB.isContextActive()) return;
+		const result = await YTB.postReply({
+			clientId,
+			name,
+			noteId: note.id,
+			body,
+		});
 		pendingReply = false;
 		textarea.disabled = false;
 
@@ -569,6 +579,7 @@
 	// The focused 5s poll: only while a conversation is open, stopped on close
 	// and on navigation. Discovers Buddy Replies (and deletion) promptly.
 	function startConversationPoll(panel) {
+		if (!YTB.isContextActive()) return;
 		stopConversationPoll();
 		pollTimer = setInterval(() => refreshConversation(panel), CONVERSATION_POLL_MS);
 	}
@@ -590,6 +601,7 @@
 			repliesByNoteId.set(note.id, result.replies);
 			renderReplies(panel, result.replies);
 			const { sharing } = await YTB.getConfig();
+			if (!YTB.isContextActive()) return;
 			if (openNote === note) updateReplyArea(panel, note, sharing, result.replies.length);
 			renderDots();
 			return;
@@ -696,6 +708,11 @@
 		},
 		true,
 	);
+
+	YTB.onContextInvalidated(() => {
+		stopConversationPoll();
+		dismissPanel({ resume: false });
+	});
 
 	// ---------------------------------------------------------------------------
 	// Playback Notifications.

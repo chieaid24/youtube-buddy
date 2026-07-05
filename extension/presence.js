@@ -22,6 +22,7 @@
   // independent of Sharing — presence means "I joined this Code", not "I'm
   // sharing my video position". Not gated to /watch: any page counts.
   async function maybeAssert() {
+    if (!YTB.isContextActive()) return;
     if (Date.now() - lastAssert < ASSERT_INTERVAL_MS) return;
     const { code } = await YTB.getConfig();
     if (!code) return; // Unpaired — nobody to appear to.
@@ -32,4 +33,7 @@
   // Every navigation (not just /watch) is a chance to (re)assert; the throttle
   // keeps it to ~once per 5 min per tab regardless of how often the user nav's.
   document.addEventListener("ytb:navigate", maybeAssert);
+  YTB.onContextInvalidated(() =>
+    document.removeEventListener("ytb:navigate", maybeAssert),
+  );
 })();
