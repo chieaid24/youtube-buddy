@@ -30,6 +30,16 @@ const YTB = {
 	// any emoji outside this deliberately small Reaction set.
 	NOTE_EMOJIS: ['\u{1F44D}', '\u{1F602}', '\u{1F62E}', '\u{2764}\u{FE0F}', '\u{1F525}', '\u{1F44F}'],
 
+	// Mirrors the backend caps: a text Note or Reply is at most this long, and a
+	// Note conversation holds at most this many Replies (best-effort under KV).
+	NOTE_MAX_CHARS: 100,
+	MAX_REPLIES: 10,
+
+	// Two timeline dots whose timestamps fall within this window would overlap;
+	// spreadFractions separates them. Mirrored by the Playback Notification
+	// "natural crossing" delta in notes.js.
+	SPREAD_WINDOW_SECONDS: 2,
+
 	// --- storage (chrome.storage.local) ---
 	// Stored keys: name, code, clientId, sharing, and Room-scoped buddyColors.
 
@@ -118,7 +128,7 @@ const YTB = {
 	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>, notes: Array<{id: string, clientId: string, name: string, videoId: string, timestamp: number, kind: string, body: string, spoiler: boolean, createdAt: number}>}>}
 	 */
 	async getRecords(code) {
-		const empty = { progress: [], presence: [], notes: [], ok: false };
+		const empty = { progress: [], presence: [], notes: [], replies: [], ok: false };
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) {
@@ -133,6 +143,7 @@ const YTB = {
 				progress: Array.isArray(data && data.progress) ? data.progress : [],
 				presence: Array.isArray(data && data.presence) ? data.presence : [],
 				notes: Array.isArray(data && data.notes) ? data.notes : [],
+				replies: Array.isArray(data && data.replies) ? data.replies : [],
 				ok: true,
 			};
 		} catch (err) {
@@ -156,27 +167,80 @@ const YTB = {
 		}
 	},
 
-	/** Post a text Note or curated-emoji Reaction at a playback position. */
-	async postNote({ clientId, name, videoId, timestamp, kind, body, spoiler }) {
-		const { code, sharing } = await YTB.getConfig();
-		if (!code || !sharing) return false;
+	/**
+	 * POST a JSON payload and normalize the outcome: `{ ok: true, ...body }` on
+	 * success, else `{ ok: false, category }` with the server's machine-readable
+	 * error category ('unexpected' for network failures / unparseable bodies).
+	 * Callers branch on `category`, never on prose.
+	 */
+	async _postJson(pathAndQuery, payload) {
 		try {
-			const res = await fetch(YTB.BACKEND_URL + '/notes?code=' + encodeURIComponent(code), {
+			const res = await fetch(YTB.BACKEND_URL + pathAndQuery, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					clientId,
-					name,
-					videoId,
-					timestamp,
-					kind,
-					body,
-					spoiler,
-				}),
+				body: JSON.stringify(payload),
 			});
-			return res.ok ? { ok: true } : false;
+			const data = await res.json().catch(() => null);
+			if (res.ok) return { ok: true, ...(data || {}) };
+			return { ok: false, category: (data && data.category) || 'unexpected' };
 		} catch {
-			return false;
+			return { ok: false, category: 'unexpected' };
+		}
+	},
+
+	/**
+	 * Post a text Note or curated-emoji Reaction at a playback position.
+	 * Resolves to `{ ok: true, note }` carrying the COMPLETE server-authoritative
+	 * record (insert it into the active Video Timeline immediately), or
+	 * `{ ok: false, category }`. Sharing gates all writes client-side.
+	 * @returns {Promise<{ok: true, note: object}|{ok: false, category: string}>}
+	 */
+	async postNote({ clientId, name, videoId, timestamp, kind, body, spoiler }) {
+		const { code, sharing } = await YTB.getConfig();
+		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
+		return YTB._postJson('/notes?code=' + encodeURIComponent(code), {
+			clientId,
+			name,
+			videoId,
+			timestamp,
+			kind,
+			body,
+			spoiler,
+		});
+	},
+
+	/**
+	 * Post a Reply to an existing text Note. Resolves to `{ ok: true, reply }`
+	 * with the complete server record (append it to the open conversation), or
+	 * `{ ok: false, category }` — notably 'reply_cap', 'missing_parent',
+	 * 'room_full', or 'sharing_off'.
+	 * @returns {Promise<{ok: true, reply: object}|{ok: false, category: string}>}
+	 */
+	async postReply({ clientId, name, noteId, body }) {
+		const { code, sharing } = await YTB.getConfig();
+		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
+		return YTB._postJson('/replies?code=' + encodeURIComponent(code), { clientId, name, noteId, body });
+	},
+
+	/**
+	 * Focused conversation read for an open Expanded Note: one parent Note plus
+	 * its Replies oldest-first, cheap enough to poll every 5 seconds without
+	 * pulling the whole Room. `{ ok: false, category: 'missing_parent' }` means
+	 * the Note was deleted while open.
+	 * @returns {Promise<{ok: true, note: object, replies: Array<object>}|{ok: false, category: string}>}
+	 */
+	async getConversation(code, noteId) {
+		if (!code || !noteId) return { ok: false, category: 'validation' };
+		try {
+			const query = new URLSearchParams({ code, noteId });
+			const res = await fetch(YTB.BACKEND_URL + '/conversation?' + query);
+			const data = await res.json().catch(() => null);
+			if (res.ok && data && data.note) {
+				return { ok: true, note: data.note, replies: Array.isArray(data.replies) ? data.replies : [] };
+			}
+			return { ok: false, category: (data && data.category) || 'unexpected' };
+		} catch {
+			return { ok: false, category: 'unexpected' };
 		}
 	},
 
@@ -239,6 +303,103 @@ const YTB = {
 		const ss = String(s).padStart(2, '0');
 		if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${ss}`;
 		return `${m}:${ss}`;
+	},
+
+	/**
+	 * Relative age label for a creation time: "just now", "8 min ago",
+	 * "1 hr ago", "4 days ago", "1 week ago" — rounded DOWN to the largest
+	 * useful unit, progressing to months after four weeks and to years after
+	 * twelve months. UI copy prefixes "Posted ".
+	 * @param {number} thenMs epoch millis (server createdAt)
+	 * @param {number} [nowMs]
+	 * @returns {string}
+	 */
+	relativeTime(thenMs, nowMs = Date.now()) {
+		const seconds = Math.max(0, Math.floor((nowMs - Number(thenMs)) / 1000));
+		if (seconds < 60) return 'just now';
+		const minutes = Math.floor(seconds / 60);
+		if (minutes < 60) return `${minutes} min ago`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours} hr ago`;
+		const days = Math.floor(hours / 24);
+		if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+		const weeks = Math.floor(days / 7);
+		if (weeks < 4) return `${weeks} week${weeks === 1 ? '' : 's'} ago`;
+		const months = Math.max(1, Math.floor(days / 30));
+		if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+		const years = Math.floor(days / 365);
+		return `${years} year${years === 1 ? '' : 's'} ago`;
+	},
+
+	/**
+	 * User-facing copy for a failed Note/Reply/Reaction write, keyed by the
+	 * server's machine-readable category. Known safe cases get specific copy;
+	 * everything else gets the action's generic retry message. Never surfaces
+	 * backend prose.
+	 * @param {string} category
+	 * @param {'note'|'reply'|'reaction'} action
+	 * @returns {string}
+	 */
+	errorCopy(category, action) {
+		if (category === 'reply_cap') return 'This note already has 10 replies.';
+		if (category === 'room_full') return "This Room is full, so you can't post here.";
+		if (category === 'missing_parent') return 'This note is no longer available.';
+		return `We couldn't post your ${action}. Try again.`;
+	},
+
+	/**
+	 * Spread timeline dots that would overlap. Dots whose timestamps chain
+	 * within SPREAD_WINDOW_SECONDS form a group; each group is spread
+	 * horizontally by `minGap` around its natural center — chronological order
+	 * preserved, clamped inside [0,1] — so every dot keeps a separate pointer
+	 * and keyboard target. Dots are never merged and their true timestamps are
+	 * untouched (this maps ids to DISPLAY fractions only).
+	 * @param {Array<{id: string, timestamp: number, fraction: number}>} dots
+	 * @param {number} [minGap] minimum separation as a fraction of the bar
+	 * @returns {Map<string, number>} id -> display fraction
+	 */
+	spreadFractions(dots, minGap = 0.012) {
+		const sorted = [...dots].sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : 1));
+		const out = new Map();
+		let group = [];
+		const flush = () => {
+			if (group.length === 0) return;
+			if (group.length === 1) {
+				out.set(group[0].id, group[0].fraction);
+			} else {
+				const span = (group.length - 1) * minGap;
+				const center = group.reduce((sum, dot) => sum + dot.fraction, 0) / group.length;
+				const start = Math.max(0, Math.min(center - span / 2, 1 - span));
+				group.forEach((dot, i) => out.set(dot.id, start + i * minGap));
+			}
+			group = [];
+		};
+		for (const dot of sorted) {
+			if (group.length > 0 && dot.timestamp - group[group.length - 1].timestamp > YTB.SPREAD_WINDOW_SECONDS) flush();
+			group.push(dot);
+		}
+		flush();
+		return out;
+	},
+
+	/**
+	 * The Notes whose timestamps ordinary forward playback just crossed:
+	 * previousTime < timestamp <= currentTime, in timestamp order. The CALLER
+	 * decides whether the step was natural (small forward delta, not a seek);
+	 * this stays a pure filter so every natural crossing — including replays
+	 * after rewinding — triggers again.
+	 * @param {Array<{timestamp: number}>} notes
+	 * @param {number} previousTime
+	 * @param {number} currentTime
+	 * @returns {Array<object>}
+	 */
+	crossedNotes(notes, previousTime, currentTime) {
+		return (notes || [])
+			.filter((note) => {
+				const t = Number(note.timestamp);
+				return Number.isFinite(t) && t > previousTime && t <= currentTime;
+			})
+			.sort((a, b) => a.timestamp - b.timestamp);
 	},
 
 	/**
