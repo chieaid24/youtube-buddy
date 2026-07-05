@@ -16,14 +16,17 @@
 // handles hotkeys in the capture phase (on #movie_player / document), i.e.
 // BEFORE any bubble-phase stopPropagation a textarea handler could run — so
 // space toggled play while typing. The guard below listens at window capture
-// (the only node above YouTube's handlers), swallows key events originating
-// from a YTB on-video textarea, and synchronously replays a non-bubbling
-// KeyboardEvent clone on that textarea. Existing textarea-level listeners
-// (mentions.js first, then the host's Enter/Escape handling — registration
-// order is preserved) run against the clone exactly as before; preventDefault
-// on the clone is forwarded to the real event so Enter never inserts a
-// newline it shouldn't. The character itself still types normally because the
-// real event's default action is untouched.
+// (the only node above YouTube's handlers), swallows keydown/keyup/keypress
+// originating from a YTB on-video textarea, and synchronously dispatches a
+// namespaced `ytb:keydown` CustomEvent on that textarea carrying the original
+// event as `detail.original`. A same-name KeyboardEvent replay would NOT
+// isolate anything: dispatch retraces the capture path, so page capture
+// listeners would see the clone — a different event NAME is what keeps
+// YouTube blind. Textarea-level `ytb:keydown` listeners (mentions.js first,
+// then the host's Enter/Escape handling — registration order is preserved)
+// read key state from `detail.original` and call its preventDefault() when
+// they need to cancel the newline/caret default. The character itself still
+// types normally because the real event's default action is left alone.
 //
 // Exposes `window.YTBTheme`:
 //   - icon(name) — inline SVG icons ('send', 'play', 'close') built via
@@ -180,6 +183,9 @@
 		window.addEventListener(
 			type,
 			(event) => {
+				// Only real user input is guarded; synthetic key events are not ours
+				// to intercept.
+				if (!event.isTrusted) return;
 				const target = event.target;
 				if (!(target instanceof Element) || !target.matches(GUARDED_INPUTS)) return;
 				// Nothing below window ever sees the real event — not YouTube's
@@ -187,21 +193,7 @@
 				// (typing the character) is deliberately left alone.
 				event.stopImmediatePropagation();
 				if (type !== 'keydown') return;
-				const replay = new KeyboardEvent('keydown', {
-					key: event.key,
-					code: event.code,
-					location: event.location,
-					repeat: event.repeat,
-					isComposing: event.isComposing,
-					ctrlKey: event.ctrlKey,
-					shiftKey: event.shiftKey,
-					altKey: event.altKey,
-					metaKey: event.metaKey,
-					bubbles: false,
-					cancelable: true,
-				});
-				target.dispatchEvent(replay);
-				if (replay.defaultPrevented) event.preventDefault();
+				target.dispatchEvent(new CustomEvent('ytb:keydown', { detail: { original: event } }));
 			},
 			true,
 		);

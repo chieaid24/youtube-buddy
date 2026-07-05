@@ -17,9 +17,9 @@
 //
 // Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
 // by theme.js (the shared on-video apricot foundation); theme.js also isolates
-// keystrokes in the Reply textarea from YouTube's player hotkeys by replaying
-// them as non-bubbling clones, so the plain keydown listeners below only ever
-// see events the player cannot.
+// keystrokes in the Reply textarea from YouTube's player hotkeys by swallowing
+// real key events and re-dispatching `ytb:keydown` (detail.original carries
+// the key state), which the Reply composer listens for below.
 //
 // Pure consumer per ADR-0001: content.js owns navigation/mutation events and
 // renderer.js owns Room polling (rebroadcast here as `ytb:room-data`). The only
@@ -35,6 +35,7 @@
 	const DOT_TEXT_CLASS = 'ytb-note-dot-text';
 	const DOT_REACTION_CLASS = 'ytb-note-dot-reaction';
 	const DOT_LOCKED_CLASS = 'ytb-note-dot-locked';
+	const DOT_OPEN_CLASS = 'ytb-note-dot-open'; // suppresses the open Note's own preview
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -202,6 +203,8 @@
 			}
 			dot.style.left = ((fractions.get(id) || 0) * 100).toFixed(3) + '%';
 			dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
+			// The open Note's own hover preview is redundant next to its panel.
+			dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
 
 			const count = replyCount(id);
 			const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count]);
@@ -361,6 +364,7 @@
 		host.appendChild(panel);
 		positionPanel(panel);
 		panel.focus();
+		dotFor(note.id)?.classList.add(DOT_OPEN_CLASS);
 
 		startConversationPoll(panel);
 		labelTimer = setInterval(() => refreshTimeLabels(panel), LABEL_REFRESH_MS);
@@ -483,11 +487,13 @@
 			text.textContent = YTB.deleteConfirmCopy(replyCount(note.id));
 			confirm.hidden = false;
 			remove.hidden = true;
+			positionPanel(panel); // the confirm grows the panel: re-clamp
 			yes.focus();
 		});
 		cancel.addEventListener('click', () => {
 			confirm.hidden = true;
 			remove.hidden = false;
+			positionPanel(panel);
 			remove.focus();
 		});
 		yes.addEventListener('click', async () => {
@@ -557,6 +563,8 @@
 			wrap.append(row);
 		}
 		if (pinned) wrap.scrollTop = wrap.scrollHeight;
+		const panelHost = wrap.closest('#' + PANEL_ID);
+		if (panelHost) positionPanel(panelHost);
 	}
 
 	/** The bottom of the panel: Reply composer, or the sharing/cap states. */
@@ -584,10 +592,10 @@
 		textarea.rows = 1;
 		textarea.placeholder = 'Reply...';
 		textarea.setAttribute('aria-label', 'Write a reply');
-		// The @-mention popover must attach BEFORE our own keydown listener so an
-		// open popover consumes Enter/Escape instead of posting/dismissing.
-		// (theme.js's capture guard replays keydowns on this textarea as
-		// non-bubbling clones, so both listeners run while YouTube sees nothing.)
+		// The @-mention popover must attach BEFORE our own ytb:keydown listener
+		// so an open popover consumes Enter/Escape instead of posting/dismissing.
+		// (theme.js's capture guard swallows real keydowns on this textarea and
+		// re-dispatches them as ytb:keydown, so YouTube's hotkeys see nothing.)
 		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
 
 		// Paper-plane send: springs in once the field is non-empty. Enter still
@@ -609,14 +617,15 @@
 			autosize(textarea);
 			syncSend();
 		});
-		textarea.addEventListener('keydown', (event) => {
-			if (event.key === 'Escape') {
+		textarea.addEventListener('ytb:keydown', (event) => {
+			const key = event.detail.original;
+			if (key.key === 'Escape') {
 				dismissPanel({ refocusDot: true });
 				return;
 			}
 			// Enter posts; Shift+Enter inserts a newline.
-			if (event.key === 'Enter' && !event.shiftKey) {
-				event.preventDefault();
+			if (key.key === 'Enter' && !key.shiftKey) {
+				key.preventDefault();
 				submitReply(panel, note, textarea, mentionCtl);
 			}
 		});
@@ -750,18 +759,29 @@
 		const left = Math.max(8, Math.min(center - width / 2, hostRect.width - width - 8));
 		panel.style.left = left + 'px';
 
-		// Never taller than the player: the Reply list absorbs the squeeze (the
-		// 190 covers the panel's fixed chrome — body, byline, actions, composer).
+		// Never taller than the player: the Reply list absorbs the squeeze. The
+		// fixed chrome around it (body, byline, actions, composer, error, and a
+		// visible delete confirmation) is measured live, so content changes that
+		// grow the panel re-clamp instead of pushing it past the player's top.
+		// If even the minimum list cannot fit above the bar, the panel slides
+		// down over the control bar rather than out of the player.
 		const replies = panel.querySelector('.ytb-panel-replies');
 		if (replies) {
-			const spare = hostRect.height - parseFloat(panel.style.bottom) - 16;
-			replies.style.maxHeight = Math.max(64, Math.min(180, spare - 190)) + 'px';
+			const chrome = panel.offsetHeight - replies.offsetHeight;
+			let anchor = parseFloat(panel.style.bottom);
+			if (anchor + chrome + 64 + 16 > hostRect.height) {
+				anchor = Math.max(12, hostRect.height - chrome - 64 - 16);
+				panel.style.bottom = anchor + 'px';
+			}
+			const spare = hostRect.height - anchor - 16;
+			replies.style.maxHeight = Math.max(64, Math.min(180, spare - chrome)) + 'px';
 		}
 	}
 
 	function removePanel() {
 		stopConversationPoll();
 		document.getElementById(PANEL_ID)?.remove();
+		document.querySelector('.' + DOT_OPEN_CLASS)?.classList.remove(DOT_OPEN_CLASS);
 		openNote = null;
 		pendingReply = false;
 		pendingDelete = false;
@@ -1016,6 +1036,8 @@
         cursor: pointer;
       }
       .${DOT_LOCKED_CLASS}:hover, .${DOT_LOCKED_CLASS}:focus-visible { opacity: 0.85; }
+      /* While a Note's panel is open, its own hover preview stays hidden. */
+      .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} { opacity: 0 !important; pointer-events: none !important; }
 
       /* --- Note Preview: opaque warm card (apricot system) --- */
       .${PREVIEW_CLASS} {

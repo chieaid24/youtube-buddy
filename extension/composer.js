@@ -339,16 +339,18 @@
 		}
 
 		textarea.addEventListener('input', updateMeta);
-		// theme.js's window-capture guard replays keydowns on this textarea as
-		// non-bubbling clones, so YouTube's player hotkeys never see them.
-		textarea.addEventListener('keydown', (event) => {
-			if (event.key === 'Escape') {
+		// theme.js's window-capture guard swallows real keydowns on this textarea
+		// (YouTube's player hotkeys never see them) and re-dispatches them as
+		// ytb:keydown with the original event in detail.
+		textarea.addEventListener('ytb:keydown', (event) => {
+			const key = event.detail.original;
+			if (key.key === 'Escape') {
 				closeComposer();
 				return;
 			}
 			// Enter posts; Shift+Enter inserts a newline.
-			if (event.key === 'Enter' && !event.shiftKey) {
-				event.preventDefault();
+			if (key.key === 'Enter' && !key.shiftKey) {
+				key.preventDefault();
 				submit({ kind: 'text', body: textarea.value.trim() });
 			}
 		});
