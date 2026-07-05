@@ -1,17 +1,18 @@
-// popup.js — identity, Room Code, and the Sharing toggle.
-// Consumes the frozen `window.YTB` contract from shared.js (task 03). The popup is
-// the only UI surface; all persisted state lives in chrome.storage.local (via YTB)
-// so it survives a browser restart. See CONTEXT.md for terminology.
+// popup.js -- identity, Room Code, and the Sharing pill.
+// Consumes the frozen `window.YTB` contract from shared.js. The popup is the only
+// UI surface; all persisted state lives in chrome.storage.local (via YTB) so it
+// survives a browser restart. See CONTEXT.md for terminology and DESIGN.md for the
+// visual system this file drives.
 
 const ROSTER_POLL_MS = 5_000;
 
 const el = {
-	// Display Name (locked once set; Edit reopens the input).
+	// Display Name (locked once set; the pencil reopens the input).
 	nameField: document.getElementById('name-field'),
 	name: document.getElementById('name'),
 	nameValue: document.getElementById('name-value'),
 	nameEdit: document.getElementById('name-edit'),
-	// Room Code views (mutually exclusive — only one is shown at a time).
+	// Room Code views (mutually exclusive -- only one is shown at a time).
 	viewChooser: document.getElementById('view-chooser'),
 	viewJoin: document.getElementById('view-join'),
 	viewConnected: document.getElementById('view-connected'),
@@ -33,6 +34,7 @@ const el = {
 	roster: document.getElementById('roster'),
 	colorGrid: document.getElementById('color-grid'),
 	sharingToggle: document.getElementById('sharing-toggle'),
+	sharingLabel: document.getElementById('sharing-label'),
 	backendUrl: document.getElementById('backend-url'),
 	// Disconnect confirmation dialog.
 	confirmOverlay: document.getElementById('confirm-overlay'),
@@ -50,7 +52,7 @@ let myClientId = '';
 // cleared on cancel/confirm). One dialog serves Leave room AND Stop sharing.
 let pendingConfirm = null;
 
-// Last-known Sharing state + whether the status text is currently a live toggle.
+// Last-known Sharing state + whether the pill is currently a live toggle.
 let currentSharing = true;
 let sharingInteractive = false;
 
@@ -58,6 +60,14 @@ let sharingInteractive = false;
 let currentRosterBuddies = [];
 let selectedBuddyId = '';
 let activeRoomCode = '';
+
+// Roster ids from the previous render: lets a genuinely NEW Buddy row animate in
+// while the 5s poll re-render keeps existing rows perfectly still. null = no
+// render yet (the initial fill does not animate row-by-row).
+let prevRosterIds = null;
+
+// Buddy whose swatch should do the one-shot pick wiggle on the next render.
+let lastPickedBuddyId = '';
 
 init();
 
@@ -79,7 +89,7 @@ async function init() {
 	wireHandlers();
 	setInterval(refreshConnectedRoom, ROSTER_POLL_MS);
 
-	// Route to the right view: an active code → Connected (refresh status with a
+	// Route to the right view: an active code -> Connected (refresh status with a
 	// real GET); otherwise the chooser (true first run, nothing to Cancel back to).
 	if (config.code) {
 		showConnected(config.code);
@@ -94,28 +104,28 @@ async function init() {
 
 function wireHandlers() {
 	// Display Name is cosmetic; persist every keystroke so closing the popup never
-	// loses input. Name collisions are harmless — identity is the Client ID.
+	// loses input. Name collisions are harmless -- identity is the Client ID.
 	el.name.addEventListener('input', () => {
 		YTB.setConfig({ name: el.name.value });
 	});
 
 	// Name commit: Enter or blur turns the editable name into a locked chip. There
-	// is no Save button — unfocusing the field (or pressing Enter) just saves.
+	// is no Save button -- unfocusing the field (or pressing Enter) just saves.
 	el.name.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') commitName();
 	});
 	el.name.addEventListener('blur', commitName);
 
-	// The pencil icon is unguarded (cosmetic) → reopen the input immediately.
+	// The pencil icon is unguarded (cosmetic) -> reopen the input immediately.
 	el.nameEdit.addEventListener('click', () => {
 		setFieldLocked(el.nameField, false);
 		el.name.focus();
 	});
 
-	// Chooser → Create: mint + commit a fresh code immediately (no confirm step).
+	// Chooser -> Create: mint + commit a fresh code immediately (no confirm step).
 	el.chooseCreate.addEventListener('click', () => createAndCommit());
 
-	// Chooser → Join: switch to the free-text entry view.
+	// Chooser -> Join: switch to the free-text entry view.
 	el.chooseJoin.addEventListener('click', () => {
 		el.joinInput.value = '';
 		updateJoinSubmit();
@@ -123,16 +133,16 @@ function wireHandlers() {
 		el.joinInput.focus();
 	});
 
-	// Chooser → Cancel: only reachable when a code already exists (via "Change
-	// code"); return to Connected without touching the active code.
+	// Chooser -> Cancel: only reachable when a code already exists; return to
+	// Connected without touching the active code.
 	el.chooserCancel.addEventListener('click', async () => {
 		const { code } = await YTB.getConfig();
-		if (!code) return; // No active code — nothing to cancel back to.
+		if (!code) return; // No active code -- nothing to cancel back to.
 		showConnected(code);
 		await refreshStatus(code);
 	});
 
-	// Join → submit: normalize (trim + lowercase) and commit verbatim. Pure match —
+	// Join -> submit: normalize (trim + lowercase) and commit verbatim. Pure match --
 	// no word-list validation; pairing succeeds only if it matches a real code.
 	el.joinSubmit.addEventListener('click', () => joinAndCommit());
 	el.joinInput.addEventListener('input', () => {
@@ -143,10 +153,10 @@ function wireHandlers() {
 		if (e.key === 'Enter') joinAndCommit();
 	});
 
-	// Join → Back: abandon entry, return to the chooser (active code untouched).
+	// Join -> Back: abandon entry, return to the chooser (active code untouched).
 	el.joinBack.addEventListener('click', () => showView('chooser'));
 
-	// Connected → Copy: use the exact rendered label as the clipboard source of
+	// Connected -> Copy: use the exact rendered label as the clipboard source of
 	// truth and announce anchored success/failure feedback. The button is native
 	// keyboard-accessible.
 	el.copyCode.addEventListener('click', async () => {
@@ -159,7 +169,7 @@ function wireHandlers() {
 		});
 	});
 
-	// Connected → Leave room: the explicit "leave this room" action. Always
+	// Connected -> Leave room: the explicit "leave this room" action. Always
 	// confirm (copy adapts to whether a buddy is connected); on confirm, drop the
 	// code and reopen the chooser.
 	el.leaveRoom.addEventListener('click', () => {
@@ -191,8 +201,9 @@ function wireHandlers() {
 		closeColorGrid();
 	});
 
-	// Stopping Sharing is guarded by a confirm; starting is instant. The reporter reads `sharing` and
-	// stops/resumes its POSTs; the renderer keeps drawing the Buddy either way.
+	// Stopping Sharing is guarded by a confirm; starting is instant. The reporter
+	// reads `sharing` and stops/resumes its POSTs; the renderer keeps drawing the
+	// Buddy either way.
 	el.sharingToggle.addEventListener('click', () => {
 		if (!sharingInteractive) return;
 		if (currentSharing) {
@@ -209,16 +220,17 @@ function wireHandlers() {
 	});
 }
 
-// Keep the Join action unavailable and neutral until there is meaningful input.
+// Keep the Join action unavailable and neutral until there is meaningful input;
+// with input it promotes to the apricot primary.
 function updateJoinSubmit() {
 	const enabled = el.joinInput.value.trim().length > 0;
 	el.joinSubmit.disabled = !enabled;
-	el.joinSubmit.classList.toggle('primary', enabled);
+	el.joinSubmit.classList.toggle('btn-primary', enabled);
 }
 
 // --- Display Name lock/edit ---------------------------------------------------
 
-/** Toggle a field between locked (value chip + pencil) and editable (input). */
+/** Toggle the field between locked (value chip + pencil) and editable (input). */
 function setFieldLocked(field, locked) {
 	field.classList.toggle('is-locked', locked);
 }
@@ -243,7 +255,6 @@ function commitName() {
 
 // Create flow: generate a code, commit it, assert presence (so I appear to a
 // Buddy who joins later even before I watch anything), then land on Connected.
-// The GET shows me as the lone member → "No buddy joined yet :(" with a live dot.
 async function createAndCommit() {
 	clearCreateError();
 	const { code: oldCode } = await YTB.getConfig();
@@ -289,7 +300,7 @@ function clearCreateError() {
 // any local config or old-Room membership changes.
 async function joinAndCommit() {
 	const code = YTB.normalizeCode(el.joinInput.value);
-	if (!code) return; // Empty — stay on the entry view.
+	if (!code) return; // Empty -- stay on the entry view.
 	const records = await YTB.getRecords(code);
 	if (!YTB.roomExists(records)) {
 		showJoinError("This room doesn't exist yet");
@@ -319,13 +330,13 @@ function clearJoinError() {
 // --- confirmation dialog -----------------------------------------------------
 
 // One reusable confirm dialog. Callers set the copy, the confirm button's label
-// and variant ("danger" = red Disconnect; "neutral" = dark Stop sharing), and
+// and variant ("danger" = red Leave; "neutral" = warm charcoal Stop sharing), and
 // the action to run on confirm.
 function openConfirm({ title, body, confirmLabel, variant, onConfirm }) {
 	el.confirmTitle.textContent = title;
 	el.confirmBody.textContent = body;
 	el.confirmOk.textContent = confirmLabel;
-	el.confirmOk.className = variant === 'danger' ? 'danger' : 'neutral';
+	el.confirmOk.className = 'btn ' + (variant === 'danger' ? 'btn-danger' : 'btn-neutral');
 	pendingConfirm = onConfirm;
 	showConfirm();
 }
@@ -354,8 +365,8 @@ async function confirmDisconnectThen(onProceed) {
 	}
 }
 
-// Toggle Sharing and re-render the status dot. Off stops our POSTs (reporter
-// reads the flag); the renderer keeps drawing the Buddy's markers either way.
+// Toggle Sharing and re-render the pill. Off stops our POSTs (reporter reads the
+// flag); the renderer keeps drawing the Buddy's markers either way.
 async function setSharing(on) {
 	currentSharing = on;
 	await YTB.setConfig({ sharing: on });
@@ -379,7 +390,7 @@ async function clearCodeAndChoose() {
 // Buddy Display Names under `code` for the confirmation, via the shared roomView
 // (same dedup-by-Client-ID the roster uses); an unnamed buddy falls back to a
 // stable "<Adjective> Buddy" (YTB.buddyName), matching the roster and on-page
-// tooltips. Room-full lockout is irrelevant here — I am already a member.
+// tooltips. Room-full lockout is irrelevant here -- I am already a member.
 async function buddyNames(code) {
 	if (!code) return [];
 	const { buddies } = YTB.roomView(await YTB.getRecords(code), myClientId);
@@ -388,6 +399,8 @@ async function buddyNames(code) {
 
 function showConfirm() {
 	el.confirmOverlay.hidden = false;
+	// Land keyboard users on the safe action; Escape/backdrop still dismiss.
+	el.confirmCancel.focus();
 }
 
 function hideConfirm() {
@@ -397,8 +410,9 @@ function hideConfirm() {
 
 // --- view switching ----------------------------------------------------------
 
-// Show exactly one of the three Room Code views. The Cancel link in the chooser
-// only makes sense when an active code exists (reached via "Leave room").
+// Show exactly one of the three Room Code views. Re-unhiding a view restarts its
+// CSS enter animation (fade + 6px rise). The Cancel link in the chooser only
+// makes sense when an active code exists (reached via "Leave room").
 function showView(name) {
 	if (name === 'join') clearJoinError();
 	if (name !== 'chooser') clearCreateError();
@@ -421,10 +435,10 @@ function showConnected(code) {
 
 // Room status, from my perspective (a Room Code is one Room of up to
 // YTB.MAX_MEMBERS people):
-//   Unpaired      — no code.
-//   Waiting       — code set, but no Buddy has a record yet.
-//   In room       — 1+ Buddies; list each with their color swatch + last-seen.
-//   Room full     — 5 others already, I'm not one of them (the locked-out 6th).
+//   Unpaired      -- no code.
+//   Waiting       -- code set, but no Buddy has a record yet.
+//   In room       -- 1+ Buddies; list each with their color swatch + last-seen.
+//   Room full     -- 5 others already, I'm not one of them (the locked-out 6th).
 async function refreshStatus(code) {
 	if (!code) {
 		setStatus('unpaired', 'Unpaired', 'Enter or generate a Room Code to join.');
@@ -455,7 +469,7 @@ async function refreshStatus(code) {
 		return;
 	}
 
-	setStatus('inroom', '', '', true);
+	setStatus('inroom', 'Buddies', '', true);
 	renderRoster(buddies);
 }
 
@@ -465,13 +479,17 @@ async function refreshConnectedRoom() {
 	await refreshStatus(code);
 }
 
-// Render the status line. Waiting and in-room states keep the Sharing toggle live;
-// only the in-room state exposes the boolean in its visible label.
+// Render the status panel. Waiting and in-room states keep the Sharing pill live;
+// the pill itself carries the on/off boolean (green dot "Sharing" / muted dot
+// "Not sharing"), and the panel's data-state drives the cue line's look.
 function setStatus(state, text, sub, interactive = false) {
-	const notSharing = interactive && !currentSharing;
-	el.status.className = 'status is-' + state + (notSharing ? ' not-sharing' : '');
-	el.statusText.textContent = notSharing ? text + ' · Not sharing' : text;
+	el.status.dataset.state = state;
+	el.statusText.textContent = text;
 	el.statusSub.textContent = sub;
+	el.statusSub.hidden = !sub;
+
+	el.sharingToggle.classList.toggle('is-off', !currentSharing);
+	el.sharingLabel.textContent = currentSharing ? 'Sharing' : 'Not sharing';
 
 	sharingInteractive = interactive;
 	if (interactive) {
@@ -488,24 +506,42 @@ function setStatus(state, text, sub, interactive = false) {
 	}
 }
 
-// Render one row per Buddy: [color swatch] name · last-seen. The swatch color
+// Render one row per Buddy: [color swatch] name ... last-seen. The swatch square
 // matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
 // as the color legend. Newest-active Buddy first (roomView already sorts).
+// A row whose Client ID was not in the previous render springs in; rows that
+// were already there re-render in place with no motion (the 5s poll stays calm).
 function renderRoster(buddies) {
-	closeColorGrid();
+	const ids = buddies.map((b) => b.clientId);
+	const sameRoster = prevRosterIds !== null && ids.join('\n') === prevRosterIds.join('\n');
+	// Keep an open picker up across a no-change poll; anything else invalidates
+	// its anchor, so close it.
+	if (!sameRoster) closeColorGrid();
+
 	currentRosterBuddies = buddies;
 	el.roster.textContent = '';
 	for (const b of buddies) {
 		const row = document.createElement('div');
 		row.className = 'buddy';
+		if (prevRosterIds !== null && !prevRosterIds.includes(b.clientId)) {
+			row.classList.add('is-new');
+		}
 
 		const swatch = document.createElement('button');
 		swatch.className = 'swatch';
-		swatch.style.background = YTB.buddyColor(b.clientId);
 		swatch.type = 'button';
 		swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(b.clientId, b.name)}`);
+		const chip = document.createElement('span');
+		chip.className = 'chip';
+		chip.style.background = YTB.buddyColor(b.clientId);
+		swatch.appendChild(chip);
+		if (b.clientId === lastPickedBuddyId) {
+			// One-shot wiggle on the swatch that just received a new color.
+			swatch.classList.add('is-picked');
+			lastPickedBuddyId = '';
+		}
 		// Stop this from also reaching the document-level outside-click dismissal
-		// below -- toggle/re-anchor is handled explicitly here.
+		// -- toggle/re-anchor is handled explicitly here.
 		swatch.addEventListener('click', (e) => {
 			e.stopPropagation();
 			toggleColorGrid(b.clientId, swatch, row);
@@ -522,6 +558,7 @@ function renderRoster(buddies) {
 		row.append(swatch, name, seen);
 		el.roster.appendChild(row);
 	}
+	prevRosterIds = ids;
 }
 
 // Toggle: re-clicking the Buddy the picker is already open for closes it;
@@ -548,13 +585,17 @@ function openColorGrid(clientId, anchorEl, rowEl) {
 		const button = document.createElement('button');
 		button.className = 'color-choice';
 		button.type = 'button';
-		button.style.background = color;
 		button.disabled = used.has(color);
 		button.title = button.disabled ? 'Already assigned' : 'Choose color';
 		button.setAttribute('aria-label', button.disabled ? `${color}, Already assigned` : `Choose ${color}`);
 		button.setAttribute('aria-pressed', String(room[clientId] === color));
+		const chip = document.createElement('span');
+		chip.className = 'chip';
+		chip.style.background = color;
+		button.appendChild(chip);
 		button.addEventListener('click', async () => {
 			if (await YTB.setBuddyColor(activeRoomCode, selectedBuddyId, color)) {
+				lastPickedBuddyId = selectedBuddyId;
 				closeColorGrid();
 				renderRoster(currentRosterBuddies);
 			}
@@ -584,8 +625,8 @@ function positionColorGrid(anchorEl, rowEl) {
 	el.colorGrid.style.top = fitsBelow ? `${rowRect.bottom + gap}px` : `${rowRect.top - gap - gridHeight}px`;
 }
 
-// Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is for
-// video positions, not timestamps, so format relative time here.
+// Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is
+// for video positions, not timestamps, so format relative time here.
 function formatLastSeen(updatedAt) {
 	const diff = Date.now() - updatedAt;
 	const sec = Math.max(0, Math.round(diff / 1000));
