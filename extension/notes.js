@@ -4,7 +4,8 @@
 //   - Video Timeline dots (text Notes, Reactions, locked Spoilers), spread
 //     apart when timestamps fall within 2 seconds so each keeps its own
 //     pointer/keyboard target;
-//   - hover/focus Note Previews (author, two-line body, Reply count);
+//   - hover/focus Note Previews (two-line body, author beneath, Reply count,
+//     corner timestamp) reachable across a transparent hover bridge;
 //   - the Expanded Note: a pinned conversation panel with Replies, a Reply
 //     composer, and the author-only delete confirmation;
 //   - Playback Notifications: bottom-center note cards (~4s, clickable) and
@@ -29,6 +30,9 @@
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
 	const STYLE_ID = 'ytb-notes-style';
+	// Toggled on #movie_player while a Note dot/preview is hovered so YouTube's
+	// native scrubber tooltip hides ONLY its time readout (thumbnail stays).
+	const SCRUB_HIDE_CLASS = 'ytb-hide-scrub-time';
 
 	const CONVERSATION_POLL_MS = 5000; // focused Expanded Note freshness
 	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
@@ -181,6 +185,10 @@
 					e.preventDefault();
 					onDotActivate(dot);
 				});
+				// While the dot (and its preview, a descendant) is hovered, suppress
+				// YouTube's native scrubber time so our corner timestamp stands alone.
+				dot.addEventListener('mouseenter', () => player()?.classList.add(SCRUB_HIDE_CLASS));
+				dot.addEventListener('mouseleave', () => player()?.classList.remove(SCRUB_HIDE_CLASS));
 				bar.appendChild(dot);
 			}
 			dot.style.left = ((fractions.get(id) || 0) * 100).toFixed(3) + '%';
@@ -231,6 +239,7 @@
 	function buildPreview(preview, note, who, locked, count) {
 		preview.replaceChildren();
 		preview.classList.toggle('ytb-preview-reaction', note.kind === 'emoji' && !locked);
+		// A locked Spoiler can never be previewed: no author, no timestamp.
 		if (locked) {
 			const label = document.createElement('div');
 			label.className = 'ytb-preview-spoiler';
@@ -238,8 +247,14 @@
 			preview.append(label);
 			return;
 		}
+		// The Note's video timestamp, pinned in the top-right corner — replaces the
+		// YouTube scrubber time suppressed while a dot/preview is hovered.
+		const time = document.createElement('div');
+		time.className = 'ytb-preview-time';
+		time.textContent = YTB.formatTime(note.timestamp);
+		preview.append(time);
 		if (note.kind === 'emoji') {
-			// Transparent treatment: just the larger emoji and the author.
+			// Transparent treatment: the larger emoji with the author beneath it.
 			const emoji = document.createElement('div');
 			emoji.className = 'ytb-preview-emoji';
 			emoji.textContent = note.body;
@@ -249,14 +264,15 @@
 			preview.append(emoji, author);
 			return;
 		}
+		// Text Note: body first, author beneath it, Reply count last.
+		const body = document.createElement('div');
+		body.className = 'ytb-preview-body';
+		body.textContent = note.body;
 		const author = document.createElement('div');
 		author.className = 'ytb-preview-author';
 		author.textContent = who;
 		author.style.color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
-		const body = document.createElement('div');
-		body.className = 'ytb-preview-body';
-		body.textContent = note.body;
-		preview.append(author, body);
+		preview.append(body, author);
 		if (count > 0) {
 			const replies = document.createElement('div');
 			replies.className = 'ytb-preview-replies';
@@ -757,14 +773,16 @@
 		card.type = 'button';
 		card.className = 'ytb-alert-card';
 		card.setAttribute('aria-label', `Note by ${who}. Open conversation`);
+		const body = document.createElement('div');
+		body.className = 'ytb-alert-body';
+		body.textContent = note.body;
 		const author = document.createElement('div');
 		author.className = 'ytb-alert-author';
 		author.textContent = who;
 		author.style.color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
-		const body = document.createElement('div');
-		body.className = 'ytb-alert-body';
-		body.textContent = note.body;
-		card.append(author, body);
+		// Author beneath the content, matching the Note Preview (no timestamp here —
+		// a Playback Notification fires exactly as playback crosses the moment).
+		card.append(body, author);
 		card.addEventListener('click', (event) => {
 			event.stopPropagation();
 			card.remove();
@@ -918,9 +936,25 @@
         transition: opacity 0.1s;
         z-index: 60;
       }
+      /* Transparent hover bridge: spans the gap between the preview and the dot so
+         the pointer can travel up onto the card without dropping :hover. It is
+         interactive only while the dot is hovered, so it never blocks the
+         scrubber; hovering it (a dot descendant) keeps .${DOT_CLASS}:hover alive. */
+      .${PREVIEW_CLASS}::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100%;
+        height: 22px;
+        pointer-events: none;
+      }
       .${DOT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
         opacity: 1;
+      }
+      .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
+        pointer-events: auto;
       }
       .${DOT_TEXT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_TEXT_CLASS}:focus-visible .${PREVIEW_CLASS} {
@@ -929,15 +963,29 @@
       }
       .${PREVIEW_CLASS}.ytb-preview-reaction {
         background: transparent;
+        padding-top: 18px;
+        min-width: 52px;
         text-align: center;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
-      .ytb-preview-author { font-weight: 600; margin-bottom: 2px; }
+      /* The Note's video timestamp, pinned in the top-right corner of both the
+         text card and the transparent Reaction preview. */
+      .ytb-preview-time {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        color: #bbb;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+      .ytb-preview-reaction .ytb-preview-time { color: #eee; }
+      .ytb-preview-author { font-weight: 600; margin-top: 4px; }
       .ytb-preview-body {
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
+        padding-right: 34px;
         color: #e8e8e8;
         overflow-wrap: anywhere;
       }
@@ -945,6 +993,9 @@
       .ytb-preview-spoiler { color: #aaa; font-style: italic; }
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; }
+      /* Suppress ONLY YouTube's native scrubber time while a dot/preview is
+         hovered; its storyboard thumbnail (.ytp-tooltip-bg) is left intact. */
+      .${SCRUB_HIDE_CLASS} .ytp-tooltip-text { visibility: hidden !important; }
 
       #${PANEL_ID} {
         position: absolute;
@@ -1062,7 +1113,7 @@
       }
       .ytb-alert-card.show { opacity: 1; transform: translateY(0); }
       .ytb-alert-card:focus-visible { outline: 2px solid #3ea6ff; }
-      .ytb-alert-author { font-weight: 600; margin-bottom: 1px; }
+      .ytb-alert-author { font-weight: 600; margin-top: 3px; }
       .ytb-alert-body {
         display: -webkit-box;
         -webkit-line-clamp: 2;
