@@ -7,11 +7,14 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
+		"test:e2e": "playwright test",
+		"test:e2e:live": "YTB_LIVE_YOUTUBE=1 playwright test --grep @live",
 		"cf-typegen": "wrangler types",
 		"prepare": "cd .. && husky backend/.husky"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.18.0",
+		"@playwright/test": "^1.61.1",
 		"@types/node": "^25.9.2",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.0.8",
