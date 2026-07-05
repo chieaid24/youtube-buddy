@@ -500,11 +500,11 @@ describe('GET /?code=', () => {
 		expect(data.notes).toEqual([]);
 	});
 
-	it('always answers 200 with empty progress/presence/notes/replies arrays for a Room with no records', async () => {
+	it('always answers 200 with empty progress/presence/notes/replies/playlist/events arrays for a Room with no records', async () => {
 		const res = await SELF.fetch('https://example.com/?code=get-shape-empty-room');
 		expect(res.status).toBe(200);
 		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[]; replies: unknown[] };
-		expect(data).toEqual({ progress: [], presence: [], notes: [], replies: [] });
+		expect(data).toEqual({ progress: [], presence: [], notes: [], replies: [], playlist: [], events: [] });
 	});
 
 	it('includes Notes without mixing them into progress', async () => {
@@ -683,6 +683,266 @@ describe('POST /replies?code=', () => {
 		for (const key of [...noteListing.keys, ...replyListing.keys]) {
 			expect(key.expiration).toBeGreaterThan(floor);
 		}
+	});
+});
+
+function playlistBody(overrides: Record<string, unknown> = {}) {
+	return {
+		clientId: 'a1b2c3d4',
+		name: 'aidan',
+		videoId: 'abc123',
+		title: 'A Great Video',
+		...overrides,
+	};
+}
+
+function postPlaylist(code: string, payload: unknown) {
+	return SELF.fetch(`https://example.com/playlist?code=${code}`, {
+		method: 'POST',
+		body: JSON.stringify(payload),
+	});
+}
+
+function deletePlaylist(code: string, clientId: string, videoId: string) {
+	return SELF.fetch(`https://example.com/playlist?code=${code}&clientId=${clientId}&videoId=${videoId}`, { method: 'DELETE' });
+}
+
+async function listEvents(code: string): Promise<Array<{ type: string; videoId: string; actorClientId: string; at: number }>> {
+	const listing = await env.PROGRESS.list({ prefix: `${code}:event:` });
+	const events = await Promise.all(listing.keys.map(async ({ name }) => JSON.parse((await env.PROGRESS.get(name))!)));
+	return events;
+}
+
+describe('POST /playlist?code=', () => {
+	it('stores a Playlist Item with a server-set addedAt and returns the complete record', async () => {
+		const code = 'playlist-stores';
+		const before = Date.now();
+		const res = await postPlaylist(code, playlistBody({ addedAt: 1, addedBy: 'forged' }));
+		const after = Date.now();
+		expect(res.status).toBe(200);
+		const { ok, item } = (await res.json()) as { ok: boolean; item: Record<string, unknown> };
+		expect(ok).toBe(true);
+		expect(item).toMatchObject({ videoId: 'abc123', title: 'A Great Video', addedBy: 'a1b2c3d4', addedByName: 'aidan' });
+		expect(item.addedAt as number).toBeGreaterThanOrEqual(before);
+		expect(item.addedAt as number).toBeLessThanOrEqual(after);
+
+		const raw = await env.PROGRESS.get(`${code}:playlist:abc123`);
+		expect(JSON.parse(raw!)).toEqual(item);
+	});
+
+	it('coerces a missing name to "" and emits an added Playlist Event', async () => {
+		const code = 'playlist-added-event';
+		const { name, ...payload } = playlistBody();
+		expect((await postPlaylist(code, payload)).status).toBe(200);
+
+		const item = JSON.parse((await env.PROGRESS.get(`${code}:playlist:abc123`))!);
+		expect(item.addedByName).toBe('');
+		const events = await listEvents(code);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ type: 'added', videoId: 'abc123', actorClientId: 'a1b2c3d4' });
+	});
+
+	it('re-adding an existing videoId is a no-op: no duplicate, no new Event', async () => {
+		const code = 'playlist-dedup';
+		const first = ((await (await postPlaylist(code, playlistBody())).json()) as { item: unknown }).item;
+		const res = await postPlaylist(code, playlistBody({ title: 'Renamed Attempt', clientId: 'buddy222' }));
+		expect(res.status).toBe(200);
+		// The original record survives untouched and is what the re-add returns.
+		expect(((await res.json()) as { item: unknown }).item).toEqual(first);
+		expect((await env.PROGRESS.list({ prefix: `${code}:playlist:` })).keys).toHaveLength(1);
+		expect(await listEvents(code)).toHaveLength(1);
+	});
+
+	it.each([
+		['missing clientId', playlistBody({ clientId: undefined })],
+		['missing videoId', playlistBody({ videoId: '' })],
+		['missing title', playlistBody({ title: undefined })],
+		['oversized title', playlistBody({ title: 'x'.repeat(201) })],
+	])('rejects %s with a validation category', async (_name, payload) => {
+		const res = await postPlaylist('playlist-invalid', payload);
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { category: string }).category).toBe('validation');
+	});
+
+	it('rejects the 31st distinct video with playlist_full', async () => {
+		const code = 'playlist-cap';
+		for (let i = 0; i < 30; i++) {
+			expect((await postPlaylist(code, playlistBody({ videoId: `video-${i}` }))).status).toBe(200);
+		}
+		const res = await postPlaylist(code, playlistBody({ videoId: 'video-31' }));
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'playlist full', category: 'playlist_full' });
+		expect(await env.PROGRESS.get(`${code}:playlist:video-31`)).toBeNull();
+
+		// Removing one frees the slot again (the Room curates together).
+		await deletePlaylist(code, 'a1b2c3d4', 'video-0');
+		expect((await postPlaylist(code, playlistBody({ videoId: 'video-31' }))).status).toBe(200);
+	}, 30_000);
+
+	it('rejects a brand-new member when the Room is full', async () => {
+		const code = 'playlist-room-full';
+		for (const clientId of ['m1', 'm2', 'm3', 'm4', 'm5']) await postPresence(code, { clientId });
+		const res = await postPlaylist(code, playlistBody({ clientId: 'm6' }));
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
+	});
+});
+
+describe('DELETE /playlist?code=', () => {
+	it('removes the item and emits a removed Playlist Event', async () => {
+		const code = 'playlist-remove';
+		await postPlaylist(code, playlistBody());
+		// Any member may remove any item — buddy222 removes a1b2c3d4's add.
+		const res = await deletePlaylist(code, 'buddy222', 'abc123');
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+		expect(await env.PROGRESS.get(`${code}:playlist:abc123`)).toBeNull();
+
+		const events = await listEvents(code);
+		expect(events.map((e) => e.type)).toEqual(['added', 'removed']);
+		expect(events[1]).toMatchObject({ videoId: 'abc123', actorClientId: 'buddy222' });
+	});
+
+	it('is idempotent: deleting an absent video is ok and emits NO Event', async () => {
+		const code = 'playlist-remove-absent';
+		const res = await deletePlaylist(code, 'a1b2c3d4', 'never-added');
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+		expect(await listEvents(code)).toHaveLength(0);
+	});
+
+	it('rejects a missing videoId or clientId with 400', async () => {
+		expect((await SELF.fetch('https://example.com/playlist?code=playlist-remove-invalid&clientId=x', { method: 'DELETE' })).status).toBe(400);
+		expect((await SELF.fetch('https://example.com/playlist?code=playlist-remove-invalid&videoId=v', { method: 'DELETE' })).status).toBe(400);
+	});
+
+	it('rejects a locked-out 6th member removing items from a full Room', async () => {
+		const code = 'playlist-remove-locked';
+		await postPlaylist(code, playlistBody({ clientId: 'm1' }));
+		for (const clientId of ['m2', 'm3', 'm4', 'm5']) await postPresence(code, { clientId });
+		const res = await deletePlaylist(code, 'm6', 'abc123');
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
+		expect(await env.PROGRESS.get(`${code}:playlist:abc123`)).not.toBeNull();
+	});
+});
+
+describe('Playlist Events', () => {
+	it('caps the event log at the newest 50, pruning the oldest', async () => {
+		const code = 'event-cap';
+		// 26 adds + 26 removes = 52 events; the first two must be pruned away.
+		for (let i = 0; i < 26; i++) {
+			await postPlaylist(code, playlistBody({ videoId: `video-${i}` }));
+			await deletePlaylist(code, 'a1b2c3d4', `video-${i}`);
+		}
+		const events = await listEvents(code);
+		expect(events).toHaveLength(50);
+		// Chronological by key; the oldest surviving event is video-1's add.
+		expect(events[0]).toMatchObject({ type: 'added', videoId: 'video-1' });
+		expect(events[events.length - 1]).toMatchObject({ type: 'removed', videoId: 'video-25' });
+	}, 30_000);
+
+	it('events and Playlist Items carry the 14-day TTL', async () => {
+		const code = 'event-ttl';
+		await postPlaylist(code, playlistBody());
+		const floor = Date.now() / 1000 + 13 * 24 * 3600;
+		for (const prefix of [`${code}:playlist:`, `${code}:event:`]) {
+			const listing = await env.PROGRESS.list({ prefix });
+			expect(listing.keys.length).toBeGreaterThan(0);
+			for (const key of listing.keys) {
+				expect(key.expiration).toBeGreaterThan(floor);
+			}
+		}
+	});
+
+	it('counts Playlist adders and Event actors toward the Room cap', async () => {
+		const code = 'event-member-union';
+		// m1 exists only as a Playlist adder; m2 only as a remove-Event actor.
+		await postPlaylist(code, playlistBody({ clientId: 'm1', videoId: 'v1' }));
+		await postPlaylist(code, playlistBody({ clientId: 'm1', videoId: 'v2' }));
+		await deletePlaylist(code, 'm2', 'v2');
+		for (const clientId of ['m3', 'm4', 'm5']) await postPresence(code, { clientId });
+
+		const res = await postPresence(code, { clientId: 'm6' });
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
+	});
+
+	it('GET / returns playlist and events in their own buckets', async () => {
+		const code = 'get-playlist-events';
+		await post(code, body());
+		await postPlaylist(code, playlistBody({ videoId: 'keep' }));
+		await postPlaylist(code, playlistBody({ videoId: 'gone' }));
+		await deletePlaylist(code, 'a1b2c3d4', 'gone');
+
+		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
+			progress: unknown[];
+			playlist: { videoId: string }[];
+			events: { type: string; videoId: string }[];
+		};
+		expect(data.progress).toHaveLength(1);
+		expect(data.playlist.map((item) => item.videoId)).toEqual(['keep']);
+		expect(data.events.map((e) => `${e.type}:${e.videoId}`).sort()).toEqual(['added:gone', 'added:keep', 'removed:gone']);
+	});
+
+	it('leaving a Room keeps the communal Playlist Items and Events', async () => {
+		const code = 'leave-keeps-playlist';
+		await postPresence(code, { clientId: 'leaver55' });
+		await postPlaylist(code, playlistBody({ clientId: 'leaver55' }));
+
+		await deleteMember(code, 'leaver55');
+		expect(await env.PROGRESS.get(`${code}:presence:leaver55`)).toBeNull();
+		// The list belongs to the Room: the leaver's item and its Event survive.
+		expect(await env.PROGRESS.get(`${code}:playlist:abc123`)).not.toBeNull();
+		expect(await listEvents(code)).toHaveLength(1);
+	});
+});
+
+describe('Mentions', () => {
+	it('round-trips mentions through POST /notes and GET /', async () => {
+		const code = 'mentions-note';
+		const res = await postNote(code, noteBody({ mentions: ['buddy222', 'buddy333'] }));
+		expect(res.status).toBe(200);
+		const { note } = (await res.json()) as { note: { mentions: string[] } };
+		expect(note.mentions).toEqual(['buddy222', 'buddy333']);
+
+		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as { notes: { mentions?: string[] }[] };
+		expect(data.notes[0].mentions).toEqual(['buddy222', 'buddy333']);
+	});
+
+	it('round-trips mentions through POST /replies and GET /', async () => {
+		const code = 'mentions-reply';
+		const note = await createNote(code);
+		const res = await postReply(code, replyBody(note.id, { clientId: 'buddy222', mentions: [note.clientId] }));
+		expect(res.status).toBe(200);
+		const { reply } = (await res.json()) as { reply: { mentions: string[] } };
+		expect(reply.mentions).toEqual([note.clientId]);
+
+		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as { replies: { mentions?: string[] }[] };
+		expect(data.replies[0].mentions).toEqual([note.clientId]);
+	});
+
+	it('omits the field entirely when the client sends no mentions (backward compatible)', async () => {
+		const code = 'mentions-absent';
+		const note = await createNote(code);
+		expect('mentions' in ((await (await getConversation(code, note.id)).json()) as { note: object }).note).toBe(false);
+	});
+
+	it.each([
+		['a non-array', 'not-a-list'],
+		['an empty string entry', ['buddy222', '']],
+		['a non-string entry', [42]],
+		['more targets than a Room holds', ['m1', 'm2', 'm3', 'm4', 'm5', 'm6']],
+	])('rejects %s with a validation category on both routes', async (_name, mentions) => {
+		const code = 'mentions-invalid';
+		const noteRes = await postNote(code, noteBody({ mentions }));
+		expect(noteRes.status).toBe(400);
+		expect(((await noteRes.json()) as { category: string }).category).toBe('validation');
+
+		const note = await createNote(code);
+		const replyRes = await postReply(code, replyBody(note.id, { mentions }));
+		expect(replyRes.status).toBe(400);
+		expect(((await replyRes.json()) as { category: string }).category).toBe('validation');
 	});
 });
 
