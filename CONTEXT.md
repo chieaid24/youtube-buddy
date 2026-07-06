@@ -65,19 +65,27 @@ The transient bottom-center presentation triggered whenever ordinary forward pla
 _Avoid_: Note Preview, Expanded Note, popup (ambiguous)
 
 **Room Home Section**:
-The compact panel the extension injects at the top of the YouTube **home page** (the recommendations grid on `youtube.com`), above the grid, which shifts down. It holds the Room Feed on the left and the Shared Playlist on the right, styled to match YouTube's home layout and kept deliberately short — small and scrollable, never a tall block. It is a distinct surface from the action popup and the Video Timeline (see ADR-0005). When Unpaired it shows a compact Create/Join prompt instead of the Feed + Playlist.
+The compact panel the extension injects at the top of the YouTube **home page** (the recommendations grid on `youtube.com`), above the grid, which shifts down. It holds the Room Feed on the left and the Recommended for you list on the right, styled to match YouTube's home layout and kept deliberately short — small and scrollable, never a tall block. It is a distinct surface from the action popup and the Video Timeline (see ADR-0005). When Unpaired it shows a compact Create/Join prompt instead of the Feed + Recommendations. Its visibility is controlled by the Room Home Toggle; when the toggle is off the whole section is absent from the page.
 _Avoid_: home widget, dashboard, feed (alone)
 
-**Shared Playlist**:
-One Room-level list of videos — at most one Shared Playlist per Room — holding up to 30 Playlist Items, newest-added first. Any member may add or remove any video; there is no per-item ownership. Adding a video already present is a no-op; adding when the list is full is rejected (a member must remove one first). Rendered as a horizontal row of thumbnails on the right of the Room Home Section.
-_Avoid_: queue, watch later, saved videos
+**Room Home Toggle**:
+A very small on/off control injected as a row into YouTube's own left guide (sidebar) on the home route, letting the viewer show or hide the entire Room Home Section. Off removes the section completely (not merely collapsed); the toggle itself stays in the guide so it can be turned back on. The state persists per install in `chrome.storage.local`. Toggling only affects the Room Home Section — on-video markers, Notes, presence, and the watch-page recommend control keep running (the point is to hide the home surface without disabling the extension).
+_Avoid_: sidebar widget, hide button, disable
 
-**Playlist Item**:
-One video in the Shared Playlist: its videoId, a title captured at add time, and the adding member's Client ID plus a timestamp. Under each item the Room Home Section shows who has watched it ("watched by You, Bob, and 1 other"), derived live from the Room's Progress Records for that videoId — so "watched" means "has a Progress Record" (started, not finished), and the attribution disappears when a member leaves or their record expires. Naming rule: "You" first (only when you personally have a record), then up to two Buddy Display Names, then "and N other(s)"; blank-name members use the "<Adjective> Buddy" fallback.
-_Avoid_: playlist entry, video record
+**Recommendation**:
+One video a member has recommended to the whole Room, replacing the old communal Shared Playlist (see ADR-0007). Stored exactly as before — one Room-level list keyed by videoId, up to 30 entries, each carrying its videoId, a title captured at recommend time, and the recommending member's Client ID (`addedBy`) plus a timestamp — but reinterpreted as directional. A member recommends "to all Buddies" with the same "+ Buddy Room" control; re-recommending an existing video is a no-op; the 31st distinct video is rejected. Only the recommender can **un-recommend** (a point delete that removes it for everyone), done from the watch-page recommend control since their own recommendations are hidden from their own grid.
+_Avoid_: playlist item, playlist entry, shared playlist, queue, saved video
+
+**Recommended for you**:
+Each viewer's personalized view of the Room's Recommendations, rendered as a horizontal thumbnail row on the right of the Room Home Section: the Recommendations whose `addedBy` is **not** you, minus any you have Dismissed. Your own recommendations never appear here. Under each card the same "Watched by ..." attribution appears, derived live from the Room's Progress Records for that videoId — "watched" means "has a Progress Record" (started, not finished), disappearing when a member leaves or their record expires. Naming rule: "You" first (only when you personally have a record), then up to two Buddy Display Names, then "and N other(s)"; blank-name members use the "<Adjective> Buddy" fallback.
+_Avoid_: my playlist, recommendations page, for you feed
+
+**Dismiss**:
+A recipient hiding one Recommendation from just their own Recommended-for-you grid. Dismissals are private and local — stored per install in `chrome.storage.local`, Room-scoped, mirroring Buddy Color storage — and never reach the backend, so they leave the Room-level Recommendation intact for every other member (contrast **un-recommend**, which is the recommender deleting the Recommendation for everyone). Keyed by videoId; there is no un-dismiss UI initially.
+_Avoid_: remove, delete, un-recommend, hide (alone)
 
 **Room Feed**:
-The personalized, chronological, chat-like feed on the left of the Room Home Section. For the viewer it shows: Replies to Notes the viewer authored, and Notes or Replies that Mention the viewer — plus deemphasized System Messages for Shared Playlist changes. Items are grouped under day dividers (Today / Yesterday / date), oldest at the top and newest at the bottom, auto-scrolled to newest like a chat. There is **no** read/unread state: the Feed simply shows the most recent activity. It is derived entirely on the client from the Room read plus Playlist Events; nothing is stored per-recipient.
+The personalized, chronological, chat-like feed on the left of the Room Home Section. For the viewer it shows: Replies to Notes the viewer authored; Notes or Replies that Mention the viewer; deemphasized System Messages that someone recommended the viewer a video ("X recommended you \"Title\""); and Watch Notices that a Buddy watched a video the viewer recommended ("X watched \"Title\""). A Note/Reply/Mention item is **clickable**: it links to the video and seeks to the Note's timestamp, then opens that Note's Expanded Note (a Reply-Mention opens the parent Note's conversation). Recommendation-related items are not clickable. Items are grouped under day dividers (Today / Yesterday / date), oldest at the top and newest at the bottom, auto-scrolled to newest like a chat. There is **no** read/unread state: the Feed simply shows the most recent activity. It is derived entirely on the client from the Room read plus Playlist Events; nothing is stored per-recipient.
 _Avoid_: inbox, notifications (as a stored entity), activity log
 
 **Mention**:
@@ -85,9 +93,13 @@ An @-reference inside a Note or Reply that targets a specific Room member. Becau
 _Avoid_: tag, ping, at-name (as the stored form)
 
 **System Message**:
-A small, deemphasized Room Feed line describing a Shared Playlist change — a video added or removed, and by whom ("Bob added <title>", "You removed <title>"). Rendered visually quieter than personal Feed items. Backed by Playlist Events.
+A small, deemphasized Room Feed line telling the viewer that another member recommended them a video ("Bob recommended you \"Title\""). Shown only to recipients — never to the recommender, and never for an un-recommend (removals produce no Feed line). The title comes from the Playlist Event itself, so the message survives even after the video is un-recommended. Rendered visually quieter than personal Feed items.
 _Avoid_: notification, alert, toast
 
+**Watch Notice**:
+A Room Feed line telling the recommender that a Buddy started watching a video they recommended ("Alice watched \"Title\""). Derived live on the client from the Room read — a Buddy's Progress Record for one of your Recommendations, timestamped by that record's `updatedAt` — and never stored, so it is best-effort: it may reorder as the Buddy keeps watching and cannot distinguish watched-before vs watched-after the recommendation. Shown only to the recommender.
+_Avoid_: watched alert, view notification
+
 **Playlist Event**:
-The backend event-log record behind System Messages: one row per Shared Playlist add or removal (`{ type: 'added' | 'removed', videoId, actorClientId, at }`), aged out on the shared 14-day TTL and capped to the newest ~50, returned alongside the Room read. Distinct from a Playlist Item (the current membership of the list) — an Event is the immutable history of a change.
+The backend event-log record behind System Messages: one row per recommend (`{ type: 'added', videoId, title, actorClientId, at }`), aged out on the shared 14-day TTL and capped to the newest ~50, returned alongside the Room read. It carries the video `title` so the Feed line resolves even after the video is un-recommended. Un-recommends emit no Event. Distinct from a Recommendation (the current membership of the list) — an Event is the immutable history of a recommend.
 _Avoid_: log entry, activity record
