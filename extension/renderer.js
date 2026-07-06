@@ -224,7 +224,7 @@
 			marker.style.left = (fraction * 100).toFixed(3) + '%';
 			marker.style.background = YTB.buddyColor(cid);
 			const who = YTB.buddyName(record.clientId, record.name);
-			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' · ' + YTB.formatTime(record.timestamp);
+			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' · @' + YTB.formatTime(record.timestamp);
 		}
 	}
 
@@ -300,7 +300,7 @@
 				const tooltip = document.createElement('div');
 				tooltip.className = TOOLTIP_CLASS;
 				const who = YTB.buddyName(s.record.clientId, s.record.name);
-				tooltip.textContent = who + ' · ' + YTB.formatTime(s.record.timestamp);
+				tooltip.textContent = who + ' · @' + YTB.formatTime(s.record.timestamp);
 				seg.appendChild(tooltip);
 				container.appendChild(seg);
 				prev = s.fraction;

@@ -287,7 +287,7 @@
 		// YouTube scrubber time suppressed while a dot/preview is hovered.
 		const time = document.createElement('div');
 		time.className = 'ytb-preview-time';
-		time.textContent = YTB.formatTime(note.timestamp);
+		time.textContent = '@' + YTB.formatTime(note.timestamp);
 		preview.append(time);
 		if (note.kind === 'emoji') {
 			// Transparent treatment: the larger emoji with the author beneath it.
@@ -410,7 +410,7 @@
 		goHereText.textContent = 'Go here';
 		const goHereTime = document.createElement('span');
 		goHereTime.className = 'ytb-panel-gohere-time';
-		goHereTime.textContent = atLabel;
+		goHereTime.textContent = '@' + atLabel;
 		goHereButton.append(YTBTheme.icon('play'), goHereText, goHereTime);
 		goHereButton.addEventListener('click', () => goHere(note));
 		actions.append(goHereButton);

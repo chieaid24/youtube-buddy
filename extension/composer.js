@@ -202,7 +202,7 @@
 		title.textContent = 'Add a Note';
 		const time = document.createElement('time');
 		time.className = 'ytb-note-time';
-		time.textContent = YTB.formatTime(timestamp);
+		time.textContent = '@' + YTB.formatTime(timestamp);
 		const close = document.createElement('button');
 		close.type = 'button';
 		close.className = 'ytb-note-close';
