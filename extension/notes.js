@@ -232,7 +232,8 @@
 	// A text Note opens on click/Enter/Space; a Reaction only exposes its
 	// preview on hover/focus; a locked Spoiler performs Go here — it seeks to
 	// just before its moment and plays, so the Note reveals through the natural
-	// crossing. It is still never previewed or expanded while locked.
+	// crossing. Its preview masks the body ("Spoiler") and it is still never
+	// expanded while locked.
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
 		if (!note) return;
@@ -271,18 +272,6 @@
 	function buildPreview(preview, note, who, locked, count) {
 		preview.replaceChildren();
 		preview.classList.toggle('ytb-preview-reaction', note.kind === 'emoji' && !locked);
-		// A locked Spoiler can never be previewed: no author, no timestamp —
-		// only the click-to-seek affordance is hinted.
-		if (locked) {
-			const label = document.createElement('div');
-			label.className = 'ytb-preview-spoiler';
-			label.textContent = 'Spoiler';
-			const hint = document.createElement('div');
-			hint.className = 'ytb-preview-spoiler-hint';
-			hint.textContent = 'Click to jump here';
-			preview.append(label, hint);
-			return;
-		}
 		// The Note's video timestamp, pinned in the top-right corner — replaces the
 		// YouTube scrubber time suppressed while a dot/preview is hovered.
 		const time = document.createElement('div');
@@ -303,16 +292,18 @@
 		}
 		// Text Note: the body is the hero, author small beneath it (own
 		// authorship stays a neutral "You" — the stylesheet's muted default),
-		// Reply count last.
+		// Reply count last. A locked Spoiler keeps this exact layout with the
+		// body masked by a muted placeholder and the Reply count withheld until
+		// the playhead crosses (only text Notes can be Spoilers).
 		const body = document.createElement('div');
-		body.className = 'ytb-preview-body';
-		body.textContent = note.body;
+		body.className = locked ? 'ytb-preview-spoiler' : 'ytb-preview-body';
+		body.textContent = locked ? 'Spoiler' : note.body;
 		const author = document.createElement('div');
 		author.className = 'ytb-preview-author';
 		author.textContent = who;
 		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		preview.append(body, author);
-		if (count > 0) {
+		if (!locked && count > 0) {
 			const replies = document.createElement('div');
 			replies.className = 'ytb-preview-replies';
 			replies.textContent = count === 1 ? '1 reply' : `${count} replies`;
@@ -1121,8 +1112,7 @@
       }
       .ytb-preview-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-preview-replies { margin-top: 4px; color: var(--ytb-accent-800); font-size: 11px; font-weight: 700; }
-      .ytb-preview-spoiler { color: var(--ytb-ink-muted); font-style: italic; font-weight: 600; }
-      .ytb-preview-spoiler-hint { margin-top: 2px; color: var(--ytb-ink-faint); font-size: 10.5px; }
+      .ytb-preview-spoiler { padding-right: 34px; color: var(--ytb-ink-muted); font-style: italic; font-weight: 600; }
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
       /* Suppress ONLY YouTube's native scrubber time while a dot/preview is
