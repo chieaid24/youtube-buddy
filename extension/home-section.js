@@ -12,7 +12,11 @@
 // stays the source of truth for identity and Room membership).
 //
 // Strictly gated to the home route ('/'); re-injected after SPA navigations
-// back to home. Pure consumer per ADR-0001: content.js emits
+// back to home. Also gated by the Room Home Toggle (home-toggle.js): while
+// the per-install homeSectionHidden preference is on, the section is absent
+// from the page entirely. The preference is read once on load and updated
+// live via `ytb:home-section-visibility`. Pure consumer per ADR-0001:
+// content.js emits
 // ytb:navigate/ytb:mutation, renderer.js polls the Room and rebroadcasts every
 // read as `ytb:room-data` — this file makes no reads of its own (the only
 // writes are Create/Join, playlist removal, and their presence assert).
@@ -32,8 +36,16 @@
 	let onHome = false;
 	let myClientId = null;
 	let pendingPair = false; // one Create/Join request at a time
+	// Room Home Toggle state: null until the stored preference has been read,
+	// so the section never flashes in before a hide preference is known.
+	let hiddenPref = null;
 
 	injectStyle();
+
+	YTB.getHomeSectionHidden().then((value) => {
+		if (hiddenPref === null) hiddenPref = value;
+		ensureSection();
+	});
 
 	function isHomePath() {
 		return location.pathname === '/';
@@ -45,7 +57,9 @@
 
 	function ensureSection() {
 		if (!YTB.isContextActive()) return null;
-		if (!onHome) {
+		// Absent off the home route, while the Room Home Toggle is off, and
+		// until the stored toggle preference is known (hiddenPref === null).
+		if (!onHome || hiddenPref !== false) {
 			document.getElementById(SECTION_ID)?.remove();
 			return null;
 		}
@@ -396,6 +410,14 @@
 		myClientId = (lastDetail && lastDetail.myClientId) || myClientId;
 		const section = ensureSection();
 		if (section) render(section);
+	});
+
+	// The Room Home Toggle (home-toggle.js) persisted a flip: remove the
+	// section outright, or re-inject and render it from the latest Room data.
+	document.addEventListener('ytb:home-section-visibility', (event) => {
+		if (!YTB.isContextActive()) return;
+		hiddenPref = Boolean(event.detail && event.detail.hidden);
+		ensureSection();
 	});
 
 	YTB.onContextInvalidated(() => {
