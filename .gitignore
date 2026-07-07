@@ -10,8 +10,12 @@ AGENTS.md
 # Parallel-agent worktrees
 .worktrees/
 
-# Dependencies
-node_modules/
+# Dependencies (no trailing slash: also matches the node_modules symlink
+# that parallel-agent worktrees point at the main checkout's install)
+node_modules
+
+# Playwright e2e artifacts
+test-results/
 
 # Build output
 dist/
