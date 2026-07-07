@@ -101,6 +101,8 @@ test('loads the unpacked extension and runs every content script', async () => {
 		await expect(page.locator('#ytb-renderer-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-composer-styles')).toHaveCount(1);
+		await expect(page.locator('#ytb-home-toggle-style')).toHaveCount(1);
+		await expect(page.locator('#ytb-home-toggle')).toHaveCount(0); // guide row is home-route only
 		await expect(page.locator('.ytb-thumb-bar')).toHaveCount(0);
 		await page.waitForTimeout(750);
 		const extensions = await context.newPage();
@@ -167,6 +169,87 @@ test('hovering a Note dot hides the native scrubber timecode, keeping the thumbn
 		await page.mouse.move(10, 10);
 		await expect.poll(() => visibilityOf('.ytp-tooltip-progress-bar-pill')).toBe('visible');
 		expect(await visibilityOf('.ytp-tooltip-text')).toBe('visible');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// The YouTube HOME page, reduced to what the Room Home surfaces target: the
+// left guide (where home-toggle.js appends the Room Home Toggle row) and the
+// home browse grid (above which home-section.js injects the Room Home
+// Section).
+const homeFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube home fixture</title></head>
+  <body>
+    <div id="guide">
+      <ytd-guide-renderer>
+        <div id="sections">
+          <ytd-guide-section-renderer><div id="items"></div></ytd-guide-section-renderer>
+        </div>
+      </ytd-guide-renderer>
+    </div>
+    <ytd-browse page-subtype="home">
+      <div id="grid-container"><ytd-rich-grid-renderer></ytd-rich-grid-renderer></div>
+    </ytd-browse>
+  </body>
+</html>`;
+
+test('Room Home Toggle hides and restores the Room Home Section, persisting across reload and SPA nav', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }));
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		// content.js only re-emits ytb:mutation on DOM churn; a static fixture
+		// needs nudging for URL-change detection and injection retries.
+		const nudge = () => page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+
+		// Default: toggle on (checked) inside the guide, section rendered.
+		const toggle = page.locator('#ytb-home-toggle');
+		const section = page.locator('#ytb-home-section');
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(page.locator('ytd-guide-renderer #items #ytb-home-toggle')).toHaveCount(1);
+		await expect(section).toHaveCount(1);
+
+		// Off: the section is removed completely, and mutation churn must not
+		// re-inject it; the toggle row itself stays available in the guide.
+		await toggle.click();
+		await expect(section).toHaveCount(0);
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await nudge();
+		await page.waitForTimeout(600);
+		await expect(section).toHaveCount(0);
+		await expect(toggle).toBeVisible();
+
+		// The choice persists across a full reload.
+		await page.reload();
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await page.waitForTimeout(600);
+		await expect(section).toHaveCount(0);
+
+		// ...and across SPA navigations: away from home the row disappears (the
+		// section is off-route anyway); back on home both gates still hold.
+		await page.evaluate(() => history.pushState({}, '', '/watch?v=fixture-video'));
+		await nudge();
+		await expect(toggle).toHaveCount(0);
+		await page.evaluate(() => history.pushState({}, '', '/'));
+		await nudge();
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(section).toHaveCount(0);
+
+		// Back on: the section re-injects right away.
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(section).toHaveCount(1);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

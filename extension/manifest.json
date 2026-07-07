@@ -22,6 +22,7 @@
 				"presence.js",
 				"composer.js",
 				"home-section.js",
+				"home-toggle.js",
 				"playlist-add.js",
 				"content.js"
 			],

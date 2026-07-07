@@ -107,7 +107,8 @@ const YTB = {
 	SPREAD_WINDOW_SECONDS: 2,
 
 	// --- storage (chrome.storage.local) ---
-	// Stored keys: name, code, clientId, sharing, and Room-scoped buddyColors.
+	// Stored keys: name, code, clientId, sharing, homeSectionHidden, and
+	// Room-scoped buddyColors.
 
 	/**
 	 * Read the full config, applying defaults for unset keys.
@@ -137,6 +138,26 @@ const YTB = {
 			if (key in partial) next[key] = partial[key];
 		}
 		await YTB._storageSet(next);
+	},
+
+	/**
+	 * Whether the viewer turned the Room Home Section off with the Room Home
+	 * Toggle. Per install (NOT Room-scoped), absent means visible.
+	 * @returns {Promise<boolean>}
+	 */
+	async getHomeSectionHidden() {
+		const { homeSectionHidden } = await YTB._storageGet('homeSectionHidden');
+		return homeSectionHidden === true;
+	},
+
+	/**
+	 * Persist the Room Home Toggle state. Coerced to a strict boolean so the
+	 * stored value round-trips getHomeSectionHidden exactly.
+	 * @param {boolean} hidden
+	 * @returns {Promise<boolean>} false when the extension context is gone.
+	 */
+	async setHomeSectionHidden(hidden) {
+		return await YTB._storageSet({ homeSectionHidden: hidden === true });
 	},
 
 	/**

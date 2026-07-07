@@ -495,6 +495,27 @@ describe('room home section helpers', () => {
 		expect(window.YTB.dayLabel(keyOf(now - 24 * 3600_000), now)).toBe('Yesterday');
 		expect(window.YTB.dayLabel(keyOf(new Date(2026, 6, 3, 12).getTime()), now)).toMatch(/Jul/);
 	});
+
+	it('defaults the Room Home Toggle to visible and round-trips a hide per install', async () => {
+		storage = {};
+		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
+
+		await window.YTB.setHomeSectionHidden(true);
+		expect(storage.homeSectionHidden).toBe(true);
+		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(true);
+
+		await window.YTB.setHomeSectionHidden(false);
+		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
+	});
+
+	it('stores the Room Home Toggle as a strict boolean, ignoring junk values', async () => {
+		storage = {};
+		await window.YTB.setHomeSectionHidden('yes' as unknown as boolean);
+		expect(storage.homeSectionHidden).toBe(false);
+
+		storage = { homeSectionHidden: 'truthy junk' };
+		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
+	});
 });
 
 describe('extension context lifecycle', () => {
@@ -550,6 +571,8 @@ declare global {
 			): Array<{ dayKey: string; items: Array<{ type: string; at: number; note?: { id: string } | null; reply?: object; event?: object }> }>;
 			dayLabel(dayKey: string, nowMs?: number): string;
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
+			getHomeSectionHidden(): Promise<boolean>;
+			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
 			syncBuddyColors(code: string, ids: string[], successful: boolean, random?: () => number): Promise<Record<string, string>>;
 			setBuddyColor(code: string, clientId: string, color: string): Promise<boolean>;
 			clearRoomColors(code: string): Promise<void>;
