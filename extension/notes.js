@@ -1130,8 +1130,16 @@
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
       /* Suppress ONLY YouTube's native scrubber time while a dot/preview is
-         hovered; its storyboard thumbnail (.ytp-tooltip-bg) is left intact. */
-      .${SCRUB_HIDE_CLASS} .ytp-tooltip-text { visibility: hidden !important; }
+         hovered; its storyboard thumbnail (.ytp-tooltip-bg) is left intact.
+         The current ("delhi") player carries the timecode in a dark rounded
+         pill (.ytp-tooltip-progress-bar-pill) and leaves .ytp-tooltip-text
+         empty — hide the WHOLE pill (hiding only its inner time-stamp would
+         leave an empty floating chip). .ytp-tooltip-text still carries the
+         timecode on the legacy tooltip markup, so both stay covered. */
+      .${SCRUB_HIDE_CLASS} .ytp-tooltip-text,
+      .${SCRUB_HIDE_CLASS} .ytp-tooltip-progress-bar-pill {
+        visibility: hidden !important;
+      }
 
       /* --- the Expanded Note: opaque warm surface (cream / espresso) --- */
       #${PANEL_ID} {
