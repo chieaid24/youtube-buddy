@@ -1061,15 +1061,18 @@
         transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
         z-index: 60;
       }
-      /* Transparent hover bridge: spans the gap between the preview and the dot so
-         the pointer can travel up onto the card without dropping :hover. It is
+      /* Transparent hover bridge: a dot-width column spanning the gap between the
+         preview and the dot so the pointer can travel straight up onto the card
+         without dropping :hover. Kept narrow (not full preview width) so sliding
+         horizontally along the progress bar off the dot drops the preview. It is
          interactive only while the dot is hovered, so it never blocks the
          scrubber; hovering it (a dot descendant) keeps .${DOT_CLASS}:hover alive. */
       .${PREVIEW_CLASS}::before {
         content: '';
         position: absolute;
-        left: 0;
-        right: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 16px;
         top: 100%;
         height: 22px;
         pointer-events: none;
