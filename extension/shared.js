@@ -490,6 +490,29 @@ const YTB = {
 	},
 
 	/**
+	 * What activating (click/Enter/Space) a Video Timeline dot does — a pure
+	 * decision so notes.js stays a thin executor and the routing is testable:
+	 * - a locked Spoiler (spoiler + playhead before its moment) is 'go-here':
+	 *   seek to `target` AND resume playback, so the Note reveals through its
+	 *   natural crossing;
+	 * - a Reaction (emoji) is 'seek': the same `target`, but a bare,
+	 *   state-preserving seek — playing stays playing, paused stays paused
+	 *   (the executor must not call play()/pause());
+	 * - a text Note (including an unlocked Spoiler) is 'open': the
+	 *   conversation panel, no seek.
+	 * @param {{kind?: string, spoiler?: boolean, timestamp: number}} note
+	 * @param {number} playhead the viewer's playback position in seconds
+	 *   (pass Infinity when there is no player — nothing can be locked)
+	 * @returns {{action: 'go-here'|'seek'|'open', target?: number}}
+	 */
+	dotActivation(note, playhead) {
+		const locked = Boolean(note.spoiler) && Number(playhead) < Number(note.timestamp);
+		if (locked) return { action: 'go-here', target: YTB.goHereTarget(Number(note.timestamp)) };
+		if (note.kind === 'emoji') return { action: 'seek', target: YTB.goHereTarget(Number(note.timestamp)) };
+		return { action: 'open' };
+	},
+
+	/**
 	 * Spread timeline dots that would overlap. Dots whose timestamps chain
 	 * within SPREAD_WINDOW_SECONDS form a group; each group is spread
 	 * horizontally by `minGap` around its natural center — chronological order

@@ -238,20 +238,21 @@
 	// here, which resumes playback); a locked Spoiler performs Go here — it
 	// seeks to just before its moment and plays, so the Note reveals through
 	// the natural crossing. Its preview masks the body ("Spoiler") and it is
-	// still never expanded while locked.
+	// still never expanded while locked. The routing itself is the pure
+	// YTB.dotActivation; this stays the thin executor.
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
 		if (!note) return;
 		const video = document.querySelector('video');
-		const locked = Boolean(note.spoiler) && video && Number(video.currentTime) < Number(note.timestamp);
-		if (locked) {
+		const { action, target } = YTB.dotActivation(note, video ? Number(video.currentTime) : Infinity);
+		if (action === 'go-here') {
 			goHere(note);
 			return;
 		}
-		if (note.kind === 'emoji') {
+		if (action === 'seek') {
 			// Bare, state-preserving seek: playing stays playing, paused stays
 			// paused — never call play()/pause() here.
-			if (video) video.currentTime = YTB.goHereTarget(Number(note.timestamp));
+			if (video) video.currentTime = target;
 			return;
 		}
 		openPanel(note);
