@@ -11,6 +11,9 @@
 //     author-only delete confirmation;
 //   - click-to-seek on locked Spoiler dots (Go here without opening — the Note
 //     reveals through its natural crossing, never early);
+//   - click-to-seek on Reaction dots: a bare, state-preserving seek to just
+//     before the Reaction (playing stays playing, paused stays paused — this
+//     is NOT Go here, which resumes playback);
 //   - Playback Notifications: bottom-center note cards (~4s, clickable) and
 //     animated Reaction bursts (~2s, non-interactive) on every NATURAL forward
 //     crossing — rewind-and-replay triggers again, direct seeks stay silent.
@@ -185,8 +188,9 @@
 				const preview = dot.appendChild(document.createElement('div'));
 				preview.className = PREVIEW_CLASS;
 				// Never let the player interpret a dot press as a seek. Clicking the
-				// dot OR its Note Preview opens the conversation (activation re-checks
-				// kind and Spoiler lock).
+				// dot OR its Note Preview activates it — open the conversation, or
+				// seek for Reactions/locked Spoilers (activation re-checks kind and
+				// Spoiler lock).
 				for (const type of ['mousedown', 'touchstart', 'pointerdown']) {
 					dot.addEventListener(type, (e) => e.stopPropagation());
 				}
@@ -222,28 +226,35 @@
 				locked
 					? `Spoiler note at ${at}. Jump to just before it`
 					: isReaction
-						? `Reaction ${note.body} by ${who} at ${at}`
+						? `Reaction ${note.body} by ${who} at ${at}. Seek to just before it`
 						: `Note by ${who} at ${at}. Open conversation`,
 			);
 			buildPreview(dot.querySelector('.' + PREVIEW_CLASS), note, who, locked, count);
 		}
 	}
 
-	// A text Note opens on click/Enter/Space; a Reaction only exposes its
-	// preview on hover/focus; a locked Spoiler performs Go here — it seeks to
-	// just before its moment and plays, so the Note reveals through the natural
-	// crossing. Its preview masks the body ("Spoiler") and it is still never
-	// expanded while locked.
+	// A text Note opens on click/Enter/Space; a Reaction seeks to just before
+	// its moment while PRESERVING the play/pause state (a bare seek — not Go
+	// here, which resumes playback); a locked Spoiler performs Go here — it
+	// seeks to just before its moment and plays, so the Note reveals through
+	// the natural crossing. Its preview masks the body ("Spoiler") and it is
+	// still never expanded while locked. The routing itself is the pure
+	// YTB.dotActivation; this stays the thin executor.
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
 		if (!note) return;
 		const video = document.querySelector('video');
-		const locked = Boolean(note.spoiler) && video && Number(video.currentTime) < Number(note.timestamp);
-		if (locked) {
+		const { action, target } = YTB.dotActivation(note, video ? Number(video.currentTime) : Infinity);
+		if (action === 'go-here') {
 			goHere(note);
 			return;
 		}
-		if (note.kind === 'emoji') return;
+		if (action === 'seek') {
+			// Bare, state-preserving seek: playing stays playing, paused stays
+			// paused — never call play()/pause() here.
+			if (video) video.currentTime = target;
+			return;
+		}
 		openPanel(note);
 	}
 

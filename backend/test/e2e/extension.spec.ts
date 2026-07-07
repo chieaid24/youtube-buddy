@@ -22,7 +22,13 @@ async function launchExtension(): Promise<BrowserContext> {
 	return chromium.launchPersistentContext('', {
 		channel: 'chromium',
 		headless: true,
-		args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
+		args: [
+			`--disable-extensions-except=${extensionPath}`,
+			`--load-extension=${extensionPath}`,
+			// The dot-click playback test drives play() from evaluate(), which
+			// carries no user gesture.
+			'--autoplay-policy=no-user-gesture-required',
+		],
 	});
 }
 
@@ -89,6 +95,161 @@ test('opens the extension popup without runtime errors', async () => {
 		await popup.waitForTimeout(250);
 		await extensions.reload();
 		await expect((await extensionItem(extensions)).locator('#errors-button')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// A playable fixture for dot-click behavior: the <video> carries a real silent
+// WAV as a data: URI (fully buffered, so the whole duration is seekable and
+// currentTime/play()/pause() behave like a real player — a route-fulfilled
+// media URL stalls at HAVE_METADATA with an empty seekable range), and the
+// progress bar has real dimensions so Note dots render and are clickable.
+function playbackFixture(mediaSrc: string) {
+	return `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube playback fixture</title></head>
+  <body>
+    <main id="movie_player" class="html5-video-player">
+      <video src="${mediaSrc}" preload="auto"></video>
+      <div class="ytp-chrome-bottom">
+        <div class="ytp-progress-bar" style="position: relative; width: 400px; height: 6px; background: #444"></div>
+        <div class="ytp-left-controls"></div>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
+/** A silent 8-bit mono PCM WAV of the given duration (real, seekable media). */
+function silentWav(seconds: number): Buffer {
+	const sampleRate = 8000;
+	const dataSize = sampleRate * seconds;
+	const wav = Buffer.alloc(44 + dataSize, 0x80);
+	wav.write('RIFF', 0);
+	wav.writeUInt32LE(36 + dataSize, 4);
+	wav.write('WAVE', 8);
+	wav.write('fmt ', 12);
+	wav.writeUInt32LE(16, 16);
+	wav.writeUInt16LE(1, 20); // PCM
+	wav.writeUInt16LE(1, 22); // mono
+	wav.writeUInt32LE(sampleRate, 24);
+	wav.writeUInt32LE(sampleRate, 28); // byte rate
+	wav.writeUInt16LE(1, 32); // block align
+	wav.writeUInt16LE(8, 34); // bits per sample
+	wav.write('data', 36);
+	wav.writeUInt32LE(dataSize, 40);
+	return wav;
+}
+
+// One Buddy-authored Note of each dot kind on a 20s video. goHereTarget is 1s
+// before the timestamp, so the Reaction seeks to 7 and the Spoiler to 15.
+const roomNotes = [
+	{ id: 'n-text', clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 4, kind: 'text', body: 'hello', spoiler: false, createdAt: 1 },
+	{ id: 'n-react', clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 8, kind: 'emoji', body: '\u{1F525}', spoiler: false, createdAt: 2 },
+	{ id: 'n-spoiler', clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 16, kind: 'text', body: 'secret', spoiler: true, createdAt: 3 },
+];
+
+test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots keep their behavior', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		// Stand in for the backend: GET returns the Room read above; writes are
+		// swallowed. Content-script fetches run under the page origin, so the
+		// stub must answer CORS like the real Worker does.
+		const cors = {
+			'access-control-allow-origin': '*',
+			'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+			'access-control-allow-headers': 'content-type',
+		};
+		await context.route('http://localhost:8787/**', (route) => {
+			const method = route.request().method();
+			if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+			if (method === 'GET') {
+				return route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					headers: cors,
+					body: JSON.stringify({ progress: [], presence: [], notes: roomNotes, replies: [], playlist: [], events: [] }),
+				});
+			}
+			return route.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: JSON.stringify({ ok: true }) });
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+
+		// Seed the paired-Room config through an extension page (chrome.storage
+		// is only reachable from the extension's own origin).
+		const extensions = await context.newPage();
+		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
+		const popup = await context.newPage();
+		await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+		await popup.evaluate(() => chrome.storage.local.set({ code: 'ROOME2E', clientId: 'viewer-e2e', name: 'Viewer', sharing: false }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+
+		// The initial render can race the media metadata (dots need a finite
+		// duration); nudge the DOM so content.js re-emits ytb:mutation until the
+		// three dots reconcile.
+		const dots = page.locator('.ytb-note-dot');
+		await expect(async () => {
+			await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+			await expect(dots).toHaveCount(3, { timeout: 700 });
+		}).toPass({ timeout: 15_000 });
+		await expect(page.locator('.ytb-note-dot-text')).toHaveCount(1);
+		await expect(page.locator('.ytb-note-dot-reaction')).toHaveCount(1);
+		await expect(page.locator('.ytb-note-dot-locked')).toHaveCount(1);
+
+		const state = () => video.evaluate((v: HTMLVideoElement) => ({ currentTime: v.currentTime, paused: v.paused }));
+
+		// Paused Reaction click: seeks to goHereTarget(8) = 7 and stays paused.
+		expect((await state()).paused).toBe(true);
+		await page.locator('.ytb-note-dot-reaction').click();
+		let s = await state();
+		expect(s.currentTime).toBeGreaterThanOrEqual(6.7);
+		expect(s.currentTime).toBeLessThan(7.3);
+		expect(s.paused).toBe(true);
+
+		// Playing Reaction click: same seek, and playback keeps running.
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.currentTime = 0;
+			return v.play();
+		});
+		expect((await state()).paused).toBe(false);
+		await page.locator('.ytb-note-dot-reaction').click();
+		s = await state();
+		expect(s.currentTime).toBeGreaterThanOrEqual(6.7);
+		expect(s.currentTime).toBeLessThan(8.5);
+		expect(s.paused).toBe(false);
+
+		// Locked Spoiler click is still Go here: seeks to goHereTarget(16) = 15
+		// AND resumes playback from paused.
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+		await page.locator('.ytb-note-dot-locked').click();
+		await expect.poll(async () => (await state()).paused).toBe(false);
+		s = await state();
+		expect(s.currentTime).toBeGreaterThanOrEqual(14.7);
+		expect(s.currentTime).toBeLessThan(16);
+
+		// Text Note click still opens the conversation panel without seeking.
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+		const before = (await state()).currentTime;
+		await page.locator('.ytb-note-dot-text').click();
+		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+		s = await state();
+		expect(s.currentTime).toBeCloseTo(before, 1);
+		expect(s.paused).toBe(true);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

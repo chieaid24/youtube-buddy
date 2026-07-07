@@ -227,6 +227,25 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.goHereTarget(Number.NaN)).toBe(0);
 	});
 
+	it('routes dot activation: Reaction = bare state-preserving seek, locked Spoiler = Go here, text = open', () => {
+		// A Reaction seeks to just before its moment WITHOUT touching playback
+		// state: the action is 'seek' (bare), never 'go-here' (which resumes
+		// play), whether the playhead sits before or after the Reaction.
+		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 42 }, 5)).toEqual({ action: 'seek', target: 41 });
+		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 42 }, 90)).toEqual({ action: 'seek', target: 41 });
+		// The seek target clamps at zero like Go here.
+		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 0.5 }, 30)).toEqual({ action: 'seek', target: 0 });
+		// A locked Spoiler (playhead before its moment) still performs Go here.
+		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 }, 5)).toEqual({ action: 'go-here', target: 41 });
+		// An unlocked Spoiler and a plain text Note open the conversation.
+		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 }, 50)).toEqual({ action: 'open' });
+		expect(window.YTB.dotActivation({ kind: 'text', timestamp: 42 }, 5)).toEqual({ action: 'open' });
+		// No player = Infinity playhead: nothing locks, Reactions still route
+		// to the bare seek (the executor skips it without a video element).
+		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 }, Infinity)).toEqual({ action: 'open' });
+		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 1 }, Infinity)).toEqual({ action: 'seek', target: 0 });
+	});
+
 	it('spreads dots within the 2-second window, preserving order and clamping to the bar', () => {
 		// Two dots 1s apart at the same spot: separated by >= the gap, in order.
 		const pair = window.YTB.spreadFractions([
