@@ -201,14 +201,15 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			addedAt: Date.now(),
 		};
 		await env.PROGRESS.put(key, JSON.stringify(item), { expirationTtl: TTL_SECONDS });
-		await recordPlaylistEvent(env, prefix, 'added', body.videoId!, body.clientId!);
+		await recordPlaylistEvent(env, prefix, body.videoId!, body.title!, body.clientId!);
 		return json({ ok: true, item });
 	}
 
 	// Any member may remove any Playlist Item (the list belongs to the Room).
-	// Idempotent: deleting an absent video is ok with no Event. The actor's
-	// clientId is required for the `removed` Event, and a brand-new clientId is
-	// still cap-gated so a locked-out 6th person cannot curate the list.
+	// Idempotent: deleting an absent video is ok. Removals emit NO Playlist
+	// Event (ADR-0007: the recommend Feed line survives an un-recommend). The
+	// actor's clientId is still required because a brand-new clientId is
+	// cap-gated, so a locked-out 6th person cannot curate the list.
 	if (req.method === 'DELETE' && path === '/playlist') {
 		const clientId = url.searchParams.get('clientId');
 		const videoId = url.searchParams.get('videoId');
@@ -222,10 +223,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		}
 
 		const key = `${prefix}playlist:${videoId}`;
-		const existing = await env.PROGRESS.get(key);
-		if (existing === null) return json({ ok: true });
 		await env.PROGRESS.delete(key);
-		await recordPlaylistEvent(env, prefix, 'removed', videoId, clientId);
 		return json({ ok: true });
 	}
 
@@ -457,21 +455,24 @@ async function currentMembers(env: Env, prefix: string): Promise<Set<string>> {
 	return members;
 }
 
-// One Playlist Event backs one System Message in the Room Feed. The key embeds
-// a zero-padded millisecond timestamp so KV's lexicographic listing order is
-// chronological; the log keeps only the newest MAX_EVENTS, pruned best-effort
-// from the front on each write, and ages out on the shared TTL. The timestamp
-// is bumped past the newest existing event when two writes land in the same
-// millisecond, so sequential adds/removes always order correctly (best-effort
-// under concurrency, like every cap here).
-async function recordPlaylistEvent(env: Env, prefix: string, type: 'added' | 'removed', videoId: string, actorClientId: string): Promise<void> {
+// One Playlist Event backs one System Message in the Room Feed. Only
+// recommends are recorded — un-recommending emits nothing (ADR-0007) — and the
+// event captures the video's `title` at recommend time so the Feed line
+// survives the Playlist Item's later removal. The key embeds a zero-padded
+// millisecond timestamp so KV's lexicographic listing order is chronological;
+// the log keeps only the newest MAX_EVENTS, pruned best-effort from the front
+// on each write, and ages out on the shared TTL. The timestamp is bumped past
+// the newest existing event when two writes land in the same millisecond, so
+// sequential recommends always order correctly (best-effort under concurrency,
+// like every cap here).
+async function recordPlaylistEvent(env: Env, prefix: string, videoId: string, title: string, actorClientId: string): Promise<void> {
 	const eventPrefix = `${prefix}event:`;
 	const listing = await env.PROGRESS.list({ prefix: eventPrefix });
 	const lastKey = listing.keys.length > 0 ? listing.keys[listing.keys.length - 1].name : null;
 	const lastAt = lastKey ? Number(lastKey.slice(eventPrefix.length).split(':')[0]) || 0 : 0;
 	const at = Math.max(Date.now(), lastAt + 1);
 	const id = crypto.randomUUID();
-	const record = { id, type, videoId, actorClientId, at };
+	const record = { id, type: 'added', videoId, title, actorClientId, at };
 	await env.PROGRESS.put(`${eventPrefix}${String(at).padStart(14, '0')}:${id}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
 	const excess = listing.keys.length + 1 - MAX_EVENTS;
 	if (excess > 0) {
