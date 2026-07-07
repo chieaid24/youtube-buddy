@@ -707,7 +707,7 @@ function deletePlaylist(code: string, clientId: string, videoId: string) {
 	return SELF.fetch(`https://example.com/playlist?code=${code}&clientId=${clientId}&videoId=${videoId}`, { method: 'DELETE' });
 }
 
-async function listEvents(code: string): Promise<Array<{ type: string; videoId: string; actorClientId: string; at: number }>> {
+async function listEvents(code: string): Promise<Array<{ type: string; videoId: string; title: string; actorClientId: string; at: number }>> {
 	const listing = await env.PROGRESS.list({ prefix: `${code}:event:` });
 	const events = await Promise.all(listing.keys.map(async ({ name }) => JSON.parse((await env.PROGRESS.get(name))!)));
 	return events;
@@ -739,7 +739,7 @@ describe('POST /playlist?code=', () => {
 		expect(item.addedByName).toBe('');
 		const events = await listEvents(code);
 		expect(events).toHaveLength(1);
-		expect(events[0]).toMatchObject({ type: 'added', videoId: 'abc123', actorClientId: 'a1b2c3d4' });
+		expect(events[0]).toMatchObject({ type: 'added', videoId: 'abc123', title: 'A Great Video', actorClientId: 'a1b2c3d4' });
 	});
 
 	it('re-adding an existing videoId is a no-op: no duplicate, no new Event', async () => {
@@ -789,7 +789,7 @@ describe('POST /playlist?code=', () => {
 });
 
 describe('DELETE /playlist?code=', () => {
-	it('removes the item and emits a removed Playlist Event', async () => {
+	it('removes the item and emits NO Playlist Event (ADR-0007)', async () => {
 		const code = 'playlist-remove';
 		await postPlaylist(code, playlistBody());
 		// Any member may remove any item — buddy222 removes a1b2c3d4's add.
@@ -798,9 +798,9 @@ describe('DELETE /playlist?code=', () => {
 		expect(await res.json()).toEqual({ ok: true });
 		expect(await env.PROGRESS.get(`${code}:playlist:abc123`)).toBeNull();
 
+		// Un-recommending leaves no trace; only the original add event remains.
 		const events = await listEvents(code);
-		expect(events.map((e) => e.type)).toEqual(['added', 'removed']);
-		expect(events[1]).toMatchObject({ videoId: 'abc123', actorClientId: 'buddy222' });
+		expect(events.map((e) => e.type)).toEqual(['added']);
 	});
 
 	it('is idempotent: deleting an absent video is ok and emits NO Event', async () => {
@@ -830,16 +830,18 @@ describe('DELETE /playlist?code=', () => {
 describe('Playlist Events', () => {
 	it('caps the event log at the newest 50, pruning the oldest', async () => {
 		const code = 'event-cap';
-		// 26 adds + 26 removes = 52 events; the first two must be pruned away.
-		for (let i = 0; i < 26; i++) {
+		// 52 recommends, each removed right away to stay under the 30-item
+		// playlist cap (removals emit nothing); the first two add events must
+		// be pruned away.
+		for (let i = 0; i < 52; i++) {
 			await postPlaylist(code, playlistBody({ videoId: `video-${i}` }));
 			await deletePlaylist(code, 'a1b2c3d4', `video-${i}`);
 		}
 		const events = await listEvents(code);
 		expect(events).toHaveLength(50);
-		// Chronological by key; the oldest surviving event is video-1's add.
-		expect(events[0]).toMatchObject({ type: 'added', videoId: 'video-1' });
-		expect(events[events.length - 1]).toMatchObject({ type: 'removed', videoId: 'video-25' });
+		// Chronological by key; the oldest surviving event is video-2's add.
+		expect(events[0]).toMatchObject({ type: 'added', videoId: 'video-2' });
+		expect(events[events.length - 1]).toMatchObject({ type: 'added', videoId: 'video-51' });
 	}, 30_000);
 
 	it('events and Playlist Items carry the 14-day TTL', async () => {
@@ -857,10 +859,11 @@ describe('Playlist Events', () => {
 
 	it('counts Playlist adders and Event actors toward the Room cap', async () => {
 		const code = 'event-member-union';
-		// m1 exists only as a Playlist adder; m2 only as a remove-Event actor.
+		// m1 exists only as a Playlist adder; m2 only as the actor of an added
+		// Event whose item was since removed (the removal itself leaves no trace).
 		await postPlaylist(code, playlistBody({ clientId: 'm1', videoId: 'v1' }));
-		await postPlaylist(code, playlistBody({ clientId: 'm1', videoId: 'v2' }));
-		await deletePlaylist(code, 'm2', 'v2');
+		await postPlaylist(code, playlistBody({ clientId: 'm2', videoId: 'v2' }));
+		await deletePlaylist(code, 'm1', 'v2');
 		for (const clientId of ['m3', 'm4', 'm5']) await postPresence(code, { clientId });
 
 		const res = await postPresence(code, { clientId: 'm6' });
@@ -878,11 +881,14 @@ describe('Playlist Events', () => {
 		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
 			progress: unknown[];
 			playlist: { videoId: string }[];
-			events: { type: string; videoId: string }[];
+			events: { type: string; videoId: string; title: string }[];
 		};
 		expect(data.progress).toHaveLength(1);
 		expect(data.playlist.map((item) => item.videoId)).toEqual(['keep']);
-		expect(data.events.map((e) => `${e.type}:${e.videoId}`).sort()).toEqual(['added:gone', 'added:keep', 'removed:gone']);
+		// Only the two adds — the removal emitted nothing — and each carries
+		// the title captured at recommend time (ADR-0007).
+		expect(data.events.map((e) => `${e.type}:${e.videoId}`).sort()).toEqual(['added:gone', 'added:keep']);
+		expect(data.events.map((e) => e.title)).toEqual(['A Great Video', 'A Great Video']);
 	});
 
 	it('leaving a Room keeps the communal Playlist Items and Events', async () => {
