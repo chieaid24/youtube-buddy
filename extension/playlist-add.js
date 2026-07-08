@@ -1,13 +1,14 @@
 // extension/playlist-add.js
 //
-// The two Recommendation entry points (the Recommended-for-you grid itself
-// renders in home-section.js; ADR-0007):
-//   1. Watch page: a "Buddy Room" pill appended to the actions row that holds
-//      Like/Share/Save — a self-owned sibling, apricot and visually distinct
-//      from YouTube's Save. On a video the viewer recommended it shows a
-//      "Recommended" toggle state; clicking that un-recommends (the author-only
-//      point delete that removes the Recommendation for everyone).
-//   2. Any thumbnail: an "Add to Buddy Room" row appended to the tile's
+// The two Recommend Controls (the Recommended-for-you grid itself renders in
+// home-section.js; ADR-0007), sharing one vocabulary (see CONTEXT.md
+// "Recommend Control"):
+//   1. Watch page: a "Recommend to Buddies" pill appended to the actions row
+//      that holds Like/Share/Save — a self-owned sibling, apricot and visually
+//      distinct from YouTube's Save. On a video the viewer recommended it
+//      shows a "Recommended" toggle state; clicking that un-recommends (the
+//      author-only point delete that removes the Recommendation for everyone).
+//   2. Any thumbnail: a "Recommend to Buddies" row appended to the tile's
 //      three-dots menu, next to YouTube's own Save-to-playlist items.
 //
 // The kebab injection DELIBERATELY accepts YouTube-menu DOM fragility (an
@@ -30,8 +31,9 @@
 
 	let currentVideoId = null;
 	// From ytb:room-data: videoId -> the recommending member's clientId
-	// (addedBy). Powers the pill's three states: absent = idle ("+ Buddy Room"),
-	// mine = "Recommended" (click to un-recommend), a Buddy's = "In Buddy Room".
+	// (addedBy). Powers the pill's three states: absent = idle ("Recommend to
+	// Buddies"), mine = "Recommended" (click to un-recommend), a Buddy's =
+	// "Recommended to you".
 	let recommenderByVideoId = new Map();
 	let myClientId = null;
 	let hasRoomCode = false;
@@ -61,7 +63,7 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Watch page: the "Buddy Room" pill in the actions row.
+	// Watch page: the "Recommend to Buddies" pill in the actions row.
 	// ---------------------------------------------------------------------------
 
 	function watchTitle() {
@@ -92,7 +94,7 @@
 				const state = button.dataset.ytbState;
 				const videoId = currentVideoId;
 				if (state === 'idle') {
-					setButtonState(button, 'busy', 'Adding...');
+					setButtonState(button, 'busy');
 					const result = await addToPlaylist(videoId, watchTitle());
 					if (!button.isConnected) return;
 					if (result.ok) {
@@ -122,9 +124,9 @@
 	}
 
 	const STATE_LABELS = {
-		idle: '+ Buddy Room',
-		busy: 'Adding...',
-		added: 'In Buddy Room', // a Buddy's Recommendation — nothing to toggle
+		idle: 'Recommend to Buddies',
+		busy: 'Recommending...',
+		added: 'Recommended to you', // a Buddy's Recommendation — nothing to toggle
 		recommended: 'Recommended', // mine — click to un-recommend
 	};
 
@@ -157,7 +159,7 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Thumbnails: the "Add to Buddy Room" row in a tile's three-dots menu.
+	// Thumbnails: the "Recommend to Buddies" row in a tile's three-dots menu.
 	//
 	// Flow: a capture-phase click listener notices a click inside a tile's
 	// ytd-menu-renderer (the kebab) and remembers that tile's videoId + title;
@@ -260,13 +262,13 @@
 		icon.className = 'ytb-kebab-add-icon';
 		icon.textContent = '+';
 		const label = document.createElement('span');
-		label.textContent = 'Add to Buddy Room';
+		label.textContent = 'Recommend to Buddies';
 		item.append(icon, label);
 
 		const activate = async () => {
-			label.textContent = 'Adding...';
+			label.textContent = 'Recommending...';
 			const result = await addToPlaylist(videoId, title);
-			label.textContent = result.ok ? 'Added to Buddy Room' : errorLabel(result.category);
+			label.textContent = result.ok ? 'Recommended' : errorLabel(result.category);
 			setTimeout(() => {
 				// Close the menu the way YouTube would.
 				const open = item.closest('tp-yt-iron-dropdown');
@@ -287,6 +289,34 @@
 		});
 
 		listbox.appendChild(item);
+		fitOpenMenu(item);
+	}
+
+	/** After the row lands in an open menu, the popup must show it WITHOUT the
+	 * user scrolling — in both menu generations. YouTube sizes the popup before
+	 * the row exists, so any inline pixel max-height between the row and its
+	 * dropdown is now one row short: grow each by the row's height, then let
+	 * the dropdown re-measure and re-position itself (iron-dropdown's refit)
+	 * in case the taller menu would overflow the viewport. */
+	function fitOpenMenu(item) {
+		const dropdown = item.closest('tp-yt-iron-dropdown');
+		if (!dropdown) return;
+		const rowHeight = item.offsetHeight || 36;
+		let node = item.parentElement;
+		while (node) {
+			const inline = node.style ? node.style.maxHeight : '';
+			if (inline && inline.endsWith('px')) {
+				const current = parseFloat(inline);
+				if (Number.isFinite(current)) node.style.maxHeight = current + rowHeight + 'px';
+			}
+			if (node === dropdown) break;
+			node = node.parentElement;
+		}
+		try {
+			if (typeof dropdown.refit === 'function') dropdown.refit();
+		} catch {
+			// A dropdown mid-close/detach can't refit; the row is swept anyway.
+		}
 	}
 
 	// ---------------------------------------------------------------------------
