@@ -519,6 +519,121 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 	}
 });
 
+test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native, Escape closes', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(context, {}, calls);
+		// Registered after (so matched before) the generic stub: POST /notes
+		// answers with the complete server record, like the real Worker.
+		await context.route('http://localhost:8787/notes**', (route) => {
+			const request = route.request();
+			if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			const body = request.postData() ?? '';
+			calls.push(`${request.method()} ${request.url()} ${body}`);
+			const note = { id: 'posted-1', createdAt: Date.now(), ...JSON.parse(body) };
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({ ok: true, id: note.id, note }),
+			});
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true })); // posting a Note requires Sharing
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+
+		// Stand in for YouTube's capture-phase player hotkeys (main world, like
+		// the real page): Enter activates the focused element — exactly what used
+		// to re-toggle the checkbox — and Space toggles play/pause.
+		await page.evaluate(() => {
+			document.addEventListener(
+				'keydown',
+				(event) => {
+					if (event.key === 'Enter' && document.activeElement instanceof HTMLElement) document.activeElement.click();
+					if (event.key === ' ') {
+						const video = document.querySelector('video');
+						if (video) void (video.paused ? video.play() : video.pause());
+					}
+				},
+				true,
+			);
+		});
+
+		const composer = page.locator('#ytb-note-composer');
+		const textarea = composer.locator('textarea');
+		const spoilerBox = composer.locator('input[type="checkbox"]');
+		const notePosts = () => calls.filter((call) => call.startsWith('POST') && call.includes('/notes'));
+
+		// Baseline unchanged: Enter in the textarea posts the draft and closes.
+		await page.locator('#ytb-note-button').click();
+		await expect(textarea).toBeFocused();
+		await textarea.fill('from the textarea');
+		await page.keyboard.press('Enter');
+		await expect(composer).toHaveCount(0);
+		expect(notePosts()).toHaveLength(1);
+		expect(notePosts()[0]).toContain('"body":"from the textarea"');
+
+		// Checkbox focused (Tab from the textarea; a mouse click focuses it the
+		// same way): Enter posts the typed Note exactly once through the same
+		// path and never re-toggles the checkbox — the posted record still says
+		// spoiler: true (the seeded default).
+		await page.locator('#ytb-note-button').click();
+		await expect(textarea).toBeFocused();
+		await textarea.fill('from the checkbox');
+		await page.keyboard.press('Tab');
+		await expect(spoilerBox).toBeFocused();
+		await expect(spoilerBox).toBeChecked();
+		await page.keyboard.press('Enter');
+		await expect(composer).toHaveCount(0);
+		expect(notePosts()).toHaveLength(2);
+		expect(notePosts()[1]).toContain('"body":"from the checkbox"');
+		expect(notePosts()[1]).toContain('"spoiler":true');
+
+		// Empty draft: Enter on the focused checkbox is a no-op, like textarea
+		// Enter — nothing posts and the composer stays open.
+		await page.locator('#ytb-note-button').click();
+		await expect(textarea).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(spoilerBox).toBeFocused();
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(400);
+		await expect(composer).toBeVisible();
+		expect(notePosts()).toHaveLength(2);
+
+		// Space keeps its native checkbox toggle and never reaches YouTube: the
+		// (paused) video does not start playing.
+		await expect(spoilerBox).toBeChecked();
+		await page.keyboard.press('Space');
+		await expect(spoilerBox).not.toBeChecked();
+		expect(await page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+
+		// Escape on the focused checkbox closes the composer and discards the
+		// draft (guarded keys never reach the document-level Escape listener).
+		await textarea.fill('discard me');
+		await page.keyboard.press('Tab');
+		await expect(spoilerBox).toBeFocused();
+		await page.keyboard.press('Escape');
+		await expect(composer).toHaveCount(0);
+		expect(notePosts()).toHaveLength(2);
+		await page.locator('#ytb-note-button').click();
+		await expect(textarea).toHaveValue('');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('clicking a locked-Spoiler hover preview performs Go here, exactly like its dot', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

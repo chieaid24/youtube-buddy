@@ -21,19 +21,22 @@
 //
 // It also owns KEYSTROKE ISOLATION for on-video YTB inputs. YouTube's player
 // handles hotkeys in the capture phase (on #movie_player / document), i.e.
-// BEFORE any bubble-phase stopPropagation a textarea handler could run — so
-// space toggled play while typing. The guard below listens at window capture
-// (the only node above YouTube's handlers), swallows keydown/keyup/keypress
-// originating from a YTB on-video textarea, and synchronously dispatches a
-// namespaced `ytb:keydown` CustomEvent on that textarea carrying the original
-// event as `detail.original`. A same-name KeyboardEvent replay would NOT
-// isolate anything: dispatch retraces the capture path, so page capture
-// listeners would see the clone — a different event NAME is what keeps
-// YouTube blind. Textarea-level `ytb:keydown` listeners (mentions.js first,
-// then the host's Enter/Escape handling — registration order is preserved)
-// read key state from `detail.original` and call its preventDefault() when
-// they need to cancel the newline/caret default. The character itself still
-// types normally because the real event's default action is left alone.
+// BEFORE any bubble-phase stopPropagation an input handler could run — so
+// space toggled play while typing, and Enter on the composer's focused
+// Spoiler checkbox re-toggled it instead of posting. The guard below listens
+// at window capture (the only node above YouTube's handlers), swallows
+// keydown/keyup/keypress originating from a YTB on-video input (the
+// Note/Reply textareas and the composer's Spoiler checkbox), and
+// synchronously dispatches a namespaced `ytb:keydown` CustomEvent on that
+// input carrying the original event as `detail.original`. A same-name
+// KeyboardEvent replay would NOT isolate anything: dispatch retraces the
+// capture path, so page capture listeners would see the clone — a different
+// event NAME is what keeps YouTube blind. Input-level `ytb:keydown` listeners
+// (mentions.js first, then the host's Enter/Escape handling — registration
+// order is preserved) read key state from `detail.original` and call its
+// preventDefault() when they need to cancel the newline/caret default. The
+// character itself still types normally — and Space still natively toggles
+// the checkbox — because the real event's default action is left alone.
 //
 // Exposes `window.YTBTheme`:
 //   - icon(name) — inline SVG icons ('send', 'play', 'close') built via
@@ -267,7 +270,7 @@
 
 	// --- keystroke isolation for on-video YTB inputs ---
 
-	const GUARDED_INPUTS = '#ytb-note-panel textarea, #ytb-note-composer textarea';
+	const GUARDED_INPUTS = '#ytb-note-panel textarea, #ytb-note-composer textarea, #ytb-note-composer input[type="checkbox"]';
 
 	for (const type of ['keydown', 'keyup', 'keypress']) {
 		window.addEventListener(
