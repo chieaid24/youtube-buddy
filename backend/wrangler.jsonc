@@ -9,35 +9,16 @@
 	"compatibility_date": "2026-05-03",
 	"workers_dev": true,
 	"observability": {
-		"enabled": true
+		"enabled": true,
 	},
 	"upload_source_maps": true,
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
+	"compatibility_flags": ["nodejs_compat"],
 	"kv_namespaces": [
 		{
 			"binding": "PROGRESS",
-			"id": "7ca21ebc499844c9b6c109ccaf9e9bc1"
-		}
+			"id": "89ee3a57d8a44b85928fb8f47146e1cf",
+		},
 	],
-	/**
-	 * `stable` env — the frozen, shareable instance (see share/).
-	 * Isolated worker + KV from the default dev/prod worker, so day-to-day
-	 * development never touches the friend's data. Deploy with:
-	 *   npx wrangler deploy --env stable
-	 */
-	"env": {
-		"stable": {
-			"name": "youtube-buddy-stable",
-			"kv_namespaces": [
-				{
-					"binding": "PROGRESS",
-					"id": "2196cd7850b64825af8a5e042f282a31"
-				}
-			]
-		}
-	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
