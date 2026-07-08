@@ -476,20 +476,23 @@ describe('room home section helpers', () => {
 			{ id: 'r5', noteId: 'n3', clientId: 'cid44444', name: 'Cid', body: 'not for me', createdAt: base + 6000 },
 		];
 		const events = [
-			{ id: 'e1', type: 'added', videoId: 'v9', actorClientId: 'bob22222', at: base + 7000 },
-			{ id: 'e2', type: 'removed', videoId: 'v9', actorClientId: 'ana33333', at: base + 26 * 3600_000 },
+			{ id: 'e1', type: 'added', videoId: 'v9', title: 'Cats', actorClientId: 'bob22222', at: base + 7000 },
+			// My own recommendation — a recommender never sees their own System Message.
+			{ id: 'e3', type: 'added', videoId: 'v7', title: 'Mine', actorClientId: me, at: base + 6500 },
+			{ id: 'e2', type: 'added', videoId: 'v8', title: 'Dogs', actorClientId: 'ana33333', at: base + 26 * 3600_000 },
 		];
 
 		const groups = window.YTB.buildFeed({ notes, replies, events }, me);
 		// Two local days -> two divider groups, both ascending.
 		expect(groups).toHaveLength(2);
 		const first = groups[0].items;
-		// My own note (n1), my own reply (r2), the unrelated note (n3), and the
-		// not-for-me reply (r5) are all absent. r4 (reply-to-mine AND mention)
-		// appears exactly once, as a reply.
+		// My own note (n1), my own reply (r2), the unrelated note (n3), the
+		// not-for-me reply (r5), and my OWN recommendation event (e3) are all
+		// absent. r4 (reply-to-mine AND mention) appears exactly once, as a reply.
 		expect(first.map((item) => item.type)).toEqual(['mention', 'reply', 'mention', 'reply', 'system']);
 		expect(first.map((item) => item.at)).toEqual([base + 1000, base + 2000, base + 4000, base + 5000, base + 7000]);
 		expect(first[1].note.id).toBe('n1'); // a reply item carries its parent Note
+		expect(first[4].event.actorClientId).toBe('bob22222'); // a recipient's recommend message
 		expect(groups[1].items.map((item) => item.type)).toEqual(['system']);
 		expect(groups[0].dayKey).not.toBe(groups[1].dayKey);
 
@@ -498,6 +501,66 @@ describe('room home section helpers', () => {
 			expect('read' in item).toBe(false);
 			expect('unread' in item).toBe(false);
 		}
+	});
+
+	it('recommend System Messages are recipient-only, added-only, and carry the stored title', () => {
+		const at = new Date(2026, 6, 4, 12).getTime();
+		const events = [
+			{ id: 'e1', type: 'added', videoId: 'v9', title: 'Otters 101', actorClientId: 'bob22222', at },
+			{ id: 'e2', type: 'added', videoId: 'v8', title: 'My Pick', actorClientId: me, at: at + 1000 },
+			// A stale un-recommend shape must never render as a recommendation.
+			{ id: 'e3', type: 'removed', videoId: 'v7', title: 'Old', actorClientId: 'ana33333', at: at + 2000 },
+		];
+
+		// The recipient (me) sees only Bob's recommend, with the stored title
+		// (survives an un-recommend since it's captured on the event).
+		const asRecipient = window.YTB.buildFeed({ events }, me)[0].items;
+		expect(asRecipient).toHaveLength(1);
+		expect(asRecipient[0].type).toBe('system');
+		expect(asRecipient[0].event.actorClientId).toBe('bob22222');
+		expect(asRecipient[0].event.title).toBe('Otters 101');
+
+		// The recommender (bob22222) never sees his own recommendation.
+		const asRecommender = window.YTB.buildFeed({ events }, 'bob22222');
+		const bobSystems = asRecommender.flatMap((g) => g.items).filter((i) => i.type === 'system');
+		expect(bobSystems.every((i) => i.event.actorClientId !== 'bob22222')).toBe(true);
+		// And the removed-type event surfaces for nobody.
+		for (const viewer of [me, 'bob22222', 'ana33333', 'cid44444']) {
+			const systems = window.YTB.buildFeed({ events }, viewer).flatMap((g) => g.items).filter((i) => i.type === 'system');
+			expect(systems.some((i) => i.event.videoId === 'v7')).toBe(false);
+		}
+	});
+
+	it('Watch Notices: the recommender sees a Buddy watch their pick; others do not', () => {
+		const at = new Date(2026, 6, 4, 12).getTime();
+		// I (me) recommended v9 ("Otters"); a Buddy recommended v8.
+		const playlist = [
+			{ videoId: 'v9', title: 'Otters', addedBy: me, addedByName: 'Aidan', addedAt: at },
+			{ videoId: 'v8', title: 'Cats', addedBy: 'bob22222', addedByName: 'Bob', addedAt: at },
+		];
+		const progress = [
+			{ clientId: 'bob22222', name: 'Bob', videoId: 'v9', timestamp: 30, duration: 100, updatedAt: at + 5000 },
+			{ clientId: 'ana33333', name: 'Ana', videoId: 'v9', timestamp: 10, duration: 100, updatedAt: at + 6000 },
+			// A Buddy on a video I did NOT recommend -> no notice.
+			{ clientId: 'cid44444', name: 'Cid', videoId: 'v3', timestamp: 5, duration: 100, updatedAt: at + 7000 },
+			// My own record on my own pick -> not a Watch Notice (Buddies only).
+			{ clientId: me, name: 'Aidan', videoId: 'v9', timestamp: 40, duration: 100, updatedAt: at + 8000 },
+		];
+
+		// As the recommender: one notice per Buddy on my pick, titled from the
+		// live Recommendation, timestamped by each record's updatedAt.
+		const mine = window.YTB.buildFeed({ playlist, progress }, me).flatMap((g) => g.items);
+		const watches = mine.filter((i) => i.type === 'watch');
+		expect(watches).toHaveLength(2);
+		expect(watches.map((w) => w.clientId).sort()).toEqual(['ana33333', 'bob22222']);
+		expect(watches.every((w) => w.title === 'Otters' && w.videoId === 'v9')).toBe(true);
+		expect(watches.map((w) => w.at).sort()).toEqual([at + 5000, at + 6000]);
+		expect(watches.find((w) => w.clientId === 'bob22222')!.name).toBe('Bob');
+
+		// Another member (Bob recommended v8; nobody has a record for it) sees no
+		// Watch Notice for my pick — Watch Notices go only to the recommender.
+		const bobsFeed = window.YTB.buildFeed({ playlist, progress }, 'bob22222').flatMap((g) => g.items);
+		expect(bobsFeed.some((i) => i.type === 'watch')).toBe(false);
 	});
 
 	it('labels Feed day dividers as Today / Yesterday / short date', () => {
@@ -712,7 +775,17 @@ declare global {
 				myClientId: string,
 			): Array<{
 				dayKey: string;
-				items: Array<{ type: string; at: number; note?: { id: string } | null; reply?: object; event?: object }>;
+				items: Array<{
+					type: string;
+					at: number;
+					note?: { id: string } | null;
+					reply?: object;
+					event?: { actorClientId?: string; videoId?: string; title?: string; type?: string };
+					videoId?: string;
+					title?: string;
+					clientId?: string;
+					name?: string;
+				}>;
 			}>;
 			dayLabel(dayKey: string, nowMs?: number): string;
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
