@@ -286,8 +286,14 @@
 				});
 				// While the dot (and its preview, a descendant) is hovered, suppress
 				// YouTube's native scrubber time so our corner timestamp stands alone.
-				dot.addEventListener('mouseenter', () => player()?.classList.add(SCRUB_HIDE_CLASS));
-				dot.addEventListener('mouseleave', () => player()?.classList.remove(SCRUB_HIDE_CLASS));
+				dot.addEventListener('mouseenter', () => {
+					player()?.classList.add(SCRUB_HIDE_CLASS);
+					clampReactionPreview(dot);
+				});
+				dot.addEventListener('mouseleave', () => {
+					player()?.classList.remove(SCRUB_HIDE_CLASS);
+					releaseReactionPreview(dot);
+				});
 				bar.appendChild(dot);
 			}
 			dot.style.left = ((fractions.get(id) || 0) * 100).toFixed(3) + '%';
@@ -363,6 +369,55 @@
 			if (match) return match;
 		}
 		return null;
+	}
+
+	/**
+	 * Keep a hovered Reaction preview clear of YouTube's storyboard thumbnail.
+	 * The thumbnail (`.ytp-tooltip`) floats above the scrubber with a far higher
+	 * z-index than the transparent Reaction preview, so a tall preview's top is
+	 * painted over. Cap the preview's height (bottom-anchored, so it grows down
+	 * from the thumbnail) to just below the thumbnail's bottom edge — measured
+	 * live, so it adapts to every player size. Only Reaction previews clip like
+	 * this; text and locked-Spoiler cards win on their own stacking, and a
+	 * keyboard-focused dot shows no storyboard at all (cap released then).
+	 */
+	function clampReactionPreview(dot) {
+		const preview = dot.querySelector('.' + PREVIEW_CLASS);
+		if (!preview || !preview.classList.contains('ytb-preview-reaction')) return;
+		// YouTube reveals its storyboard a frame or two AFTER the hover starts, so
+		// poll a short budget until it is up (then stop — its vertical position is
+		// stable for the rest of the hover). The loop also ends the moment the
+		// hover does, so a keyboard-focused dot (no storyboard) leaves no cap.
+		let frames = 0;
+		const tick = () => {
+			if (!preview.isConnected || !dot.matches(':hover')) return;
+			const tip = document.querySelector('.ytp-tooltip');
+			const tipRect = tip && tip.offsetParent !== null ? tip.getBoundingClientRect() : null;
+			if (tipRect && tipRect.height > 0) {
+				const bottom = preview.getBoundingClientRect().bottom; // bottom-anchored: stable
+				const naturalTop = bottom - preview.scrollHeight; // full height, ignores any cap
+				// Cap only when the storyboard's bottom edge would cover the top; clip
+				// the empty top padding first (emoji + author sit at the bottom), never
+				// below a floor that would swallow the emoji itself.
+				const clamp = tipRect.bottom > naturalTop;
+				preview.style.maxHeight = clamp ? Math.max(34, Math.round(bottom - tipRect.bottom - 4)) + 'px' : '';
+				// The compact card has no room for the corner timestamp without it
+				// sitting over the emoji; drop it while clamped (kept when a
+				// keyboard-focused dot shows the full-height preview, storyboard-free).
+				preview.classList.toggle('ytb-preview-clamped', clamp);
+				return;
+			}
+			if (frames++ < 40) requestAnimationFrame(tick);
+		};
+		requestAnimationFrame(tick);
+	}
+
+	function releaseReactionPreview(dot) {
+		const preview = dot.querySelector('.' + PREVIEW_CLASS);
+		if (preview) {
+			preview.style.maxHeight = '';
+			preview.classList.remove('ytb-preview-clamped');
+		}
 	}
 
 	function buildPreview(preview, note, who, locked, count) {
@@ -856,11 +911,30 @@
 		if (replies) {
 			const chrome = panel.offsetHeight - replies.offsetHeight;
 			let anchor = parseFloat(panel.style.bottom);
-			if (anchor + chrome + 64 + 16 > hostRect.height) {
-				anchor = Math.max(12, hostRect.height - chrome - 64 - 16);
+
+			// Margin the panel keeps from its own ceiling. Normally 16px below the
+			// player's top; but while YouTube's storyboard thumbnail floats above
+			// the scrubber, cap the panel just below it instead so it sits below
+			// the thumbnail, the Reply list absorbing the squeeze exactly as it
+			// does against the player top. Skipped when the thumbnail hugs the
+			// scrubber and would leave no usable panel — the panel's own high
+			// z-index keeps it above the thumbnail there, so nothing is clipped.
+			let topMargin = 16;
+			const tip = document.querySelector('.ytp-tooltip');
+			if (tip && tip.offsetParent !== null) {
+				const tipRect = tip.getBoundingClientRect();
+				const belowThumb = hostRect.bottom - tipRect.bottom; // gap bottom->thumb bottom
+				const reserve = hostRect.height - belowThumb; // margin from the top to clear it
+				if (tipRect.height > 0 && reserve > 16 && anchor + chrome + 120 + reserve <= hostRect.height) {
+					topMargin = reserve;
+				}
+			}
+
+			if (anchor + chrome + 64 + topMargin > hostRect.height) {
+				anchor = Math.max(12, hostRect.height - chrome - 64 - topMargin);
 				panel.style.bottom = anchor + 'px';
 			}
-			const spare = hostRect.height - anchor - 16;
+			const spare = hostRect.height - anchor - topMargin;
 			replies.style.maxHeight = Math.max(64, Math.min(180, spare - chrome)) + 'px';
 		}
 	}
@@ -1222,19 +1296,33 @@
       .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
         pointer-events: auto;
       }
+      /* Text notes AND locked Spoilers accept a click anywhere on the preview
+         (it bubbles to the dot's handler — open for text, Go here for a locked
+         Spoiler via YTB.dotActivation). Reactions stay transparent and
+         dot-only, so they are deliberately excluded here. */
       .${DOT_TEXT_CLASS}:hover .${PREVIEW_CLASS},
-      .${DOT_TEXT_CLASS}:focus-visible .${PREVIEW_CLASS} {
+      .${DOT_TEXT_CLASS}:focus-visible .${PREVIEW_CLASS},
+      .${DOT_LOCKED_CLASS}:hover .${PREVIEW_CLASS},
+      .${DOT_LOCKED_CLASS}:focus-visible .${PREVIEW_CLASS} {
         pointer-events: auto;
         cursor: pointer;
       }
-      /* Reactions keep the transparent over-video treatment (not a card). */
+      /* Reactions keep the transparent over-video treatment (not a card). Its
+         height is capped live (clampReactionPreview) to clear YouTube's
+         storyboard thumbnail; overflow:hidden makes that cap trim the empty top
+         padding rather than let the emoji spill back under the thumbnail. */
       .${PREVIEW_CLASS}.ytb-preview-reaction {
         border: 0;
         background: transparent;
         box-shadow: none;
         color: #fff;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
         padding-top: 18px;
         min-width: 52px;
+        overflow: hidden;
         text-align: center;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
@@ -1250,6 +1338,8 @@
         font-variant-numeric: tabular-nums;
       }
       .ytb-preview-reaction .ytb-preview-time { color: #eee; }
+      /* Storyboard-clamped Reaction card: no room for the corner timestamp. */
+      .ytb-preview-reaction.ytb-preview-clamped .ytb-preview-time { display: none; }
       /* Content is the hero; the author sits small beneath it (own authorship
          stays the muted neutral "You"; Buddies get their Buddy Color inline). */
       .ytb-preview-body {
