@@ -691,6 +691,7 @@ const kebabFixture = `<!doctype html>
         dropdown.removeAttribute('aria-hidden');
         dropdown.style.display = 'block';
         dropdown.innerHTML = '<div id="contentWrapper">' + html + '</div>';
+        dropdown.dataset.opens = String(1 + Number(dropdown.dataset.opens || 0));
       }
       window.openLockupMenu = () => openMenu(
         '<yt-sheet-view-model><yt-contextual-sheet-layout>' +
@@ -749,8 +750,12 @@ test('Add to Buddy Room row appears in both kebab menu generations and recommend
 		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
 		await expect(row).toContainText('Add to Buddy Room');
 
-		// Re-opening the menu never stacks duplicates.
+		// Re-opening the menu never stacks duplicates. The mimic (like YouTube)
+		// rebuilds the menu content on each open, destroying the previous row —
+		// wait for that second render before touching the fresh row, or the click
+		// below would race the rebuild and land on the doomed first instance.
 		await page.locator('#lockup-kebab').click();
+		await page.waitForFunction(() => document.querySelector<HTMLElement>('tp-yt-iron-dropdown')?.dataset.opens === '2');
 		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
 		await expect(row).toHaveCount(1);
 
