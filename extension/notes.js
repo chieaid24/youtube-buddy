@@ -77,6 +77,11 @@
 	let labelTimer = null;
 	let pendingReply = false;
 	let pendingDelete = false;
+	// A Room Feed reply/mention row (home-section.js) recorded a Note to open on
+	// arrival; consumed on the first Room read for its video. Loaded once (covers
+	// a full reload) and mirrored live from storage (covers SPA nav, where this
+	// script stays alive) — see below.
+	let pendingNoteOpen = null;
 
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
@@ -88,6 +93,14 @@
 		notesHidden = settings.notesHidden;
 		notificationPosition = settings.notificationPosition;
 		renderDots();
+	});
+
+	// Read any target a Room Feed row left before this script (re)loaded, then
+	// consume it once its Room read lands. On SPA nav this script never reloads,
+	// so the onChanged mirror below picks up the write instead.
+	YTB.getPendingNoteOpen().then((target) => {
+		pendingNoteOpen = target;
+		tryOpenPending();
 	});
 
 	chrome.storage.onChanged.addListener((changes, area) => {
@@ -106,6 +119,11 @@
 			const wrap = document.getElementById(ALERTS_ID);
 			const host = player();
 			if (wrap && host) applyAlertsPosition(wrap, host); // live re-anchor
+		}
+		if ('pendingNoteOpen' in changes) {
+			const next = changes.pendingNoteOpen.newValue;
+			pendingNoteOpen = next && next.videoId && next.noteId ? next : null;
+			tryOpenPending();
 		}
 	});
 
@@ -139,7 +157,38 @@
 		}
 		repliesByNoteId = nextReplies;
 		renderDots();
+		tryOpenPending(); // a Room Feed row may have asked to open a Note here
 	});
+
+	/**
+	 * If a Room Feed row queued a Note to open and this video now carries it, open
+	 * the Expanded Note and clear the slot. Leaves the slot for a later Room read
+	 * when the Note has not loaded yet (a mismatched video, or a poll that predates
+	 * it); an expired or vanished target is dropped so it never pops on a later
+	 * visit.
+	 */
+	function tryOpenPending() {
+		const target = pendingNoteOpen;
+		if (!target) return;
+		if (Date.now() - (Number(target.at) || 0) > YTB.PENDING_NOTE_OPEN_TTL_MS) {
+			clearPendingOpen();
+			return;
+		}
+		if (target.videoId !== currentVideoId) return; // still en route to the video
+		if (notesHidden) {
+			clearPendingOpen(); // Notes are off: honor the toggle, drop the request
+			return;
+		}
+		const note = (notesByVideoId.get(currentVideoId) || []).find((candidate) => candidate.id === target.noteId);
+		if (!note) return; // not in this read yet — retry on the next one (until TTL)
+		clearPendingOpen();
+		openPanel(note);
+	}
+
+	function clearPendingOpen() {
+		pendingNoteOpen = null;
+		YTB.clearPendingNoteOpen();
+	}
 
 	// composer.js posted a Note/Reaction: insert the complete server record into
 	// the active Video Timeline immediately — no waiting for the 60s Room poll.

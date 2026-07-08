@@ -161,6 +161,51 @@ const YTB = {
 		return await YTB._storageSet({ homeSectionHidden: hidden === true });
 	},
 
+	// A clicked Room Feed reply/mention row lives on the home route; the Note it
+	// points at is rendered by notes.js on the watch route. The two surfaces
+	// hand off through this single storage slot: the row records the target, and
+	// notes.js consumes it on the first Room read after arrival to open the
+	// Expanded Note. Storage (not just an in-memory event) so the handshake
+	// survives BOTH an SPA navigation — where the content scripts stay alive per
+	// ADR-0001 — and a full page reload. The TTL keeps a stale target (an
+	// abandoned click, a deleted Note) from popping a panel on a later visit.
+	PENDING_NOTE_OPEN_TTL_MS: 30_000,
+
+	/**
+	 * Record the Note a Room Feed row points at, for notes.js to open after the
+	 * navigation to `videoId`. A single slot: a newer click replaces an older
+	 * unconsumed one.
+	 * @param {{videoId: string, noteId: string}} target
+	 * @returns {Promise<boolean>} false when the target is malformed or context is gone.
+	 */
+	async setPendingNoteOpen(target) {
+		const videoId = target && target.videoId ? String(target.videoId) : '';
+		const noteId = target && target.noteId ? String(target.noteId) : '';
+		if (!videoId || !noteId) return false;
+		return await YTB._storageSet({ pendingNoteOpen: { videoId, noteId, at: Date.now() } });
+	},
+
+	/**
+	 * Read the pending open-target, or null when absent, malformed, or past its
+	 * TTL. Never throws on a stale/garbage value.
+	 * @returns {Promise<{videoId: string, noteId: string, at: number}|null>}
+	 */
+	async getPendingNoteOpen() {
+		const { pendingNoteOpen } = await YTB._storageGet('pendingNoteOpen');
+		if (!pendingNoteOpen || !pendingNoteOpen.videoId || !pendingNoteOpen.noteId) return null;
+		if (Date.now() - (Number(pendingNoteOpen.at) || 0) > YTB.PENDING_NOTE_OPEN_TTL_MS) return null;
+		return pendingNoteOpen;
+	},
+
+	/**
+	 * Clear the pending open-target once notes.js has opened its Expanded Note
+	 * (or on expiry). Idempotent.
+	 * @returns {Promise<boolean>}
+	 */
+	async clearPendingNoteOpen() {
+		return await YTB._storageSet({ pendingNoteOpen: null });
+	},
+
 	// --- Settings (per install, chrome.storage.local — mirrors homeSectionHidden) ---
 
 	// The Theme Preference's legal values (ADR-0008). 'system' follows the OS via

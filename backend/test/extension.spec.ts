@@ -653,6 +653,42 @@ describe('recommended for you helpers (ADR-0007)', () => {
 	});
 });
 
+describe('pending Note open handshake (Room Feed row -> notes.js)', () => {
+	it('round-trips a target, stamping it with a time', async () => {
+		storage = {};
+		await expect(window.YTB.setPendingNoteOpen({ videoId: 'v1', noteId: 'n1' })).resolves.toBe(true);
+		const stored = storage.pendingNoteOpen as { videoId: string; noteId: string; at: number };
+		expect(stored).toMatchObject({ videoId: 'v1', noteId: 'n1' });
+		expect(typeof stored.at).toBe('number');
+		await expect(window.YTB.getPendingNoteOpen()).resolves.toMatchObject({ videoId: 'v1', noteId: 'n1' });
+	});
+
+	it('rejects a malformed target without writing anything', async () => {
+		storage = {};
+		await expect(window.YTB.setPendingNoteOpen({ videoId: 'v1' } as never)).resolves.toBe(false);
+		await expect(window.YTB.setPendingNoteOpen({ noteId: 'n1' } as never)).resolves.toBe(false);
+		await expect(window.YTB.setPendingNoteOpen(null as never)).resolves.toBe(false);
+		expect('pendingNoteOpen' in storage).toBe(false);
+	});
+
+	it('treats a target past its TTL, or a garbage value, as absent', async () => {
+		storage = { pendingNoteOpen: { videoId: 'v1', noteId: 'n1', at: Date.now() - window.YTB.PENDING_NOTE_OPEN_TTL_MS - 1 } };
+		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+		storage = { pendingNoteOpen: 'junk' };
+		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+		storage = { pendingNoteOpen: { videoId: 'v1' } };
+		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+	});
+
+	it('clears the slot idempotently', async () => {
+		storage = { pendingNoteOpen: { videoId: 'v1', noteId: 'n1', at: Date.now() } };
+		await window.YTB.clearPendingNoteOpen();
+		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+		await window.YTB.clearPendingNoteOpen(); // idempotent
+		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+	});
+});
+
 describe('extension context lifecycle', () => {
 	it('keeps unrelated Chrome API failures observable', async () => {
 		const failure = new Error('storage unavailable');
@@ -718,6 +754,10 @@ declare global {
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
 			getHomeSectionHidden(): Promise<boolean>;
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
+			PENDING_NOTE_OPEN_TTL_MS: number;
+			setPendingNoteOpen(target: { videoId: string; noteId: string }): Promise<boolean>;
+			getPendingNoteOpen(): Promise<{ videoId: string; noteId: string; at: number } | null>;
+			clearPendingNoteOpen(): Promise<boolean>;
 			THEMES: string[];
 			NOTIFICATION_ZONES: string[];
 			getSettings(): Promise<{
