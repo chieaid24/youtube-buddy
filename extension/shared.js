@@ -97,8 +97,8 @@ const YTB = {
 	NOTE_MAX_CHARS: 100,
 	MAX_REPLIES: 10,
 
-	// Mirrors the backend cap: the Shared Playlist holds at most this many
-	// distinct videos per Room.
+	// Mirrors the backend cap: the Room's Recommendation list holds at most
+	// this many distinct videos (API/KV names keep the playlist term, ADR-0007).
 	MAX_PLAYLIST_ITEMS: 30,
 
 	// Two timeline dots whose timestamps fall within this window would overlap;
@@ -107,8 +107,8 @@ const YTB = {
 	SPREAD_WINDOW_SECONDS: 2,
 
 	// --- storage (chrome.storage.local) ---
-	// Stored keys: name, code, clientId, sharing, homeSectionHidden, and
-	// Room-scoped buddyColors.
+	// Stored keys: name, code, clientId, sharing, homeSectionHidden, and the
+	// Room-scoped buddyColors + dismissedVideos maps.
 
 	/**
 	 * Read the full config, applying defaults for unset keys.
@@ -322,11 +322,12 @@ const YTB = {
 	},
 
 	/**
-	 * Add a video to the Room's Shared Playlist. Reads the Room Code from
-	 * config. NOT gated by Sharing: curating the Room's list is an explicit
-	 * act, not position reporting (Sharing only covers Progress Records).
-	 * Re-adding an existing video is a server-side no-op. Resolves
-	 * `{ ok: true, item }` with the complete server record, or
+	 * Recommend a video to the Room (ADR-0007; the API keeps its playlist
+	 * name). Reads the Room Code from config. NOT gated by Sharing:
+	 * recommending is an explicit act, not position reporting (Sharing only
+	 * covers Progress Records). Re-adding an existing video is a server-side
+	 * no-op returning the EXISTING item (its original recommender stands).
+	 * Resolves `{ ok: true, item }` with the complete server record, or
 	 * `{ ok: false, category }` — notably 'playlist_full' and 'room_full'.
 	 * @returns {Promise<{ok: true, item: object}|{ok: false, category: string}>}
 	 */
@@ -337,9 +338,11 @@ const YTB = {
 	},
 
 	/**
-	 * Remove a video from the Shared Playlist. Any member may remove any item
-	 * (the list is Room-communal); idempotent on the server. The clientId is
-	 * the acting member — it attributes the `removed` System Message.
+	 * Remove one Recommendation for everyone — the un-recommend point delete
+	 * (ADR-0007). Idempotent on the server, which stays permissive (any member
+	 * may delete); the UI only offers it to the recommender, from the
+	 * watch-page pill. Removals emit no Playlist Event. The clientId is the
+	 * acting member (a brand-new clientId is still Room-cap gated).
 	 * @returns {Promise<{ok: true}|{ok: false, category: string}>}
 	 */
 	async deletePlaylistItem({ clientId, videoId }) {
@@ -674,7 +677,7 @@ const YTB = {
 	},
 
 	/**
-	 * "Watched by" attribution for one Shared Playlist video, derived live from
+	 * "Watched by" attribution for one recommended video, derived live from
 	 * the Room's Progress Records: "You" first (only when you have a record for
 	 * the video), then up to two Buddy Display Names most-recent first (blank
 	 * names via the buddyName fallback), then "and N other(s)". Returns '' when
@@ -706,6 +709,61 @@ const YTB = {
 		// Three or more: Oxford-comma list; the collapsed tail already says "and".
 		const last = parts[parts.length - 1];
 		return parts.slice(0, -1).join(', ') + ', ' + (last.startsWith('and ') ? last : 'and ' + last);
+	},
+
+	/**
+	 * Each viewer's "Recommended for you" grid, derived from the Room's
+	 * Recommendations (ADR-0007): the items whose `addedBy` is NOT the viewer
+	 * (you never recommend to yourself), minus the videoIds the viewer has
+	 * Dismissed locally, newest recommendation first.
+	 * @param {Array<{videoId: string, addedBy: string, addedAt: number}>} playlist Room read items.
+	 * @param {string} myClientId
+	 * @param {Iterable<string>} [dismissedVideoIds] this Room's local Dismissals.
+	 * @returns {Array<object>}
+	 */
+	recommendedForYou(playlist, myClientId, dismissedVideoIds) {
+		const dismissed = new Set(dismissedVideoIds || []);
+		return (playlist || [])
+			.filter((item) => item && item.videoId && item.addedBy !== myClientId && !dismissed.has(item.videoId))
+			.sort((a, b) => (Number(b.addedAt) || 0) - (Number(a.addedAt) || 0));
+	},
+
+	// --- Dismissed Recommendations (ADR-0007) ---
+	// A Dismiss hides one Recommendation from this viewer's Recommended-for-you
+	// grid only. Stored per install in chrome.storage.local, Room-scoped and
+	// keyed by videoId (mirroring Buddy Color storage); it never reaches the
+	// backend, so the Room-level Recommendation stays intact for every other
+	// member. There is deliberately no un-dismiss yet.
+
+	/**
+	 * The videoIds this viewer has Dismissed in one Room.
+	 * @param {string} code Room Code (already normalized).
+	 * @returns {Promise<Array<string>>}
+	 */
+	async dismissedVideoIds(code) {
+		if (!code) return [];
+		const stored = await YTB._storageGet('dismissedVideos');
+		const all = (stored && stored.dismissedVideos) || {};
+		return Array.isArray(all[code]) ? all[code] : [];
+	},
+
+	/**
+	 * Dismiss one Recommendation locally: persist its videoId under the Room so
+	 * it stays hidden across reloads. Idempotent, local-only (no backend write).
+	 * @param {string} code Room Code (already normalized).
+	 * @param {string} videoId
+	 * @returns {Promise<Array<string>>} the Room's updated Dismissed list.
+	 */
+	async dismissVideo(code, videoId) {
+		if (!code || !videoId) return YTB.dismissedVideoIds(code);
+		const stored = await YTB._storageGet('dismissedVideos');
+		if (!YTB.isContextActive()) return [];
+		const all = (stored && stored.dismissedVideos) || {};
+		const room = Array.isArray(all[code]) ? all[code] : [];
+		if (room.includes(videoId)) return room;
+		all[code] = [...room, videoId];
+		await YTB._storageSet({ dismissedVideos: all });
+		return all[code];
 	},
 
 	/** Local calendar day of an epoch-ms instant, e.g. "2026-07-05". */

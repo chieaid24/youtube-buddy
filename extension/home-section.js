@@ -4,12 +4,14 @@
 // top of the YouTube HOME page, above the recommendations grid (which shifts
 // down). Left: the Room Feed — a chronological, chat-like feed of Replies to
 // the viewer's Notes, @-mentions of the viewer, and deemphasized System
-// Messages for Shared Playlist changes, grouped under day dividers, newest at
-// the bottom, auto-scrolled. Right: the Shared Playlist — one Room-level list
-// of up to 30 videos as a horizontal thumbnail row, each with a live
-// "Watched by ..." attribution and a remove control. Unpaired installs get a
-// compact Create/Join prompt (same YTB / YTBRoomCode calls as the popup, which
-// stays the source of truth for identity and Room membership).
+// Messages, grouped under day dividers, newest at the bottom, auto-scrolled.
+// Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
+// `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
+// horizontal thumbnail row with a live "Watched by ..." attribution and a
+// Dismiss control (local-only; un-recommending one's OWN items happens on the
+// watch-page pill, never here). Unpaired installs get a compact Create/Join
+// prompt (same YTB / YTBRoomCode calls as the popup, which stays the source
+// of truth for identity and Room membership).
 //
 // Strictly gated to the home route ('/'); re-injected after SPA navigations
 // back to home. Also gated by the Room Home Toggle (home-toggle.js): while
@@ -19,7 +21,8 @@
 // content.js emits
 // ytb:navigate/ytb:mutation, renderer.js polls the Room and rebroadcasts every
 // read as `ytb:room-data` — this file makes no reads of its own (the only
-// writes are Create/Join, playlist removal, and their presence assert).
+// writes are Create/Join and their presence assert; a Dismiss only touches
+// chrome.storage.local).
 //
 // Styling extends the DESIGN.md system (apricot accent, warm neutrals, gentle
 // motion) to this surface. The popup's bundled Nunito is not re-embedded here
@@ -39,6 +42,8 @@
 	// Room Home Toggle state: null until the stored preference has been read,
 	// so the section never flashes in before a hide preference is known.
 	let hiddenPref = null;
+	let dismissedIds = new Set(); // this Room's local Dismissals (videoIds)
+	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
 
 	injectStyle();
 
@@ -116,7 +121,7 @@
 			locked.textContent = 'This Room is full, so nothing can be shown here.';
 			body.append(locked);
 		} else {
-			body.append(buildFeedColumn(detail), buildPlaylistColumn(detail));
+			body.append(buildFeedColumn(detail), buildRecommendedColumn(detail));
 		}
 
 		section.replaceChildren(head, body);
@@ -210,39 +215,42 @@
 		return row;
 	}
 
-	// --- Shared Playlist (right column) ---
+	// --- Recommended for you (right column, ADR-0007) ---
 
-	function buildPlaylistColumn(detail) {
+	function buildRecommendedColumn(detail) {
 		const column = document.createElement('section');
 		column.className = 'ytb-hs-playlist';
-		column.setAttribute('aria-label', 'Shared Playlist');
+		column.setAttribute('aria-label', 'Recommended for you');
 
 		const head = document.createElement('div');
 		head.className = 'ytb-hs-col-head';
-		head.textContent = 'Shared Playlist';
-		const count = document.createElement('span');
-		count.className = 'ytb-hs-count';
-		count.textContent = (detail.playlist || []).length + ' / ' + YTB.MAX_PLAYLIST_ITEMS;
-		head.append(count);
+		head.textContent = 'Recommended for you';
 		column.append(head);
 
-		const items = [...(detail.playlist || [])].sort((a, b) => b.addedAt - a.addedAt);
+		// The viewer's personalized grid: Buddies' Recommendations only (own are
+		// hidden — you manage those from the watch page), minus local Dismissals.
+		const items = YTB.recommendedForYou(detail.playlist, myClientId, dismissedIds);
 		if (items.length === 0) {
 			const empty = document.createElement('p');
 			empty.className = 'ytb-hs-empty';
-			empty.textContent = 'No videos yet. Add one with the Buddy Room button on a video, or from a thumbnail menu.';
+			empty.textContent = 'Nothing recommended for you yet. When a Buddy recommends a video, it shows up here.';
 			column.append(empty);
 			return column;
 		}
 
+		const count = document.createElement('span');
+		count.className = 'ytb-hs-count';
+		count.textContent = String(items.length);
+		head.append(count);
+
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-pl-row';
-		for (const item of items) row.append(buildPlaylistCard(item, detail));
+		for (const item of items) row.append(buildRecommendationCard(item, detail));
 		column.append(row);
 		return column;
 	}
 
-	function buildPlaylistCard(item, detail) {
+	function buildRecommendationCard(item, detail) {
 		const card = document.createElement('div');
 		card.className = 'ytb-hs-card';
 
@@ -257,25 +265,22 @@
 		img.loading = 'lazy';
 		link.append(img);
 
-		const remove = document.createElement('button');
-		remove.type = 'button';
-		remove.className = 'ytb-hs-remove';
-		remove.textContent = '×';
-		remove.title = 'Remove from Shared Playlist';
-		remove.setAttribute('aria-label', 'Remove "' + item.title + '" from the Shared Playlist');
-		remove.addEventListener('click', async (event) => {
+		// Dismiss (ADR-0007): hide this Recommendation for THIS viewer in THIS
+		// Room only — a private chrome.storage.local write, never a backend call.
+		// Other members are unaffected; the hide persists across reloads.
+		const dismiss = document.createElement('button');
+		dismiss.type = 'button';
+		dismiss.className = 'ytb-hs-remove';
+		dismiss.textContent = '×';
+		dismiss.title = 'Dismiss';
+		dismiss.setAttribute('aria-label', 'Dismiss "' + item.title + '" from your Recommended for you');
+		dismiss.addEventListener('click', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
-			remove.disabled = true;
-			const clientId = myClientId || (await YTB.ensureClientId());
-			const result = await YTB.deletePlaylistItem({ clientId, videoId: item.videoId });
-			if (result.ok && lastDetail) {
-				// Optimistic local removal; the next Room poll confirms.
-				lastDetail.playlist = (lastDetail.playlist || []).filter((entry) => entry.videoId !== item.videoId);
-				render();
-			} else {
-				remove.disabled = false;
-			}
+			dismissedIds.add(item.videoId); // optimistic: hide immediately
+			const code = lastDetail && lastDetail.roomCode;
+			if (code) YTB.dismissVideo(code, item.videoId); // persist, best-effort
+			render();
 		});
 
 		const title = document.createElement('div');
@@ -287,7 +292,7 @@
 		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId);
 		watched.textContent = label ? 'Watched by ' + label : 'New to the Room';
 
-		card.append(link, remove, title, watched);
+		card.append(link, dismiss, title, watched);
 		return card;
 	}
 
@@ -299,7 +304,7 @@
 
 		const pitch = document.createElement('p');
 		pitch.className = 'ytb-hs-pitch';
-		pitch.textContent = 'Watch together, apart. Share progress, notes, and a playlist with up to four friends.';
+		pitch.textContent = 'Watch together, apart. Share progress, notes, and recommendations with up to four friends.';
 
 		const actions = document.createElement('div');
 		actions.className = 'ytb-hs-pair-actions';
@@ -404,10 +409,25 @@
 		ensureSection();
 	});
 
-	document.addEventListener('ytb:room-data', (event) => {
+	document.addEventListener('ytb:room-data', async (event) => {
 		if (!YTB.isContextActive()) return;
 		lastDetail = (event && event.detail) || null;
 		myClientId = (lastDetail && lastDetail.myClientId) || myClientId;
+
+		// Load this Room's persisted Dismissals before rendering the grid. On a
+		// Room switch start fresh; otherwise merge, so a just-clicked Dismiss
+		// whose storage write is still in flight cannot flicker back.
+		const code = (lastDetail && lastDetail.roomCode) || '';
+		if (code !== dismissedRoom) {
+			dismissedIds = new Set();
+			dismissedRoom = code;
+		}
+		if (code) {
+			const persisted = await YTB.dismissedVideoIds(code);
+			if (dismissedRoom !== code) return; // switched Rooms mid-read
+			for (const videoId of persisted) dismissedIds.add(videoId);
+		}
+
 		const section = ensureSection();
 		if (section) render(section);
 	});

@@ -518,6 +518,58 @@ describe('room home section helpers', () => {
 	});
 });
 
+describe('recommended for you helpers (ADR-0007)', () => {
+	const playlist = [
+		{ videoId: 'v1', title: 'Mine', addedBy: 'me111111', addedAt: 1000 },
+		{ videoId: 'v2', title: 'Bob 1', addedBy: 'bob22222', addedAt: 2000 },
+		{ videoId: 'v3', title: 'Ana 1', addedBy: 'ana33333', addedAt: 3000 },
+		{ videoId: 'v4', title: 'Bob 2', addedBy: 'bob22222', addedAt: 4000 },
+	];
+
+	it('filters the grid to Buddy Recommendations minus Dismissed, newest first', () => {
+		// Own Recommendations never appear, even with nothing Dismissed.
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', []).map((i) => i.videoId)).toEqual(['v4', 'v3', 'v2']);
+		// A Dismissed videoId is hidden for this viewer only (pure filter).
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v3']).map((i) => i.videoId)).toEqual(['v4', 'v2']);
+		// Dismissing every foreign item empties the grid.
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v2', 'v3', 'v4'])).toEqual([]);
+		// A member with no Recommendations of their own sees the whole list.
+		expect(window.YTB.recommendedForYou(playlist, 'zoe77777', undefined).map((i) => i.videoId)).toEqual(['v4', 'v3', 'v2', 'v1']);
+		// Defensive: an absent Room read yields an empty grid.
+		expect(window.YTB.recommendedForYou(undefined, 'me111111', [])).toEqual([]);
+	});
+
+	it('stores Dismissals per Room in chrome.storage.local, idempotently, without any backend call', async () => {
+		storage = {};
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(window.YTB.dismissedVideoIds('room-a')).resolves.toEqual([]);
+		await window.YTB.dismissVideo('room-a', 'v1');
+		await window.YTB.dismissVideo('room-a', 'v2');
+		await window.YTB.dismissVideo('room-a', 'v1'); // idempotent re-dismiss
+		await window.YTB.dismissVideo('room-b', 'v9'); // Room-scoped, like Buddy Colors
+
+		await expect(window.YTB.dismissedVideoIds('room-a')).resolves.toEqual(['v1', 'v2']);
+		await expect(window.YTB.dismissedVideoIds('room-b')).resolves.toEqual(['v9']);
+		expect(storage.dismissedVideos).toEqual({ 'room-a': ['v1', 'v2'], 'room-b': ['v9'] });
+		// A Dismiss is private and local: it never reaches the backend.
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		// Unpaired (no code) reads empty and writes nothing.
+		await expect(window.YTB.dismissedVideoIds('')).resolves.toEqual([]);
+		await window.YTB.dismissVideo('', 'v1');
+		expect(storage.dismissedVideos).toEqual({ 'room-a': ['v1', 'v2'], 'room-b': ['v9'] });
+	});
+
+	it('hides a Dismissed videoId even after a later re-recommend (keyed by videoId)', async () => {
+		storage = { dismissedVideos: { room: ['v2'] } };
+		const dismissed = await window.YTB.dismissedVideoIds('room');
+		const rerecommended = [{ videoId: 'v2', title: 'Bob 1 again', addedBy: 'bob22222', addedAt: 9000 }];
+		expect(window.YTB.recommendedForYou(rerecommended, 'me111111', dismissed)).toEqual([]);
+	});
+});
+
 describe('extension context lifecycle', () => {
 	it('keeps unrelated Chrome API failures observable', async () => {
 		const failure = new Error('storage unavailable');
@@ -560,6 +612,13 @@ declare global {
 			MAX_PLAYLIST_ITEMS: number;
 			postPlaylistAdd(item: object): Promise<WriteResult<'item', object>>;
 			deletePlaylistItem(target: { clientId: string; videoId: string }): Promise<{ ok: true } | { ok: false; category: string }>;
+			recommendedForYou(
+				playlist: Array<{ videoId: string; addedBy: string; addedAt: number }> | undefined,
+				myClientId: string,
+				dismissedVideoIds?: Iterable<string>,
+			): Array<{ videoId: string; addedBy: string; addedAt: number }>;
+			dismissedVideoIds(code: string): Promise<string[]>;
+			dismissVideo(code: string, videoId: string): Promise<string[]>;
 			buddyName(clientId: string, name?: string): string;
 			roomRoster(records: object): Array<{ clientId: string; name: string }>;
 			filterRoster(roster: Array<{ clientId: string; name: string }>, query: string): Array<{ clientId: string; name: string }>;

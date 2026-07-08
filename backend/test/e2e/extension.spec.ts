@@ -87,6 +87,65 @@ async function extensionItem(page: Page) {
 	return item;
 }
 
+// Content-script fetches run under the page origin, so backend stubs must
+// answer CORS like the real Worker does.
+const CORS = {
+	'access-control-allow-origin': '*',
+	'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+	'access-control-allow-headers': 'content-type',
+};
+
+/**
+ * Stand in for the backend Worker: every GET returns the one fixed Room read
+ * built from `read`; writes are acknowledged with `{ ok: true }`. Records each
+ * request as "METHOD url" into `calls` so tests can assert what hit the wire.
+ */
+function stubRoomBackend(context: BrowserContext, read: { notes?: object[]; playlist?: object[] }, calls: string[] = []) {
+	return context.route('http://localhost:8787/**', (route) => {
+		const request = route.request();
+		calls.push(`${request.method()} ${request.url()}`);
+		if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+		if (request.method() === 'GET') {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({ progress: [], presence: [], notes: read.notes ?? [], replies: [], playlist: read.playlist ?? [], events: [] }),
+			});
+		}
+		return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
+	});
+}
+
+/**
+ * Seed the paired-Room config through an extension page (chrome.storage is
+ * only reachable from the extension's own origin). Returns the popup page so
+ * tests can keep reading chrome.storage.local through it.
+ */
+async function seedPairedRoom(context: BrowserContext) {
+	const extensions = await context.newPage();
+	const extensionId = await (await extensionItem(extensions)).getAttribute('id');
+	const popup = await context.newPage();
+	await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+	// popup.js mints a clientId on open (read-then-write); wait for that write
+	// to land or it would clobber the seeded clientId in a losing race.
+	await popup.waitForFunction(async () => (await chrome.storage.local.get('clientId')).clientId);
+	await popup.evaluate(() => chrome.storage.local.set({ code: 'roome2e', clientId: 'viewer-e2e', name: 'Viewer', sharing: false }));
+	return popup;
+}
+
+/**
+ * Retry an assertion while nudging the DOM, so content.js keeps re-emitting
+ * ytb:mutation until the extension reconciles (initial renders can race the
+ * fixture and the stubbed Room read).
+ */
+async function nudgeUntil(page: Page, assertion: () => Promise<void>) {
+	await expect(async () => {
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await assertion();
+	}).toPass({ timeout: 15_000 });
+}
+
 test('loads the unpacked extension and runs every content script', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -336,39 +395,13 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 	const errors = collectErrors(context);
 
 	try {
-		// Stand in for the backend: GET returns the Room read above; writes are
-		// swallowed. Content-script fetches run under the page origin, so the
-		// stub must answer CORS like the real Worker does.
-		const cors = {
-			'access-control-allow-origin': '*',
-			'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
-			'access-control-allow-headers': 'content-type',
-		};
-		await context.route('http://localhost:8787/**', (route) => {
-			const method = route.request().method();
-			if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
-			if (method === 'GET') {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					headers: cors,
-					body: JSON.stringify({ progress: [], presence: [], notes: roomNotes, replies: [], playlist: [], events: [] }),
-				});
-			}
-			return route.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: JSON.stringify({ ok: true }) });
-		});
+		await stubRoomBackend(context, { notes: roomNotes });
 		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
 		await context.route('https://www.youtube.com/**', (route) =>
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 
-		// Seed the paired-Room config through an extension page (chrome.storage
-		// is only reachable from the extension's own origin).
-		const extensions = await context.newPage();
-		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
-		const popup = await context.newPage();
-		await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-		await popup.evaluate(() => chrome.storage.local.set({ code: 'ROOME2E', clientId: 'viewer-e2e', name: 'Viewer', sharing: false }));
+		await seedPairedRoom(context);
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -379,13 +412,9 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 		});
 
 		// The initial render can race the media metadata (dots need a finite
-		// duration); nudge the DOM so content.js re-emits ytb:mutation until the
-		// three dots reconcile.
+		// duration); nudge until the three dots reconcile.
 		const dots = page.locator('.ytb-note-dot');
-		await expect(async () => {
-			await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
-			await expect(dots).toHaveCount(3, { timeout: 700 });
-		}).toPass({ timeout: 15_000 });
+		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));
 		await expect(page.locator('.ytb-note-dot-text')).toHaveCount(1);
 		await expect(page.locator('.ytb-note-dot-reaction')).toHaveCount(1);
 		await expect(page.locator('.ytb-note-dot-locked')).toHaveCount(1);
@@ -429,6 +458,127 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 		s = await state();
 		expect(s.currentTime).toBeCloseTo(before, 1);
 		expect(s.paused).toBe(true);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// A watch page with the Like/Share/Save actions row, where playlist-add.js
+// injects the "+ Buddy Room" recommend pill.
+const watchActionsFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube watch fixture</title></head>
+  <body>
+    <main id="movie_player" class="html5-video-player">
+      <video></video>
+      <div class="ytp-chrome-bottom">
+        <div class="ytp-progress-bar"></div>
+        <div class="ytp-left-controls"></div>
+      </div>
+    </main>
+    <ytd-watch-metadata>
+      <h1>Fixture Video</h1>
+      <div id="actions"><div id="top-level-buttons-computed"></div></div>
+    </ytd-watch-metadata>
+  </body>
+</html>`;
+
+test('watch pill shows Recommended on an own Recommendation and un-recommends for everyone', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(
+			context,
+			{ playlist: [{ videoId: 'fixture-video', title: 'Fixture Video', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 1000 }] },
+			calls,
+		);
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+
+		// The pill lands as "+ Buddy Room" and flips to the "Recommended" toggle
+		// state once the Room read shows this viewer recommended the video.
+		const pill = page.locator('#ytb-playlist-add-button');
+		await nudgeUntil(page, () => expect(pill).toHaveText('Recommended', { timeout: 700 }));
+
+		// Clicking un-recommends: one DELETE /playlist attributed to the viewer,
+		// after which the pill offers to recommend again.
+		await pill.click();
+		await expect(pill).toHaveText('+ Buddy Room');
+		const deletes = calls.filter((call) => call.startsWith('DELETE '));
+		expect(deletes).toHaveLength(1);
+		expect(deletes[0]).toContain('/playlist?code=roome2e&clientId=viewer-e2e&videoId=fixture-video');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Recommended for you grid hides own items; Dismiss is local-only and survives reload', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(
+			context,
+			{
+				playlist: [
+					{ videoId: 'vid-own', title: 'My Own Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 1000 },
+					{ videoId: 'vid-keep', title: 'Buddy Keeper', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 2000 },
+					{ videoId: 'vid-dismiss', title: 'Buddy Dismissed', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 3000 },
+				],
+			},
+			calls,
+		);
+		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }));
+		// The cards load real i.ytimg.com thumbnail URLs; the fixture videoIds
+		// would 404 there and fail the console-error gate.
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		const popup = await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		// The renamed section renders only the Buddies' Recommendations: the
+		// viewer's own pick never appears in their own grid.
+		const section = page.locator('#ytb-home-section');
+		const cards = section.locator('.ytb-hs-card');
+		await nudgeUntil(page, () => expect(cards).toHaveCount(2, { timeout: 700 }));
+		await expect(section).toContainText('Recommended for you');
+		await expect(section).not.toContainText('Shared Playlist');
+		await expect(section).not.toContainText('My Own Pick');
+
+		// Dismiss hides the card for this viewer immediately...
+		await section.locator('.ytb-hs-card').filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-remove').click();
+		await expect(cards).toHaveCount(1);
+		await expect(section).not.toContainText('Buddy Dismissed');
+
+		// ...persisted Room-scoped in chrome.storage.local (read via the popup,
+		// which shares the extension's storage)...
+		await expect
+			.poll(async () => popup.evaluate(() => chrome.storage.local.get('dismissedVideos')))
+			.toEqual({ dismissedVideos: { roome2e: ['vid-dismiss'] } });
+
+		// ...so the video stays hidden across a full reload.
+		await page.reload();
+		await nudgeUntil(page, () => expect(cards).toHaveCount(1, { timeout: 700 }));
+		await expect(section).toContainText('Buddy Keeper');
+		await expect(section).not.toContainText('Buddy Dismissed');
+
+		// A Dismiss never touches the Room's Recommendation on the backend: no
+		// playlist write of any kind hit the wire.
+		expect(calls.filter((call) => call.startsWith('DELETE ') || call.includes('/playlist'))).toEqual([]);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
