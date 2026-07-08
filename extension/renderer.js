@@ -123,8 +123,8 @@
 	// Hand every refreshed Room read to the other modules: notes.js (the sole
 	// Note-presentation owner) reconciles the Video Timeline, Reply counts, and
 	// Playback Notifications; home-section.js renders the Room Home Section
-	// (Feed + Shared Playlist); mentions.js keeps the roster for @-autocomplete;
-	// playlist-add.js reflects "already in the playlist" state. None of them
+	// (Feed + Recommended for you); mentions.js keeps the roster for
+	// @-autocomplete; playlist-add.js reflects the pill's recommend state. None of them
 	// polls the Room itself — this stays the single poller. Pass `null` records
 	// for the empty broadcast (no code, or locked out of a full Room).
 	function broadcastRoomData(records, locked) {

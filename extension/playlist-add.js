@@ -1,10 +1,12 @@
 // extension/playlist-add.js
 //
-// The two Shared Playlist ADD entry points (the Section itself renders in
-// home-section.js):
+// The two Recommendation entry points (the Recommended-for-you grid itself
+// renders in home-section.js; ADR-0007):
 //   1. Watch page: a "Buddy Room" pill appended to the actions row that holds
 //      Like/Share/Save — a self-owned sibling, apricot and visually distinct
-//      from YouTube's Save.
+//      from YouTube's Save. On a video the viewer recommended it shows a
+//      "Recommended" toggle state; clicking that un-recommends (the author-only
+//      point delete that removes the Recommendation for everyone).
 //   2. Any thumbnail: an "Add to Buddy Room" row appended to the tile's
 //      three-dots menu, next to YouTube's own Save-to-playlist items.
 //
@@ -27,7 +29,11 @@
 	const FEEDBACK_MS = 2000;
 
 	let currentVideoId = null;
-	let playlistVideoIds = new Set(); // from ytb:room-data — powers "In Buddy Room"
+	// From ytb:room-data: videoId -> the recommending member's clientId
+	// (addedBy). Powers the pill's three states: absent = idle ("+ Buddy Room"),
+	// mine = "Recommended" (click to un-recommend), a Buddy's = "In Buddy Room".
+	let recommenderByVideoId = new Map();
+	let myClientId = null;
 	let hasRoomCode = false;
 	let feedbackTimer = null;
 	// The tile whose kebab was last clicked; consumed when its menu popup opens.
@@ -36,7 +42,7 @@
 	injectStyle();
 
 	function errorLabel(category) {
-		if (category === 'playlist_full') return 'Playlist full';
+		if (category === 'playlist_full') return 'Room list full';
 		if (category === 'room_full') return 'Room full';
 		return "Couldn't add";
 	}
@@ -45,8 +51,12 @@
 		const clientId = await YTB.ensureClientId();
 		const { name } = await YTB.getConfig();
 		if (!YTB.isContextActive()) return { ok: false, category: 'unexpected' };
+		myClientId = myClientId || clientId;
 		const result = await YTB.postPlaylistAdd({ clientId, name, videoId, title });
-		if (result.ok) playlistVideoIds.add(videoId);
+		// The server record is authoritative: re-recommending a video a Buddy
+		// already recommended is a no-op that returns THEIR item (addedBy stays
+		// theirs), so the pill must not claim it as ours.
+		if (result.ok) recommenderByVideoId.set(videoId, (result.item && result.item.addedBy) || clientId);
 		return result;
 	}
 
@@ -79,15 +89,31 @@
 			button.type = 'button';
 			button.addEventListener('click', async (event) => {
 				event.stopPropagation();
-				if (button.dataset.ytbState !== 'idle') return;
+				const state = button.dataset.ytbState;
 				const videoId = currentVideoId;
-				setButtonState(button, 'busy');
-				const result = await addToPlaylist(videoId, watchTitle());
-				if (!button.isConnected) return;
-				if (result.ok) {
-					syncWatchButton(button);
-				} else {
-					flashButton(button, errorLabel(result.category));
+				if (state === 'idle') {
+					setButtonState(button, 'busy', 'Adding...');
+					const result = await addToPlaylist(videoId, watchTitle());
+					if (!button.isConnected) return;
+					if (result.ok) {
+						syncWatchButton(button);
+					} else {
+						flashButton(button, errorLabel(result.category));
+					}
+				} else if (state === 'recommended') {
+					// Un-recommend (ADR-0007): the author-only point delete that
+					// removes this Recommendation for EVERYONE (and emits no event).
+					setButtonState(button, 'busy', 'Removing...');
+					const clientId = await YTB.ensureClientId();
+					if (!YTB.isContextActive()) return;
+					const result = await YTB.deletePlaylistItem({ clientId, videoId });
+					if (!button.isConnected) return;
+					if (result.ok) {
+						recommenderByVideoId.delete(videoId);
+						syncWatchButton(button);
+					} else {
+						flashButton(button, "Couldn't remove");
+					}
 				}
 			});
 		}
@@ -95,15 +121,30 @@
 		if (!feedbackTimer) syncWatchButton(button);
 	}
 
+	const STATE_LABELS = {
+		idle: '+ Buddy Room',
+		busy: 'Adding...',
+		added: 'In Buddy Room', // a Buddy's Recommendation — nothing to toggle
+		recommended: 'Recommended', // mine — click to un-recommend
+	};
+
 	function setButtonState(button, state, label) {
 		button.dataset.ytbState = state;
-		button.textContent = label || (state === 'busy' ? 'Adding...' : state === 'added' ? 'In Buddy Room' : '+ Buddy Room');
+		button.textContent = label || STATE_LABELS[state] || STATE_LABELS.idle;
 		button.disabled = state === 'busy';
 		button.classList.toggle('is-added', state === 'added');
+		button.classList.toggle('is-recommended', state === 'recommended');
+		button.title = state === 'recommended' ? 'You recommended this to your Buddies. Click to remove it for everyone.' : '';
+	}
+
+	function pillState() {
+		const addedBy = recommenderByVideoId.get(currentVideoId);
+		if (addedBy === undefined) return 'idle';
+		return myClientId && addedBy === myClientId ? 'recommended' : 'added';
 	}
 
 	function syncWatchButton(button) {
-		setButtonState(button, playlistVideoIds.has(currentVideoId) ? 'added' : 'idle');
+		setButtonState(button, pillState());
 	}
 
 	function flashButton(button, label) {
@@ -233,7 +274,8 @@
 		if (!YTB.isContextActive()) return;
 		const detail = (event && event.detail) || {};
 		hasRoomCode = Boolean(detail.roomCode);
-		playlistVideoIds = new Set((detail.playlist || []).map((item) => item.videoId));
+		myClientId = detail.myClientId || myClientId;
+		recommenderByVideoId = new Map((detail.playlist || []).map((item) => [item.videoId, item.addedBy]));
 		const button = document.getElementById(BUTTON_ID);
 		if (button && !feedbackTimer) syncWatchButton(button);
 		if (!hasRoomCode) document.getElementById(BUTTON_ID)?.remove();
@@ -269,6 +311,8 @@
       #${BUTTON_ID}:active { transform: scale(0.97); }
       #${BUTTON_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(246, 169, 107, 0.55); }
       #${BUTTON_ID}.is-added { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; cursor: default; line-height: 34px; }
+      #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; line-height: 34px; }
+      #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
       #${BUTTON_ID}:disabled { opacity: 0.7; cursor: default; }
       .${KEBAB_ITEM_CLASS} {
         display: flex;
