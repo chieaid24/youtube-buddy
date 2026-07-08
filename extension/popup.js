@@ -78,6 +78,8 @@ let settingsReturn = 'chooser';
 
 // Last-rendered roster, so a Buddy Color change can redraw without a re-GET.
 let currentRosterBuddies = [];
+// Full Room roster (incl. me) from the last read, for Room-unique Buddy labels.
+let currentRoster = [];
 let selectedBuddyId = '';
 let activeRoomCode = '';
 
@@ -462,8 +464,10 @@ async function clearCodeAndChoose() {
 // tooltips. Room-full lockout is irrelevant here -- I am already a member.
 async function buddyNames(code) {
 	if (!code) return [];
-	const { buddies } = YTB.roomView(await YTB.getRecords(code), myClientId);
-	return buddies.map((b) => YTB.buddyName(b.clientId, b.name));
+	const records = await YTB.getRecords(code);
+	const roster = YTB.roomRoster(records);
+	const { buddies } = YTB.roomView(records, myClientId);
+	return buddies.map((b) => YTB.buddyName(b.clientId, b.name, roster));
 }
 
 function showConfirm() {
@@ -630,6 +634,7 @@ async function refreshStatus(code) {
 	currentSharing = sharing;
 	const records = await YTB.getRecords(code);
 	const { buddies, locked } = YTB.roomView(records, myClientId);
+	currentRoster = YTB.roomRoster(records);
 	activeRoomCode = code;
 	await YTB.syncBuddyColors(
 		code,
@@ -650,7 +655,7 @@ async function refreshStatus(code) {
 	}
 
 	setStatus('inroom', 'Buddies', '', true);
-	renderRoster(buddies);
+	renderRoster(buddies, currentRoster);
 }
 
 async function refreshConnectedRoom() {
@@ -679,7 +684,7 @@ function setStatus(state, text, sub, memberStates = false) {
 // as the color legend. Newest-active Buddy first (roomView already sorts).
 // A row whose Client ID was not in the previous render springs in; rows that
 // were already there re-render in place with no motion (the 5s poll stays calm).
-function renderRoster(buddies) {
+function renderRoster(buddies, roster = buddies) {
 	const ids = buddies.map((b) => b.clientId);
 	const sameRoster = prevRosterIds !== null && ids.join('\n') === prevRosterIds.join('\n');
 	// Keep an open picker up across a no-change poll; anything else invalidates
@@ -698,7 +703,7 @@ function renderRoster(buddies) {
 		const swatch = document.createElement('button');
 		swatch.className = 'swatch';
 		swatch.type = 'button';
-		swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(b.clientId, b.name)}`);
+		swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(b.clientId, b.name, roster)}`);
 		const chip = document.createElement('span');
 		chip.className = 'chip';
 		chip.style.background = YTB.buddyColor(b.clientId);
@@ -717,7 +722,7 @@ function renderRoster(buddies) {
 
 		const name = document.createElement('span');
 		name.className = 'buddy-name';
-		name.textContent = YTB.buddyName(b.clientId, b.name);
+		name.textContent = YTB.buddyName(b.clientId, b.name, roster);
 
 		const seen = document.createElement('span');
 		seen.className = 'buddy-seen';
@@ -765,7 +770,7 @@ function openColorGrid(clientId, anchorEl, rowEl) {
 			if (await YTB.setBuddyColor(activeRoomCode, selectedBuddyId, color)) {
 				lastPickedBuddyId = selectedBuddyId;
 				closeColorGrid();
-				renderRoster(currentRosterBuddies);
+				renderRoster(currentRosterBuddies, currentRoster);
 			}
 		});
 		el.colorGrid.appendChild(button);

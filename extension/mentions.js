@@ -102,7 +102,7 @@
 
 		function pick(member) {
 			if (!token) return;
-			const label = YTB.buddyName(member.clientId, member.name);
+			const label = YTB.buddyName(member.clientId, member.name, roster);
 			const text = '@' + label;
 			const value = textarea.value;
 			textarea.value = value.slice(0, token.start) + text + ' ' + value.slice(token.end);
@@ -124,10 +124,11 @@
 				return;
 			}
 			// Mentionable members: every CURRENT Room member except the author.
-			const candidates = YTB.filterRoster(
-				roster.filter((member) => member.clientId !== myClientId),
-				token.query,
-			).slice(0, MAX_VISIBLE);
+			// Search + disambiguate over the FULL roster (so labels match the rest
+			// of the UI), then drop myself from the results and cap.
+			const candidates = YTB.filterRoster(roster, token.query)
+				.filter((member) => member.clientId !== myClientId)
+				.slice(0, MAX_VISIBLE);
 			if (candidates.length === 0) {
 				close();
 				return;
@@ -139,7 +140,7 @@
 				const element = document.createElement('div');
 				element.className = OPTION_CLASS;
 				element.setAttribute('role', 'option');
-				element.textContent = YTB.buddyName(member.clientId, member.name);
+				element.textContent = YTB.buddyName(member.clientId, member.name, roster);
 				element.style.borderLeftColor = YTB.buddyColor(member.clientId);
 				element.addEventListener('click', () => pick(member));
 				element.addEventListener('mouseenter', () => setActive(index));

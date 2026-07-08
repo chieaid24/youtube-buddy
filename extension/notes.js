@@ -64,6 +64,7 @@
 	let activeRoomCode = '';
 	let notesByVideoId = new Map(); // videoId -> Note[] (mine and Buddies')
 	let repliesByNoteId = new Map(); // noteId -> Reply[] oldest-first (Room reads + local appends)
+	let roster = []; // full Room roster (incl. me), for Room-unique Buddy labels
 	let currentVideoId = null;
 	let lastPlaybackTime = null; // previous timeupdate, for natural crossings
 	let burstCount = 0; // fans concurrent Reaction bursts apart
@@ -135,6 +136,7 @@
 		const detail = (event && event.detail) || {};
 		myClientId = detail.myClientId || myClientId;
 		activeRoomCode = detail.roomCode || '';
+		roster = YTB.roomRoster(detail);
 
 		// Reconcile by server id: a locally inserted Note and the next Room read
 		// can never duplicate because both index into these maps by id.
@@ -306,7 +308,7 @@
 			if (dot.dataset.ytbSig === signature) continue;
 			dot.dataset.ytbSig = signature;
 
-			const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
+			const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 			const at = YTB.formatTime(note.timestamp);
 			const isReaction = note.kind === 'emoji';
 			dot.classList.toggle(DOT_LOCKED_CLASS, locked);
@@ -513,7 +515,7 @@
 	}
 
 	function buildPanel(note, config) {
-		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
+		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const panel = document.createElement('section');
 		panel.id = PANEL_ID;
 		panel.setAttribute('role', 'dialog');
@@ -693,7 +695,7 @@
 			byline.className = 'ytb-panel-reply-byline';
 			const author = document.createElement('span');
 			author.className = 'ytb-panel-reply-author';
-			author.textContent = reply.clientId === myClientId ? 'You' : YTB.buddyName(reply.clientId, reply.name);
+			author.textContent = reply.clientId === myClientId ? 'You' : YTB.buddyName(reply.clientId, reply.name, roster);
 			if (reply.clientId !== myClientId) author.style.color = YTB.buddyColor(reply.clientId);
 			const when = document.createElement('span');
 			when.className = 'ytb-rel ytb-panel-reply-time';
@@ -1085,7 +1087,7 @@
 	function showNoteCard(note) {
 		const wrap = alertsContainer();
 		if (!wrap) return;
-		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
+		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const card = document.createElement('button');
 		card.type = 'button';
 		card.className = 'ytb-alert-card';
@@ -1116,7 +1118,7 @@
 	function showReactionBurst(note) {
 		const wrap = alertsContainer();
 		if (!wrap) return;
-		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name);
+		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const burst = document.createElement('div');
 		burst.className = 'ytb-alert-burst';
 		// Concurrent Reactions fan out horizontally instead of replacing.

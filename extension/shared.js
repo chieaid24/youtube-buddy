@@ -775,7 +775,7 @@ const YTB = {
 		};
 		const scored = [];
 		(roster || []).forEach((member, index) => {
-			const label = YTB.buddyName(member.clientId, member.name).toLowerCase();
+			const label = YTB.buddyName(member.clientId, member.name, roster).toLowerCase();
 			let rank;
 			if (!q || label.startsWith(q)) rank = 0;
 			else if (label.includes(q)) rank = 1;
@@ -798,7 +798,7 @@ const YTB = {
 	 */
 	mentionName(roster, clientId) {
 		const member = (roster || []).find((m) => m.clientId === clientId);
-		return YTB.buddyName(clientId, member && member.name);
+		return YTB.buddyName(clientId, member && member.name, roster);
 	},
 
 	/**
@@ -810,9 +810,10 @@ const YTB = {
 	 * @param {Array<object>} progress Room read progress records (all members).
 	 * @param {string} videoId
 	 * @param {string} myClientId
+	 * @param {Array<{clientId: string, name?: string}>} [roster] the Room roster; makes Buddy names Room-unique.
 	 * @returns {string} e.g. "You, Bob, and 1 other"
 	 */
-	watchedByLabel(progress, videoId, myClientId) {
+	watchedByLabel(progress, videoId, myClientId, roster) {
 		const latest = new Map(); // clientId -> latest record (for its name)
 		for (const r of progress || []) {
 			if (!r || !r.clientId || r.videoId !== videoId) continue;
@@ -825,7 +826,7 @@ const YTB = {
 			latest.delete(myClientId);
 		}
 		const buddies = [...latest.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-		for (const record of buddies.slice(0, 2)) parts.push(YTB.buddyName(record.clientId, record.name));
+		for (const record of buddies.slice(0, 2)) parts.push(YTB.buddyName(record.clientId, record.name, roster));
 		const rest = buddies.length - Math.min(buddies.length, 2);
 		if (rest > 0) parts.push(`and ${rest} other${rest === 1 ? '' : 's'}`);
 		if (parts.length === 0) return '';
@@ -1081,26 +1082,10 @@ const YTB = {
 		await YTB._storageSet({ buddyColors: all });
 	},
 
-	// Playful adjectives for unnamed Buddies (see buddyName). 16 entries spread
-	// unnamed Buddies across the small set ever on screen.
-	ADJECTIVES: [
-		'Silly',
-		'Scary',
-		'Sleepy',
-		'Sneaky',
-		'Grumpy',
-		'Goofy',
-		'Wild',
-		'Brave',
-		'Cheeky',
-		'Jolly',
-		'Mighty',
-		'Sloppy',
-		'Spooky',
-		'Zesty',
-		'Snazzy',
-		'Wobbly',
-	],
+	// Playful adjectives for unnamed Buddies (see buddyName). Spreads unnamed
+	// Buddies across the small set ever on screen; same-adjective collisions
+	// within a Room are broken by disambiguateNames, so this need not be huge.
+	ADJECTIVES: ['Silly', 'Sleepy', 'Sweaty', 'Big', 'Little', 'Buddy', 'Good-looking', 'Sloppy', 'Zesty', 'Stinky'],
 
 	/**
 	 * Stable 32-bit hash of a Client ID. The SAME id always hashes the same, so
@@ -1127,21 +1112,66 @@ const YTB = {
 	},
 
 	/**
-	 * Display label for a Buddy. Returns their trimmed Display Name when set, else
-	 * a stable "<Adjective> Buddy" derived from their Client ID — same adjective
-	 * on every surface and for every viewer (Display Name is optional, so unnamed
-	 * Buddies still get a friendly, consistent token). Applies to FOREIGN records
-	 * only; you never render yourself as a Buddy.
+	 * Base display label for a Buddy WITHOUT Room context: their trimmed Display
+	 * Name when set, else a stable "<Adjective> Buddy" derived from their Client
+	 * ID (same adjective on every surface and for every viewer). Two members can
+	 * collide on the same base — a shared adjective, or the same typed name — so
+	 * anything user-facing goes through buddyName with a roster to disambiguate.
 	 * @param {string} clientId
 	 * @param {string} [name]
 	 * @returns {string}
 	 */
-	buddyName(clientId, name) {
+	baseBuddyName(clientId, name) {
 		const trimmed = String(name ?? '').trim();
 		if (trimmed) return trimmed;
 		const adjs = YTB.ADJECTIVES;
 		const h = YTB.hashClientId(clientId);
 		return `${adjs[((h % adjs.length) + adjs.length) % adjs.length]} Buddy`;
+	},
+
+	/**
+	 * Map every Client ID in a Room roster to a label that is UNIQUE within the
+	 * Room. Base labels come from baseBuddyName; when two or more members share
+	 * one, they are ordered by Client ID (a viewer-independent total order) and
+	 * each successive duplicate gains one more "Very " prefix — so a colliding
+	 * pair reads "Silly Buddy" / "Very Silly Buddy", a triple adds "Very Very …".
+	 * Deterministic: the same roster yields the same label for a given Client ID
+	 * on every surface and for every viewer. Applies to real names too, so two
+	 * "Alex"es become "Alex" / "Very Alex".
+	 * @param {Array<{clientId: string, name?: string}>} roster
+	 * @returns {Map<string, string>} clientId -> unique display label
+	 */
+	disambiguateNames(roster) {
+		const groups = new Map(); // base label -> clientId[]
+		for (const m of roster || []) {
+			if (!m || !m.clientId) continue;
+			const base = YTB.baseBuddyName(m.clientId, m.name);
+			const ids = groups.get(base);
+			if (ids) ids.push(m.clientId);
+			else groups.set(base, [m.clientId]);
+		}
+		const labels = new Map();
+		for (const [base, ids] of groups) {
+			ids.sort();
+			ids.forEach((id, i) => labels.set(id, 'Very '.repeat(i) + base));
+		}
+		return labels;
+	},
+
+	/**
+	 * Display label for a Buddy. Without a roster, returns the base label (trimmed
+	 * Display Name or the stable "<Adjective> Buddy" fallback). WITH the Room
+	 * roster, returns the Room-unique label (see disambiguateNames) so no two
+	 * members ever read the same on screen. Applies to FOREIGN records only; you
+	 * never render yourself as a Buddy.
+	 * @param {string} clientId
+	 * @param {string} [name]
+	 * @param {Array<{clientId: string, name?: string}>} [roster] the Room roster; enables disambiguation.
+	 * @returns {string}
+	 */
+	buddyName(clientId, name, roster) {
+		if (roster) return YTB.disambiguateNames(roster).get(clientId) || YTB.baseBuddyName(clientId, name);
+		return YTB.baseBuddyName(clientId, name);
 	},
 
 	/**

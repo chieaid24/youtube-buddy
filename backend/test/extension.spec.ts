@@ -416,6 +416,58 @@ describe('room home section helpers', () => {
 		expect(window.YTB.filterRoster(roster, '').map((m) => m.clientId)).toEqual(['a', 'b', 'c', 'd']);
 	});
 
+	it('disambiguates duplicate labels within a Room by prefixing "Very "', () => {
+		// Same typed name: ordered by Client ID, the first stays bare and each
+		// later duplicate gains one more "Very ". Distinct names are untouched.
+		const roster = [
+			{ clientId: 'c', name: 'Sam' },
+			{ clientId: 'a', name: 'Sam' },
+			{ clientId: 'b', name: 'Sam' },
+			{ clientId: 'd', name: 'Solo' },
+		];
+		const labels = window.YTB.disambiguateNames(roster);
+		expect(labels.get('a')).toBe('Sam');
+		expect(labels.get('b')).toBe('Very Sam');
+		expect(labels.get('c')).toBe('Very Very Sam');
+		expect(labels.get('d')).toBe('Solo');
+		// buddyName routes through the same map when handed a roster; without one
+		// it returns the (possibly-colliding) base label.
+		expect(window.YTB.buddyName('c', 'Sam', roster)).toBe('Very Very Sam');
+		expect(window.YTB.buddyName('c', 'Sam')).toBe('Sam');
+	});
+
+	it('disambiguates unnamed Buddies that hash to the same adjective', () => {
+		// Two blank-named members whose Client IDs collide on the same adjective:
+		// exactly one keeps the bare "<Adjective> Buddy"; the other reads "Very ".
+		const adjs = window.YTB.ADJECTIVES;
+		const adjOf = (id: string) => adjs[((window.YTB.hashClientId(id) % adjs.length) + adjs.length) % adjs.length];
+		let a = '';
+		let b = '';
+		for (let i = 0; i < 5000 && !b; i++) {
+			const id = 'u' + i;
+			if (!a) a = id;
+			else if (adjOf(id) === adjOf(a)) b = id;
+		}
+		expect(b).not.toBe(''); // a collision exists within the search budget
+		const roster = [
+			{ clientId: a, name: '' },
+			{ clientId: b, name: '' },
+		];
+		const labels = [window.YTB.buddyName(a, '', roster), window.YTB.buddyName(b, '', roster)];
+		const base = `${adjOf(a)} Buddy`;
+		expect(labels.filter((l) => l === base)).toHaveLength(1);
+		expect(labels.filter((l) => l === 'Very ' + base)).toHaveLength(1);
+	});
+
+	it('fuzzy-search matches the disambiguated label, not the colliding base', () => {
+		const roster = [
+			{ clientId: 'a', name: 'Sam' },
+			{ clientId: 'b', name: 'Sam' },
+		];
+		// "b" reads "Very Sam"; a "very" query finds it and not the bare "a".
+		expect(window.YTB.filterRoster(roster, 'very').map((m) => m.clientId)).toEqual(['b']);
+	});
+
 	it('resolves a Mention to the current Display Name, falling back to the Buddy token', () => {
 		const roster = window.YTB.roomRoster(roomRead);
 		expect(window.YTB.mentionName(roster, 'bob22222')).toBe('Bobby');
@@ -526,7 +578,9 @@ describe('room home section helpers', () => {
 		expect(bobSystems.every((i) => i.event.actorClientId !== 'bob22222')).toBe(true);
 		// And the removed-type event surfaces for nobody.
 		for (const viewer of [me, 'bob22222', 'ana33333', 'cid44444']) {
-			const systems = window.YTB.buildFeed({ events }, viewer).flatMap((g) => g.items).filter((i) => i.type === 'system');
+			const systems = window.YTB.buildFeed({ events }, viewer)
+				.flatMap((g) => g.items)
+				.filter((i) => i.type === 'system');
 			expect(systems.some((i) => i.event.videoId === 'v7')).toBe(false);
 		}
 	});
@@ -801,11 +855,15 @@ declare global {
 			): Array<{ videoId: string; addedBy: string; addedAt: number }>;
 			dismissedVideoIds(code: string): Promise<string[]>;
 			dismissVideo(code: string, videoId: string): Promise<string[]>;
-			buddyName(clientId: string, name?: string): string;
+			ADJECTIVES: string[];
+			hashClientId(clientId: string): number;
+			baseBuddyName(clientId: string, name?: string): string;
+			buddyName(clientId: string, name?: string, roster?: Array<{ clientId: string; name?: string }>): string;
+			disambiguateNames(roster: Array<{ clientId: string; name?: string }>): Map<string, string>;
 			roomRoster(records: object): Array<{ clientId: string; name: string }>;
 			filterRoster(roster: Array<{ clientId: string; name: string }>, query: string): Array<{ clientId: string; name: string }>;
 			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
-			watchedByLabel(progress: object[], videoId: string, myClientId: string): string;
+			watchedByLabel(progress: object[], videoId: string, myClientId: string, roster?: Array<{ clientId: string; name?: string }>): string;
 			buildFeed(
 				records: object,
 				myClientId: string,

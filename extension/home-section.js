@@ -167,7 +167,7 @@
 			scroll.append(divider);
 			for (const item of group.items) {
 				if (item.type === 'system') scroll.append(buildSystemRow(item, roster));
-				else if (item.type === 'watch') scroll.append(buildWatchRow(item));
+				else if (item.type === 'watch') scroll.append(buildWatchRow(item, roster));
 				else scroll.append(buildFeedRow(item, roster));
 			}
 		}
@@ -197,7 +197,7 @@
 
 		const author = document.createElement('span');
 		author.className = 'ytb-hs-author';
-		author.textContent = YTB.buddyName(record.clientId, record.name);
+		author.textContent = YTB.buddyName(record.clientId, record.name, roster);
 		author.style.color = YTB.buddyColor(record.clientId);
 
 		const action = document.createElement('span');
@@ -237,11 +237,11 @@
 	// A Watch Notice, shown only to the recommender: a Buddy has a Progress
 	// Record for one of the viewer's Recommendations. Title comes from the live
 	// Recommendation (carried on the item); the watcher's name via buddyName.
-	function buildWatchRow(item) {
+	function buildWatchRow(item, roster) {
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item ytb-hs-system';
 		const text = document.createElement('span');
-		text.textContent = YTB.buddyName(item.clientId, item.name) + ' watched "' + (item.title || 'a video') + '"';
+		text.textContent = YTB.buddyName(item.clientId, item.name, roster) + ' watched "' + (item.title || 'a video') + '"';
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
@@ -263,6 +263,7 @@
 
 		// The viewer's personalized grid: Buddies' Recommendations only (own are
 		// hidden — you manage those from the watch page), minus local Dismissals.
+		const roster = YTB.roomRoster(detail);
 		const items = YTB.recommendedForYou(detail.playlist, myClientId, dismissedIds);
 		if (items.length === 0) {
 			const empty = document.createElement('p');
@@ -279,12 +280,12 @@
 
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-pl-row';
-		for (const item of items) row.append(buildRecommendationCard(item, detail));
+		for (const item of items) row.append(buildRecommendationCard(item, detail, roster));
 		column.append(row);
 		return column;
 	}
 
-	function buildRecommendationCard(item, detail) {
+	function buildRecommendationCard(item, detail, roster) {
 		const card = document.createElement('div');
 		card.className = 'ytb-hs-card';
 
@@ -325,7 +326,7 @@
 
 		const watched = document.createElement('div');
 		watched.className = 'ytb-hs-watched';
-		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId);
+		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId, roster);
 		watched.textContent = label ? 'Watched by ' + label : 'New to the Room';
 
 		card.append(link, dismiss, title, watched);

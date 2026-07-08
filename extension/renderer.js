@@ -44,6 +44,7 @@
 	// --- state ---
 	let myClientId = null; // memoized; my own records are filtered out
 	let buddyByVideoId = new Map(); // videoId -> Buddy ProgressRecord[] (latest per Buddy)
+	let roster = []; // full Room roster (incl. me), for Room-unique Buddy labels
 	let activeRoomCode = '';
 	let currentVideoId = null; // active /watch video, or null off a watch page
 	let refreshToken = 0; // guards against out-of-order async refreshes
@@ -81,6 +82,7 @@
 		if (!YTB.isContextActive()) return;
 		if (!code) {
 			buddyByVideoId = new Map();
+			roster = [];
 			activeRoomCode = '';
 			resetPresenceBaseline();
 			broadcastRoomData(null, false);
@@ -90,6 +92,7 @@
 		if (!YTB.isContextActive()) return;
 		activeRoomCode = code;
 		const records = await YTB.getRecords(code);
+		roster = YTB.roomRoster(records);
 		const view = YTB.roomView(records, myClientId);
 		await YTB.syncBuddyColors(
 			code,
@@ -172,7 +175,7 @@
 		for (const b of buddies) {
 			current.add(b.clientId);
 			if (baselineReady && !knownBuddyIds.has(b.clientId)) {
-				showToast(YTB.buddyName(b.clientId, b.name) + ' joined');
+				showToast(YTB.buddyName(b.clientId, b.name, roster) + ' joined');
 			}
 		}
 		knownBuddyIds = current;
@@ -236,7 +239,7 @@
 			}
 			marker.style.left = (fraction * 100).toFixed(3) + '%';
 			marker.style.background = YTB.buddyColor(cid);
-			const who = YTB.buddyName(record.clientId, record.name);
+			const who = YTB.buddyName(record.clientId, record.name, roster);
 			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' · @' + YTB.formatTime(record.timestamp);
 		}
 	}
@@ -314,7 +317,7 @@
 				seg.style.background = YTB.buddyColor(s.cid);
 				const tooltip = document.createElement('div');
 				tooltip.className = TOOLTIP_CLASS;
-				const who = YTB.buddyName(s.record.clientId, s.record.name);
+				const who = YTB.buddyName(s.record.clientId, s.record.name, roster);
 				tooltip.textContent = who + ' · @' + YTB.formatTime(s.record.timestamp);
 				seg.appendChild(tooltip);
 				container.appendChild(seg);
