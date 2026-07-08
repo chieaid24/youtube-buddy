@@ -103,7 +103,7 @@ const CORS = {
  */
 function stubRoomBackend(
 	context: BrowserContext,
-	read: { notes?: object[]; replies?: object[]; playlist?: object[]; progress?: object[] },
+	read: { notes?: object[]; replies?: object[]; playlist?: object[]; progress?: object[]; events?: object[] },
 	calls: string[] = [],
 ) {
 	return context.route('http://localhost:8787/**', (route) => {
@@ -122,7 +122,7 @@ function stubRoomBackend(
 					notes: read.notes ?? [],
 					replies: read.replies ?? [],
 					playlist: read.playlist ?? [],
-					events: [],
+					events: read.events ?? [],
 				}),
 			});
 		}
@@ -887,6 +887,77 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		// A Dismiss never touches the Room's Recommendation on the backend: no
 		// playlist write of any kind hit the wire.
 		expect(calls.filter((call) => call.startsWith('DELETE ') || call.includes('/playlist'))).toEqual([]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('recommend Feed lines: own "You recommended", recipient copy, title-only links, strikethrough on un-recommend', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		// A two-member Room read from the viewer's side: a Buddy's live
+		// Recommendation, the viewer's own live Recommendation, and a Buddy
+		// recommend whose videoId has since left the live list (un-recommended;
+		// removals emit NO event — ADR-0007). The Buddy also has a Progress
+		// Record for the viewer's pick, producing a Watch Notice.
+		await stubRoomBackend(context, {
+			progress: [{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-own', timestamp: 30, duration: 100, updatedAt: 4000 }],
+			playlist: [
+				{ videoId: 'vid-live', title: 'Buddy Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 1000 },
+				{ videoId: 'vid-own', title: 'My Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
+			],
+			events: [
+				{ id: 'e1', type: 'added', videoId: 'vid-live', title: 'Buddy Pick', actorClientId: 'buddy-1', at: 1000 },
+				{ id: 'e2', type: 'added', videoId: 'vid-own', title: 'My Pick', actorClientId: 'viewer-e2e', at: 2000 },
+				{ id: 'e3', type: 'added', videoId: 'vid-gone', title: 'Gone Pick', actorClientId: 'buddy-1', at: 3000 },
+			],
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		// The grid cards load real i.ytimg.com thumbnail URLs; the fixture
+		// videoIds would 404 there and fail the console-error gate.
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		// Three System Messages + one Watch Notice, all on the quiet system row.
+		const rows = page.locator('#ytb-home-section .ytb-hs-system');
+		await nudgeUntil(page, () => expect(rows).toHaveCount(4, { timeout: 700 }));
+
+		// Recipient copy drops "you"; ONLY the quoted title is a link.
+		const recipient = rows.filter({ hasText: 'Sam recommended "Buddy Pick"' });
+		await expect(recipient).toHaveCount(1);
+		await expect(page.locator('#ytb-home-section')).not.toContainText('recommended you');
+		await expect(recipient.locator('a')).toHaveCount(1);
+		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveText('"Buddy Pick"');
+		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-live');
+
+		// The recommender now sees their own line, title-linked the same way.
+		const own = rows.filter({ hasText: 'You recommended "My Pick" to the Room' });
+		await expect(own).toHaveCount(1);
+		await expect(own.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
+
+		// The un-recommended line renders struck through (its sentence span), the
+		// live one does not.
+		const decorationOf = (row: typeof recipient) =>
+			row.evaluate((el) => getComputedStyle(el.querySelector('span') as Element).textDecorationLine);
+		const struck = rows.filter({ hasText: 'Sam recommended "Gone Pick"' });
+		await expect(struck).toHaveCount(1);
+		expect(await decorationOf(struck)).toBe('line-through');
+		expect(await decorationOf(recipient)).not.toBe('line-through');
+
+		// The Watch Notice's quoted title links to the video too.
+		const watch = rows.filter({ hasText: 'Sam watched "My Pick"' });
+		await expect(watch).toHaveCount(1);
+		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

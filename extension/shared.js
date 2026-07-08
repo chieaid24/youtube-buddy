@@ -922,10 +922,13 @@ const YTB = {
 	 *   - Replies by Buddies to Notes the viewer authored;
 	 *   - Notes/Replies whose `mentions` include the viewer (a Reply that is
 	 *     both "to my Note" and "mentions me" appears exactly once);
-	 *   - recommend System Messages ("X recommended you \"Title\"") from Playlist
-	 *     `added` Events, shown ONLY to recipients — the recommender (event actor
-	 *     == viewer) never sees their own; non-`added` events are ignored so a
-	 *     stale un-recommend never surfaces;
+	 *   - recommend System Messages from Playlist `added` Events, shown to EVERY
+	 *     member (ADR-0007 amendment): recipients as "X recommended \"Title\"" and
+	 *     the recommender as their own "You recommended \"Title\" to the Room" —
+	 *     `own` marks which; non-`added` events are ignored so a stale
+	 *     un-recommend never surfaces. Each carries `removed`: true when the
+	 *     Event's videoId is no longer in the Room's live Recommendation list,
+	 *     so the renderer strikes the line through (un-recommends emit no event);
 	 *   - Watch Notices ("X watched \"Title\"") shown ONLY to the recommender:
 	 *     one per (Buddy, video) whenever a Buddy has a Progress Record for a
 	 *     video the viewer recommended (`addedBy` == viewer), timestamped by that
@@ -936,7 +939,7 @@ const YTB = {
 	 * shows recent activity (records age out server-side after 14 days).
 	 * @param {{notes?: Array, replies?: Array, events?: Array, playlist?: Array, progress?: Array}} records
 	 * @param {string} myClientId
-	 * @returns {Array<{dayKey: string, items: Array<{type: 'reply'|'mention'|'system'|'watch', at: number, note?: object, reply?: object, event?: object, videoId?: string, title?: string, clientId?: string, name?: string}>}>}
+	 * @returns {Array<{dayKey: string, items: Array<{type: 'reply'|'mention'|'system'|'watch', at: number, note?: object, reply?: object, event?: object, own?: boolean, removed?: boolean, videoId?: string, title?: string, clientId?: string, name?: string}>}>}
 	 */
 	buildFeed(records, myClientId) {
 		const notes = (records && records.notes) || [];
@@ -964,12 +967,27 @@ const YTB = {
 			if (!note || note.clientId === myClientId || !mentionsMe(note)) continue;
 			items.push({ type: 'mention', at: Number(note.createdAt) || 0, note });
 		}
-		// Recommend System Messages: recipients only (the recommender never sees
-		// their own), and only `added` events — un-recommends emit no event, so a
-		// non-`added` event is stale and must never render as a recommendation.
+		// Recommend System Messages: every member gets one per `added` event —
+		// the recommender their own (`own: true`, rendered "You recommended ...")
+		// and everyone else the recipient line (ADR-0007 amendment). Only `added`
+		// events count: un-recommends emit no event, so a non-`added` event is
+		// stale and must never render as a recommendation. Instead, removal is
+		// derived here: `removed` is true when the Event's videoId has dropped out
+		// of the Room's live Recommendation list, and the renderer strikes the
+		// line through. A re-recommend puts the videoId back, un-striking it.
+		const liveRecommendationIds = new Set();
+		for (const item of playlist) {
+			if (item && item.videoId) liveRecommendationIds.add(item.videoId);
+		}
 		for (const event of events) {
-			if (!event || event.type !== 'added' || event.actorClientId === myClientId) continue;
-			items.push({ type: 'system', at: Number(event.at) || 0, event });
+			if (!event || event.type !== 'added') continue;
+			items.push({
+				type: 'system',
+				at: Number(event.at) || 0,
+				event,
+				own: event.actorClientId === myClientId,
+				removed: !liveRecommendationIds.has(event.videoId),
+			});
 		}
 		// Watch Notices: for each video the viewer recommended, one notice per
 		// Buddy who has a Progress Record for it. Titles come from the live
