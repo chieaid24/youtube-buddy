@@ -71,3 +71,16 @@ We chose **(b)**, with a client-local dismiss layer.
   that Room for that install). Dismiss is keyed by videoId, so a later re-recommend does
   not resurface it. Both are noted as follow-ups.
 - The Room Feed no longer shows "removed from the playlist" System Messages.
+
+## Amendment (2026-07-08)
+
+Two Feed-rendering consequences are revised; storage and the "removals emit no event"
+decision are unchanged:
+
+- The recommender now DOES see their own recommend line in the Room Feed ("You
+  recommended \"Title\" to the Room"), sourced from the same `added` Event. The
+  Recommended-for-you grid still hides own items.
+- An un-recommend no longer leaves the recipient's Feed line looking live: the client
+  derives removal (the Event's videoId is absent from the Room's current Recommendation
+  list) and renders the existing System Message struck through. No `removed` event is
+  introduced.
