@@ -293,19 +293,27 @@ test('Room Home Toggle hides and restores the Room Home Section, persisting acro
 		// needs nudging for URL-change detection and injection retries.
 		const nudge = () => page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
 
-		// Default: toggle on (checked) inside the guide, section rendered.
+		// Default: toggle on (checked) inside the guide, section rendered. The
+		// row is a native-looking guide entry — icon + label, no switch cluster
+		// — whose buddies icon is the only ON/OFF signal: apricot while the
+		// section is shown.
 		const toggle = page.locator('#ytb-home-toggle');
+		const icon = toggle.locator('.ytb-ht-icon');
 		const section = page.locator('#ytb-home-section');
 		await expect(toggle).toBeVisible();
 		await expect(toggle).toHaveAttribute('aria-checked', 'true');
 		await expect(page.locator('ytd-guide-renderer #items #ytb-home-toggle')).toHaveCount(1);
+		await expect(toggle.locator('.ytb-ht-track')).toHaveCount(0);
+		await expect(icon).toHaveCSS('color', 'rgb(246, 169, 107)');
 		await expect(section).toHaveCount(1);
 
 		// Off: the section is removed completely, and mutation churn must not
-		// re-inject it; the toggle row itself stays available in the guide.
+		// re-inject it; the toggle row itself stays available in the guide,
+		// its icon back at the native guide color (light-theme fixture).
 		await toggle.click();
 		await expect(section).toHaveCount(0);
 		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(icon).toHaveCSS('color', 'rgb(15, 15, 15)');
 		await nudge();
 		await page.waitForTimeout(600);
 		await expect(section).toHaveCount(0);
@@ -764,7 +772,7 @@ test('a hovered Reaction preview is capped so its top clears the storyboard thum
 });
 
 // A watch page with the Like/Share/Save actions row, where playlist-add.js
-// injects the "+ Buddy Room" recommend pill.
+// injects the "Recommend to Buddies" pill.
 const watchActionsFixture = `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>YouTube watch fixture</title></head>
@@ -802,15 +810,15 @@ test('watch pill shows Recommended on an own Recommendation and un-recommends fo
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
 
-		// The pill lands as "+ Buddy Room" and flips to the "Recommended" toggle
-		// state once the Room read shows this viewer recommended the video.
+		// The pill lands as "Recommend to Buddies" and flips to the "Recommended"
+		// toggle state once the Room read shows this viewer recommended the video.
 		const pill = page.locator('#ytb-playlist-add-button');
 		await nudgeUntil(page, () => expect(pill).toHaveText('Recommended', { timeout: 700 }));
 
 		// Clicking un-recommends: one DELETE /playlist attributed to the viewer,
 		// after which the pill offers to recommend again.
 		await pill.click();
-		await expect(pill).toHaveText('+ Buddy Room');
+		await expect(pill).toHaveText('Recommend to Buddies');
 		const deletes = calls.filter((call) => call.startsWith('DELETE '));
 		expect(deletes).toHaveLength(1);
 		expect(deletes[0]).toContain('/playlist?code=roome2e&clientId=viewer-e2e&videoId=fixture-video');
@@ -950,7 +958,15 @@ test('a Room Feed reply row navigates to the Note, seeks, and opens its Expanded
 // yt-sheet-view-model > yt-list-view-model.
 const kebabFixture = `<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>YouTube kebab fixture</title></head>
+  <head>
+    <meta charset="utf-8"><title>YouTube kebab fixture</title>
+    <style>
+      /* Give the custom elements real boxes so menu sizing is measurable. */
+      tp-yt-iron-dropdown, ytd-menu-popup-renderer, tp-yt-paper-listbox,
+      yt-sheet-view-model, yt-contextual-sheet-layout, yt-list-view-model { display: block; }
+      ytd-menu-service-item-renderer, yt-list-item-view-model { display: block; height: 36px; }
+    </style>
+  </head>
   <body>
     <div id="guide">
       <ytd-guide-renderer>
@@ -993,13 +1009,16 @@ const kebabFixture = `<!doctype html>
         dropdown.innerHTML = '<div id="contentWrapper">' + html + '</div>';
         dropdown.dataset.opens = String(1 + Number(dropdown.dataset.opens || 0));
       }
+      // Like YouTube, each popup opens pre-sized to ITS OWN items (an inline
+      // max-height with nothing to spare), so an injected row overflows into a
+      // scrollbar unless the extension grows the menu to fit.
       window.openLockupMenu = () => openMenu(
-        '<yt-sheet-view-model><yt-contextual-sheet-layout>' +
+        '<yt-sheet-view-model><yt-contextual-sheet-layout style="overflow-y: auto; max-height: 36px">' +
         '<div class="ytContextualSheetLayoutContentContainer"><yt-list-view-model role="menu">' +
         '<yt-list-item-view-model role="menuitem"><span>Add to queue</span></yt-list-item-view-model>' +
         '</yt-list-view-model></div></yt-contextual-sheet-layout></yt-sheet-view-model>');
       window.openClassicMenu = () => openMenu(
-        '<ytd-menu-popup-renderer role="menu"><tp-yt-paper-listbox id="items" role="none">' +
+        '<ytd-menu-popup-renderer role="menu" style="overflow-y: auto; max-height: 36px"><tp-yt-paper-listbox id="items" role="none">' +
         '<ytd-menu-service-item-renderer role="menuitem"><span>Add to queue</span></ytd-menu-service-item-renderer>' +
         '</tp-yt-paper-listbox></ytd-menu-popup-renderer>');
       window.closeMenu = () => {
@@ -1017,7 +1036,7 @@ const kebabFixture = `<!doctype html>
 
 type KebabFixtureWindow = { openLockupMenu: () => void; closeMenu: () => void };
 
-test('Add to Buddy Room row appears in both kebab menu generations and recommends the right video', async () => {
+test('Recommend to Buddies row appears in both kebab menu generations and recommends the right video', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -1045,10 +1064,23 @@ test('Add to Buddy Room row appears in both kebab menu generations and recommend
 
 		const row = page.locator('.ytb-kebab-add');
 
+		// The row must be FULLY visible in its pre-sized menu with no scrolling
+		// (the extension grows the popup after injecting).
+		const rowFullyVisible = (containerSelector: string) =>
+			page.evaluate((selector) => {
+				const container = document.querySelector<HTMLElement>(selector);
+				const injected = container?.querySelector<HTMLElement>('.ytb-kebab-add');
+				if (!container || !injected) return false;
+				const c = container.getBoundingClientRect();
+				const r = injected.getBoundingClientRect();
+				return r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5 && container.scrollHeight <= container.clientHeight + 0.5;
+			}, containerSelector);
+
 		// Lockup generation: the row lands inside the sheet's list view model.
 		await page.locator('#lockup-kebab').click();
 		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
-		await expect(row).toContainText('Add to Buddy Room');
+		await expect(row).toContainText('Recommend to Buddies');
+		expect(await rowFullyVisible('yt-contextual-sheet-layout')).toBe(true);
 
 		// Re-opening the menu never stacks duplicates. The mimic (like YouTube)
 		// rebuilds the menu content on each open, destroying the previous row —
@@ -1061,7 +1093,7 @@ test('Add to Buddy Room row appears in both kebab menu generations and recommend
 
 		// Activating it recommends THAT tile's video, with the lockup title class.
 		await row.click();
-		await expect(row).toContainText('Added to Buddy Room');
+		await expect(row).toContainText('Recommended');
 		const lockupPosts = calls.filter((call) => call.startsWith('POST') && call.includes('/playlist'));
 		expect(lockupPosts).toHaveLength(1);
 		expect(lockupPosts[0]).toContain('"videoId":"vid-lockup"');
@@ -1071,11 +1103,13 @@ test('Add to Buddy Room row appears in both kebab menu generations and recommend
 		// dropdown and the next mutation sweeps the row.
 		await nudgeUntil(page, () => expect(row).toHaveCount(0, { timeout: 700 }));
 
-		// Classic generation: same row inside the paper listbox, right video.
+		// Classic generation: same row inside the paper listbox, right video,
+		// and the paper popup grows to fit it too.
 		await page.locator('#classic-kebab').click();
 		await nudgeUntil(page, () => expect(page.locator('tp-yt-paper-listbox .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		expect(await rowFullyVisible('ytd-menu-popup-renderer')).toBe(true);
 		await row.click();
-		await expect(row).toContainText('Added to Buddy Room');
+		await expect(row).toContainText('Recommended');
 		const posts = calls.filter((call) => call.startsWith('POST') && call.includes('/playlist'));
 		expect(posts).toHaveLength(2);
 		expect(posts[1]).toContain('"videoId":"vid-classic"');

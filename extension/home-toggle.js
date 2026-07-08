@@ -1,13 +1,16 @@
 // extension/home-toggle.js
 //
-// The Room Home Toggle: a very small on/off switch injected as a row into
-// YouTube's own left guide (sidebar) on the home route, controlling whether
-// the Room Home Section (home-section.js) renders at all. Off removes the
-// section completely; the toggle row itself stays in the guide so it can be
-// turned back on. The state persists per install in chrome.storage.local
-// (shared.js getHomeSectionHidden/setHomeSectionHidden) and only affects the
-// home surface — on-video markers, Notes, presence, and the watch-page
-// control are untouched.
+// The Room Home Toggle: an icon + "Buddy Room" row injected into YouTube's
+// own left guide (sidebar) on the home route, controlling whether the Room
+// Home Section (home-section.js) renders at all. There is no switch — the
+// row is styled to be pixel-indistinguishable from the native guide entries
+// (Home / Shorts / Subscriptions), and the buddies icon itself is the state
+// indicator: apricot while the section is shown, the native guide-icon color
+// while hidden. Off removes the section completely; the toggle row itself
+// stays in the guide so it can be turned back on. The state persists per
+// install in chrome.storage.local (shared.js getHomeSectionHidden/
+// setHomeSectionHidden) and only affects the home surface — on-video
+// markers, Notes, presence, and the watch-page control are untouched.
 //
 // Like the kebab injection in playlist-add.js, targeting YouTube's guide DOM
 // DELIBERATELY accepts markup fragility, contained to this one module: the
@@ -26,9 +29,12 @@
 	const ROW_ID = 'ytb-home-toggle';
 	const STYLE_ID = 'ytb-home-toggle-style';
 	const SVG_NS = 'http://www.w3.org/2000/svg';
-	// A two-person "buddies" glyph (Material "people"); tinted to YouTube's
-	// native guide-icon grey via currentColor so it matches Home / Shorts /
-	// Subscriptions in both themes.
+	// A two-person "buddies" glyph (Material "people"). While the section is
+	// hidden it inherits the row text color — which is exactly what native
+	// guide icons render at in today's markup (rgb(15,15,15) light /
+	// rgb(241,241,241) dark, measured on production YouTube) — so it matches
+	// Home / Shorts / Subscriptions; while shown it flips to the apricot
+	// accent, the row's only ON/OFF signal.
 	const PEOPLE_PATH =
 		'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z';
 
@@ -92,12 +98,7 @@
 		const label = document.createElement('span');
 		label.className = 'ytb-ht-label';
 		label.textContent = 'Buddy Room';
-		const track = document.createElement('span');
-		track.className = 'ytb-ht-track';
-		const knob = document.createElement('span');
-		knob.className = 'ytb-ht-knob';
-		track.append(knob);
-		row.append(iconWrap, label, track);
+		row.append(iconWrap, label);
 
 		row.addEventListener('click', async () => {
 			if (flipping || hidden === null) return;
@@ -113,7 +114,8 @@
 		slot.appendChild(row);
 	}
 
-	/** Reflect the current state: checked means the section is shown. */
+	/** Reflect the current state: checked means the section is shown, and the
+	 * is-on class tints the buddies icon apricot — the row's only signal. */
 	function syncRow(row) {
 		const shown = hidden === false;
 		row.setAttribute('aria-checked', String(shown));
@@ -156,7 +158,11 @@
 		return svg;
 	}
 
-	/** Inject the row stylesheet once (light + html[dark] themes). */
+	/** Inject the row stylesheet once (light + html[dark] themes). Every
+	 * metric below was measured off a production YouTube guide entry
+	 * (Home / Shorts / Subscriptions) so the row is pixel-indistinguishable
+	 * from its native siblings; the --yt-spec-* custom properties are gone
+	 * from today's markup, so the measured values are written out directly. */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
@@ -167,67 +173,46 @@
         box-sizing: border-box;
         display: flex;
         align-items: center;
-        align-self: flex-start;      /* content-width even if #items is a flex column */
-        width: fit-content;
-        max-width: 100%;
+        width: calc(100% - 12px);    /* native entries leave a 12px right inset in #items */
         height: 40px;                /* native guide-entry row height */
         margin: 0;                   /* flush with the sibling guide rows */
-        padding: 0 12px 0 16px;      /* left pad seats the icon in the guide's icon column */
+        padding: 0 12px;             /* seats the icon 12px in, exactly like native rows */
         border: 0;
         border-radius: 10px;         /* native guide hover radius */
         background: transparent;
-        color: var(--yt-spec-text-primary, #0f0f0f);
+        color: #0f0f0f;              /* native guide text color */
         font-family: 'Roboto', 'Arial', sans-serif;
-        font-size: 14px;             /* native guide typography */
-        font-weight: 400;
-        line-height: normal;
+        font-size: 14px;             /* native guide typography: 14px/20px, weight 500 */
+        font-weight: 500;
+        line-height: 20px;
         text-align: left;
         cursor: pointer;
         -webkit-font-smoothing: antialiased;
       }
-      html[dark] #${ROW_ID} { color: var(--yt-spec-text-primary, #f1f1f1); }
-      #${ROW_ID}:hover { background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.05)); }
-      html[dark] #${ROW_ID}:hover { background: var(--yt-spec-10-percent-layer, rgba(255, 255, 255, 0.1)); }
+      html[dark] #${ROW_ID} { color: #f1f1f1; }
+      #${ROW_ID}:hover { background: rgba(0, 0, 0, 0.05); }              /* native hover */
+      html[dark] #${ROW_ID}:hover { background: rgba(255, 255, 255, 0.1); }
       #${ROW_ID}:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytbht-accent); }
       #${ROW_ID} .ytb-ht-icon {
         flex: none;
         display: inline-flex;
         width: 24px; height: 24px;
         margin-right: 24px;          /* native icon-to-label gap: label aligns with siblings */
-        color: var(--yt-spec-icon-inactive, #606060);   /* native icon grey */
+        color: inherit;              /* OFF: the native guide-icon color (= text color) */
+        transition: color 140ms;
       }
-      html[dark] #${ROW_ID} .ytb-ht-icon { color: var(--yt-spec-icon-inactive, #aaaaaa); }
+      #${ROW_ID}.is-on .ytb-ht-icon { color: var(--ytbht-accent); }   /* ON: apricot */
       #${ROW_ID} .ytb-ht-icon svg { display: block; width: 24px; height: 24px; }
       #${ROW_ID} .ytb-ht-label {
         flex: 0 1 auto;
         min-width: 0;
-        margin-right: 10px;          /* switch clusters immediately after the label */
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         color: inherit;
       }
-      #${ROW_ID} .ytb-ht-track {
-        flex: none;
-        position: relative;
-        width: 22px; height: 12px;   /* smaller than the old 26x14 */
-        border-radius: 6px;
-        background: var(--yt-spec-icon-disabled, #909090);   /* native grey OFF */
-        transition: background 140ms;
-      }
-      #${ROW_ID}.is-on .ytb-ht-track { background: var(--ytbht-accent); }   /* apricot ON */
-      #${ROW_ID} .ytb-ht-knob {
-        position: absolute;
-        top: 2px; left: 2px;
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: #fff;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      #${ROW_ID}.is-on .ytb-ht-knob { transform: translateX(10px); }   /* 22 - 8 - 2*2 */
       @media (prefers-reduced-motion: reduce) {
-        #${ROW_ID} .ytb-ht-track, #${ROW_ID} .ytb-ht-knob { transition: none; }
+        #${ROW_ID} .ytb-ht-icon { transition: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
