@@ -15,7 +15,8 @@
 //
 // Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
 // by theme.js (the shared on-video apricot foundation); theme.js also isolates
-// keystrokes in the Note textarea from YouTube's player hotkeys.
+// keystrokes in the Note textarea and the Spoiler checkbox from YouTube's
+// player hotkeys.
 
 (function () {
 	'use strict';
@@ -372,6 +373,24 @@
 			}
 			// Enter posts; Shift+Enter inserts a newline.
 			if (key.key === 'Enter' && !key.shiftKey) {
+				key.preventDefault();
+				submit({ kind: 'text', body: textarea.value.trim() });
+			}
+		});
+		// The guard covers the Spoiler checkbox too (Tab or any mouse click leaves
+		// it focused, where YouTube's Enter hotkey used to activate — re-toggle —
+		// it instead of posting). Enter posts through the same path as textarea
+		// Enter; Escape must close here explicitly because guarded keys never
+		// reach the document-level Escape listener. Space is deliberately
+		// unhandled: the native toggle is the checkbox's default action, which
+		// the guard preserves.
+		spoiler.addEventListener('ytb:keydown', (event) => {
+			const key = event.detail.original;
+			if (key.key === 'Escape') {
+				closeComposer();
+				return;
+			}
+			if (key.key === 'Enter') {
 				key.preventDefault();
 				submit({ kind: 'text', body: textarea.value.trim() });
 			}
