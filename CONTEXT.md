@@ -143,3 +143,27 @@ _Avoid_: watched alert, view notification
 **Playlist Event**:
 The backend event-log record behind System Messages: one row per recommend (`{ type: 'added', videoId, title, actorClientId, at }`), aged out on the shared 14-day TTL and capped to the newest ~50, returned alongside the Room read. It carries the video `title` so the Feed line resolves even after the video is un-recommended. Un-recommends emit no Event. Distinct from a Recommendation (the current membership of the list) — an Event is the immutable history of a recommend.
 _Avoid_: log entry, activity record
+
+**Settings**:
+The in-popup preferences view, opened from a gear control in the popup header and dismissed with a Back affordance. It holds all per-install customization (Theme Preference, Spoiler Default, Notification Position, Notes Visibility, Buddy Progress Visibility, and the Room Home Section's visibility) plus the relocated **Stop sharing** and **Leave room** actions. It is a distinct popup view from the Room Code views (chooser / join / connected), reusing the same mutually-exclusive view switching.
+_Avoid_: options, preferences page, config panel
+
+**Theme Preference**:
+The viewer's chosen color theme — **Light**, **Dark**, or **System** (the default) — stored per install. It drives BOTH the action popup AND every on-video Note surface, overriding each surface's `prefers-color-scheme` default via an explicit theme marker on the document root (see ADR-0008). System removes the marker and restores OS-follow. A single preference, so the two surfaces never disagree.
+_Avoid_: dark mode toggle, skin, appearance
+
+**Spoiler Default**:
+The per-install default state of the Add Note composer's Spoiler checkbox — on by default. It only seeds each opening's checkbox; the author can still flip it per Note, and Reactions are never Spoilers regardless.
+_Avoid_: auto spoiler, spoiler mode
+
+**Notification Position**:
+The player zone where Playback Notifications appear, chosen from eight edge and corner zones (a 3x3 grid minus the dead-center cell) through a visual picker in Settings; the default is bottom-center. It affects only Playback Notifications — the Note Preview, Expanded Note, and Add Note composer stay anchored to their own dot or button.
+_Avoid_: popup location, toast position, alert corner
+
+**Notes Visibility** (aka "Notes off"):
+A per-install switch that hides the ENTIRE on-video Note layer at once — every Video Timeline dot, Note Preview, Expanded Note, Playback Notification, AND the Add Note (+) button — leaving the player with zero YTB Note UI. Default is on (Notes shown). Independent of Sharing and of Buddy Progress Visibility.
+_Avoid_: mute notes, hide comments, disable notes
+
+**Buddy Progress Visibility**:
+A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the position markers on the Video Timeline and the fractional bars on feed/home thumbnails. Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the popup roster or presence.
+_Avoid_: hide markers (alone), hide buddies, hide bars
