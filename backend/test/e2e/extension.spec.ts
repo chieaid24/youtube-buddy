@@ -98,7 +98,8 @@ const CORS = {
 /**
  * Stand in for the backend Worker: every GET returns the one fixed Room read
  * built from `read`; writes are acknowledged with `{ ok: true }`. Records each
- * request as "METHOD url" into `calls` so tests can assert what hit the wire.
+ * request as "METHOD url body" into `calls` so tests can assert what hit the
+ * wire (the body part is omitted for body-less requests).
  */
 function stubRoomBackend(
 	context: BrowserContext,
@@ -107,7 +108,8 @@ function stubRoomBackend(
 ) {
 	return context.route('http://localhost:8787/**', (route) => {
 		const request = route.request();
-		calls.push(`${request.method()} ${request.url()}`);
+		const body = request.postData();
+		calls.push(`${request.method()} ${request.url()}${body ? ` ${body}` : ''}`);
 		if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
 		if (request.method() === 'GET') {
 			return route.fulfill({
@@ -633,6 +635,172 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		// A Dismiss never touches the Room's Recommendation on the backend: no
 		// playlist write of any kind hit the wire.
 		expect(calls.filter((call) => call.startsWith('DELETE ') || call.includes('/playlist'))).toEqual([]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// A home page carrying both live tile generations and a mimic of YouTube's
+// shared popup plumbing, mirroring real markup (verified against production
+// YouTube): every kebab click re-renders the ONE reused tp-yt-iron-dropdown in
+// ytd-popup-container with that generation's menu shape — classic tiles get
+// ytd-menu-popup-renderer > tp-yt-paper-listbox, lockup tiles get
+// yt-sheet-view-model > yt-list-view-model.
+const kebabFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube kebab fixture</title></head>
+  <body>
+    <div id="guide">
+      <ytd-guide-renderer>
+        <div id="sections">
+          <ytd-guide-section-renderer><div id="items"></div></ytd-guide-section-renderer>
+        </div>
+      </ytd-guide-renderer>
+    </div>
+    <ytd-browse page-subtype="home">
+      <div id="grid-container">
+        <ytd-rich-grid-renderer>
+          <ytd-rich-item-renderer>
+            <yt-lockup-view-model>
+              <a href="/watch?v=vid-lockup"><img alt=""></a>
+              <h3><a class="ytLockupMetadataViewModelTitle" href="/watch?v=vid-lockup">Lockup Video Title</a></h3>
+              <button id="lockup-hover" aria-label="Watch later"></button>
+              <button id="lockup-kebab" aria-label="More actions"></button>
+            </yt-lockup-view-model>
+          </ytd-rich-item-renderer>
+          <ytd-video-renderer>
+            <a id="video-title" title="Classic Video Title" href="/watch?v=vid-classic">Classic Video Title</a>
+            <ytd-menu-renderer>
+              <yt-icon-button><button id="classic-kebab" aria-label="Action menu"></button></yt-icon-button>
+            </ytd-menu-renderer>
+          </ytd-video-renderer>
+        </ytd-rich-grid-renderer>
+      </div>
+    </ytd-browse>
+    <ytd-popup-container></ytd-popup-container>
+    <script>
+      const container = document.querySelector('ytd-popup-container');
+      function openMenu(html) {
+        let dropdown = container.querySelector('tp-yt-iron-dropdown');
+        if (!dropdown) {
+          dropdown = document.createElement('tp-yt-iron-dropdown');
+          container.appendChild(dropdown);
+        }
+        dropdown.removeAttribute('aria-hidden');
+        dropdown.style.display = 'block';
+        dropdown.innerHTML = '<div id="contentWrapper">' + html + '</div>';
+        dropdown.dataset.opens = String(1 + Number(dropdown.dataset.opens || 0));
+      }
+      window.openLockupMenu = () => openMenu(
+        '<yt-sheet-view-model><yt-contextual-sheet-layout>' +
+        '<div class="ytContextualSheetLayoutContentContainer"><yt-list-view-model role="menu">' +
+        '<yt-list-item-view-model role="menuitem"><span>Add to queue</span></yt-list-item-view-model>' +
+        '</yt-list-view-model></div></yt-contextual-sheet-layout></yt-sheet-view-model>');
+      window.openClassicMenu = () => openMenu(
+        '<ytd-menu-popup-renderer role="menu"><tp-yt-paper-listbox id="items" role="none">' +
+        '<ytd-menu-service-item-renderer role="menuitem"><span>Add to queue</span></ytd-menu-service-item-renderer>' +
+        '</tp-yt-paper-listbox></ytd-menu-popup-renderer>');
+      window.closeMenu = () => {
+        const dropdown = container.querySelector('tp-yt-iron-dropdown');
+        if (dropdown) {
+          dropdown.setAttribute('aria-hidden', 'true');
+          dropdown.style.display = 'none';
+        }
+      };
+      document.getElementById('lockup-kebab').addEventListener('click', () => setTimeout(window.openLockupMenu, 60));
+      document.getElementById('classic-kebab').addEventListener('click', () => setTimeout(window.openClassicMenu, 60));
+    </script>
+  </body>
+</html>`;
+
+type KebabFixtureWindow = { openLockupMenu: () => void; closeMenu: () => void };
+
+test('Add to Buddy Room row appears in both kebab menu generations and recommends the right video', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(
+			context,
+			{ playlist: [{ videoId: 'vid-room', title: 'Room Pick', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 1000 }] },
+			calls,
+		);
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: kebabFixture }),
+		);
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		// The paired Room renders the home section first — proof the Room config
+		// and Room read both landed before any kebab interaction.
+		const section = page.locator('#ytb-home-section');
+		await nudgeUntil(page, () => expect(section.locator('.ytb-hs-card')).toHaveCount(1, { timeout: 700 }));
+
+		const row = page.locator('.ytb-kebab-add');
+
+		// Lockup generation: the row lands inside the sheet's list view model.
+		await page.locator('#lockup-kebab').click();
+		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await expect(row).toContainText('Add to Buddy Room');
+
+		// Re-opening the menu never stacks duplicates. The mimic (like YouTube)
+		// rebuilds the menu content on each open, destroying the previous row —
+		// wait for that second render before touching the fresh row, or the click
+		// below would race the rebuild and land on the doomed first instance.
+		await page.locator('#lockup-kebab').click();
+		await page.waitForFunction(() => document.querySelector<HTMLElement>('tp-yt-iron-dropdown')?.dataset.opens === '2');
+		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await expect(row).toHaveCount(1);
+
+		// Activating it recommends THAT tile's video, with the lockup title class.
+		await row.click();
+		await expect(row).toContainText('Added to Buddy Room');
+		const lockupPosts = calls.filter((call) => call.startsWith('POST') && call.includes('/playlist'));
+		expect(lockupPosts).toHaveLength(1);
+		expect(lockupPosts[0]).toContain('"videoId":"vid-lockup"');
+		expect(lockupPosts[0]).toContain('"title":"Lockup Video Title"');
+
+		// The row never outlives its menu: the confirmation beat closes the
+		// dropdown and the next mutation sweeps the row.
+		await nudgeUntil(page, () => expect(row).toHaveCount(0, { timeout: 700 }));
+
+		// Classic generation: same row inside the paper listbox, right video.
+		await page.locator('#classic-kebab').click();
+		await nudgeUntil(page, () => expect(page.locator('tp-yt-paper-listbox .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await row.click();
+		await expect(row).toContainText('Added to Buddy Room');
+		const posts = calls.filter((call) => call.startsWith('POST') && call.includes('/playlist'));
+		expect(posts).toHaveLength(2);
+		expect(posts[1]).toContain('"videoId":"vid-classic"');
+		expect(posts[1]).toContain('"title":"Classic Video Title"');
+		await nudgeUntil(page, () => expect(row).toHaveCount(0, { timeout: 700 }));
+
+		// A click inside the Room Home Section's own cards never arms the
+		// capture: a menu opening right after stays row-free.
+		await section.locator('.ytb-hs-remove').first().click();
+		await page.evaluate(() => (window as unknown as KebabFixtureWindow).openLockupMenu());
+		await page.waitForTimeout(900);
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await page.waitForTimeout(600);
+		await expect(row).toHaveCount(0);
+		await page.evaluate(() => (window as unknown as KebabFixtureWindow).closeMenu());
+
+		// A stale capture (tile button clicked, but no menu opened) expires: a
+		// menu opening after the 3s window stays row-free.
+		await page.locator('#lockup-hover').click();
+		await page.waitForTimeout(3200);
+		await page.evaluate(() => (window as unknown as KebabFixtureWindow).openLockupMenu());
+		await page.waitForTimeout(900);
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await page.waitForTimeout(600);
+		await expect(row).toHaveCount(0);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

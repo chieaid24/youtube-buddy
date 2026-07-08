@@ -163,7 +163,17 @@
 	// ytd-menu-renderer (the kebab) and remembers that tile's videoId + title;
 	// the menu popup itself is rendered later into a top-level
 	// tp-yt-iron-dropdown, so the next ytb:mutation injects our row into the
-	// open listbox and consumes the pending capture.
+	// open menu list and consumes the pending capture.
+	//
+	// Two live menu generations (verified against real YouTube markup):
+	//   - classic tiles (ytd-video-renderer & co):
+	//       tp-yt-iron-dropdown > ytd-menu-popup-renderer > tp-yt-paper-listbox
+	//   - lockup tiles (yt-lockup-view-model — today's home grid + watch-related):
+	//       tp-yt-iron-dropdown > yt-sheet-view-model > yt-contextual-sheet-layout
+	//         > yt-list-view-model[role="menu"]
+	// YouTube reuses ONE dropdown node for successive popups, so an injected row
+	// must never outlive its menu: rows in a closed dropdown are removed, and a
+	// fresh capture replaces any row left from a previous tile.
 	// ---------------------------------------------------------------------------
 
 	const TILE_SELECTOR = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model';
@@ -192,27 +202,55 @@
 			const anchor = tile.querySelector('a[href*="/watch?v="]');
 			const videoId = anchor && videoIdFromHref(anchor.getAttribute('href'));
 			if (!videoId) return;
-			const titleEl = tile.querySelector('#video-title, .yt-lockup-metadata-view-model-wiz__title, a[title]');
+			// Lockup tiles carry the clean title on .ytLockupMetadataViewModelTitle
+			// (the older -wiz__ spelling is kept for stragglers); classic tiles on
+			// #video-title. Any other a[title] is a last-resort fallback only.
+			const titleEl =
+				tile.querySelector('#video-title, .ytLockupMetadataViewModelTitle, .yt-lockup-metadata-view-model-wiz__title') ||
+				tile.querySelector('a[title]');
 			const title = (titleEl && (titleEl.getAttribute('title') || titleEl.textContent)) || '';
 			pendingKebab = { videoId, title: title.trim() || 'Untitled video', at: Date.now() };
 		},
 		true,
 	);
 
-	function injectKebabItem() {
+	/** The list element of the currently open tile menu, across both menu
+	 * generations, or null while no menu is open. */
+	function openMenuList() {
+		for (const dropdown of document.querySelectorAll('tp-yt-iron-dropdown:not([aria-hidden="true"])')) {
+			if (dropdown.style.display === 'none') continue; // closed but not yet re-hidden
+			// Classic tiles: the paper listbox inside the menu popup renderer.
+			const popup = dropdown.querySelector('ytd-menu-popup-renderer');
+			if (popup) return popup.querySelector('tp-yt-paper-listbox') || popup;
+			// Lockup tiles: the sheet's list view model.
+			const sheet = dropdown.querySelector('yt-sheet-view-model');
+			if (sheet) return sheet.querySelector('yt-list-view-model') || sheet;
+		}
+		return null;
+	}
+
+	function syncKebabMenu() {
+		// A row must never outlive its menu: YouTube reuses one dropdown node for
+		// every popup, so a survivor would resurface under the wrong menu (another
+		// tile's, or an unrelated popup's) and recommend the wrong video.
+		for (const row of document.querySelectorAll('.' + KEBAB_ITEM_CLASS)) {
+			const host = row.closest('tp-yt-iron-dropdown');
+			if (!host || host.getAttribute('aria-hidden') === 'true' || host.style.display === 'none') row.remove();
+		}
+
 		if (!pendingKebab || !hasRoomCode) return;
 		// A stale capture (no menu ever opened) expires quietly.
 		if (Date.now() - pendingKebab.at > 3000) {
 			pendingKebab = null;
 			return;
 		}
-		const dropdown = document.querySelector('tp-yt-iron-dropdown:not([aria-hidden="true"]) ytd-menu-popup-renderer');
-		if (!dropdown) return; // menu not open (yet) — keep the capture until it expires
-		const listbox = dropdown.querySelector('tp-yt-paper-listbox') || dropdown;
-		if (listbox.querySelector('.' + KEBAB_ITEM_CLASS)) return;
+		const listbox = openMenuList();
+		if (!listbox) return; // menu not open (yet) — keep the capture until it expires
 
 		const { videoId, title } = pendingKebab;
 		pendingKebab = null;
+		// A fresh capture wins over any row left from a previously shown menu.
+		listbox.querySelector('.' + KEBAB_ITEM_CLASS)?.remove();
 
 		const item = document.createElement('div');
 		item.className = KEBAB_ITEM_CLASS;
@@ -267,7 +305,7 @@
 	document.addEventListener('ytb:mutation', () => {
 		if (!YTB.isContextActive()) return;
 		ensureWatchButton();
-		injectKebabItem();
+		syncKebabMenu();
 	});
 
 	document.addEventListener('ytb:room-data', (event) => {
