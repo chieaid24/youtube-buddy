@@ -872,22 +872,32 @@ const YTB = {
 	},
 
 	/**
-	 * Derive the viewer's personalized Room Feed from one Room read:
+	 * Derive the viewer's personalized Room Feed from one Room read (ADR-0007):
 	 *   - Replies by Buddies to Notes the viewer authored;
 	 *   - Notes/Replies whose `mentions` include the viewer (a Reply that is
 	 *     both "to my Note" and "mentions me" appears exactly once);
-	 *   - Playlist Events as System Messages.
+	 *   - recommend System Messages ("X recommended you \"Title\"") from Playlist
+	 *     `added` Events, shown ONLY to recipients — the recommender (event actor
+	 *     == viewer) never sees their own; non-`added` events are ignored so a
+	 *     stale un-recommend never surfaces;
+	 *   - Watch Notices ("X watched \"Title\"") shown ONLY to the recommender:
+	 *     one per (Buddy, video) whenever a Buddy has a Progress Record for a
+	 *     video the viewer recommended (`addedBy` == viewer), timestamped by that
+	 *     record's `updatedAt`. Best-effort — cannot tell watched-before from
+	 *     watched-after, and may reorder relative to the true watch instant.
 	 * Items are sorted oldest -> newest (chat order) and grouped under day
 	 * dividers. There is deliberately NO read/unread state — the Feed just
 	 * shows recent activity (records age out server-side after 14 days).
-	 * @param {{notes?: Array, replies?: Array, events?: Array}} records
+	 * @param {{notes?: Array, replies?: Array, events?: Array, playlist?: Array, progress?: Array}} records
 	 * @param {string} myClientId
-	 * @returns {Array<{dayKey: string, items: Array<{type: 'reply'|'mention'|'system', at: number, note?: object, reply?: object, event?: object}>}>}
+	 * @returns {Array<{dayKey: string, items: Array<{type: 'reply'|'mention'|'system'|'watch', at: number, note?: object, reply?: object, event?: object, videoId?: string, title?: string, clientId?: string, name?: string}>}>}
 	 */
 	buildFeed(records, myClientId) {
 		const notes = (records && records.notes) || [];
 		const replies = (records && records.replies) || [];
 		const events = (records && records.events) || [];
+		const playlist = (records && records.playlist) || [];
+		const progress = (records && records.progress) || [];
 		const noteById = new Map(notes.map((note) => [note.id, note]));
 		const mentionsMe = (record) => Array.isArray(record.mentions) && record.mentions.includes(myClientId);
 
@@ -908,9 +918,31 @@ const YTB = {
 			if (!note || note.clientId === myClientId || !mentionsMe(note)) continue;
 			items.push({ type: 'mention', at: Number(note.createdAt) || 0, note });
 		}
+		// Recommend System Messages: recipients only (the recommender never sees
+		// their own), and only `added` events — un-recommends emit no event, so a
+		// non-`added` event is stale and must never render as a recommendation.
 		for (const event of events) {
-			if (!event) continue;
+			if (!event || event.type !== 'added' || event.actorClientId === myClientId) continue;
 			items.push({ type: 'system', at: Number(event.at) || 0, event });
+		}
+		// Watch Notices: for each video the viewer recommended, one notice per
+		// Buddy who has a Progress Record for it. Titles come from the live
+		// Recommendation (the Playlist Item), never the Progress Record.
+		const myRecTitles = new Map();
+		for (const item of playlist) {
+			if (item && item.videoId && item.addedBy === myClientId) myRecTitles.set(item.videoId, item.title);
+		}
+		for (const record of progress) {
+			if (!record || !record.clientId || record.clientId === myClientId) continue; // Buddies only
+			if (!myRecTitles.has(record.videoId)) continue;
+			items.push({
+				type: 'watch',
+				at: Number(record.updatedAt) || 0,
+				videoId: record.videoId,
+				title: myRecTitles.get(record.videoId),
+				clientId: record.clientId,
+				name: record.name,
+			});
 		}
 		items.sort((a, b) => a.at - b.at);
 

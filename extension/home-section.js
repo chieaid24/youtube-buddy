@@ -3,8 +3,10 @@
 // The Room Home Section (ADR-0005): a compact two-column panel injected at the
 // top of the YouTube HOME page, above the recommendations grid (which shifts
 // down). Left: the Room Feed — a chronological, chat-like feed of Replies to
-// the viewer's Notes, @-mentions of the viewer, and deemphasized System
-// Messages, grouped under day dividers, newest at the bottom, auto-scrolled.
+// the viewer's Notes, @-mentions of the viewer, deemphasized recommend System
+// Messages ("X recommended you ...", recipients only), and Watch Notices ("X
+// watched ...", shown to the recommender when a Buddy watches their pick),
+// grouped under day dividers, newest at the bottom, auto-scrolled.
 // Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
 // `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
 // horizontal thumbnail row with a live "Watched by ..." attribution and a
@@ -148,7 +150,6 @@
 		column.append(scroll);
 
 		const roster = YTB.roomRoster(detail);
-		const titles = new Map((detail.playlist || []).map((item) => [item.videoId, item.title]));
 		const groups = YTB.buildFeed(detail, myClientId);
 
 		if (groups.length === 0) {
@@ -165,7 +166,9 @@
 			divider.textContent = YTB.dayLabel(group.dayKey);
 			scroll.append(divider);
 			for (const item of group.items) {
-				scroll.append(item.type === 'system' ? buildSystemRow(item, roster, titles) : buildFeedRow(item, roster));
+				if (item.type === 'system') scroll.append(buildSystemRow(item, roster));
+				else if (item.type === 'watch') scroll.append(buildWatchRow(item));
+				else scroll.append(buildFeedRow(item, roster));
 			}
 		}
 		return column;
@@ -197,17 +200,32 @@
 		return row;
 	}
 
-	function buildSystemRow(item, roster, titles) {
+	// A recommend System Message, shown only to recipients (buildFeed drops the
+	// recommender's own). The stored event title survives an un-recommend, so it
+	// stays correct even after the live Playlist Item is gone.
+	function buildSystemRow(item, roster) {
 		const event = item.event;
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item ytb-hs-system';
-		const actor = event.actorClientId === myClientId ? 'You' : YTB.mentionName(roster, event.actorClientId);
-		// A removed video's Playlist Item is gone, so its title may be unknown.
-		const title = titles.get(event.videoId) || 'a video';
-		const verb = event.type === 'removed' ? ' removed ' : ' added ';
-		const tail = event.type === 'removed' ? ' from the playlist' : ' to the playlist';
+		const actor = YTB.mentionName(roster, event.actorClientId);
+		const title = event.title || 'a video';
 		const text = document.createElement('span');
-		text.textContent = actor + verb + '"' + title + '"' + tail;
+		text.textContent = actor + ' recommended you "' + title + '"';
+		const when = document.createElement('time');
+		when.className = 'ytb-hs-when';
+		when.textContent = YTB.relativeTime(item.at);
+		row.append(text, when);
+		return row;
+	}
+
+	// A Watch Notice, shown only to the recommender: a Buddy has a Progress
+	// Record for one of the viewer's Recommendations. Title comes from the live
+	// Recommendation (carried on the item); the watcher's name via buddyName.
+	function buildWatchRow(item) {
+		const row = document.createElement('div');
+		row.className = 'ytb-hs-item ytb-hs-system';
+		const text = document.createElement('span');
+		text.textContent = YTB.buddyName(item.clientId, item.name) + ' watched "' + (item.title || 'a video') + '"';
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
