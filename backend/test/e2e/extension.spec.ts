@@ -519,6 +519,135 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 	}
 });
 
+test('clicking a locked-Spoiler hover preview performs Go here, exactly like its dot', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+
+		const lockedDot = page.locator('.ytb-note-dot-locked');
+		await nudgeUntil(page, () => expect(lockedDot).toHaveCount(1, { timeout: 700 }));
+		const preview = page.locator('.ytb-note-dot-locked .ytb-note-preview');
+
+		// Hovering the dot reveals its preview, which masks the body as "Spoiler"
+		// and (the fix) is now itself clickable.
+		await lockedDot.hover();
+		await expect(preview).toHaveText(/Spoiler/);
+		await expect.poll(() => preview.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('auto');
+
+		// Clicking anywhere on the preview — not the tiny dot — performs Go here:
+		// seek to goHereTarget(16) = 15 and resume playback, identical to the dot.
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.pause();
+			v.currentTime = 2;
+		});
+		await preview.click();
+		await expect.poll(async () => video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
+		const t = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
+		expect(t).toBeGreaterThanOrEqual(14.7);
+		expect(t).toBeLessThan(16);
+		// Still masked and never expanded into the conversation panel while locked.
+		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// A playable fixture that also carries YouTube's storyboard thumbnail
+// (.ytp-tooltip) at a fixed spot above the scrubber, positioned to overlap
+// where a Reaction hover preview renders — so the storyboard-clearing cap can
+// be asserted deterministically (the real player positions the same element
+// live; verified there too).
+function storyboardFixture(mediaSrc: string) {
+	return `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube storyboard fixture</title></head>
+  <body>
+    <main id="movie_player" class="html5-video-player" style="position: relative; width: 400px; height: 300px; background: #000">
+      <video src="${mediaSrc}" preload="auto" style="width: 400px; height: 300px"></video>
+      <div class="ytp-chrome-bottom" style="position: absolute; left: 0; right: 0; bottom: 0; height: 40px">
+        <div class="ytp-progress-bar" style="position: relative; width: 400px; height: 6px; background: #444"></div>
+        <div class="ytp-left-controls"></div>
+      </div>
+      <div class="ytp-tooltip ytp-bottom" style="position: absolute; left: 120px; bottom: 120px; width: 160px; height: 110px; background: #333">
+        <div class="ytp-tooltip-bg"></div>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
+test('a hovered Reaction preview is capped so its top clears the storyboard thumbnail', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: storyboardFixture(mediaSrc) }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0);
+		});
+
+		const reactionDot = page.locator('.ytb-note-dot-reaction');
+		await nudgeUntil(page, () => expect(reactionDot).toHaveCount(1, { timeout: 700 }));
+		await reactionDot.hover();
+
+		// The cap pulls the Reaction preview's top down to or below the storyboard
+		// thumbnail's bottom edge (it starts above it, clipped, without the cap).
+		await expect
+			.poll(() =>
+				page.evaluate(() => {
+					const pv = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview').getBoundingClientRect();
+					const tip = document.querySelector('.ytp-tooltip').getBoundingClientRect();
+					return Math.round(pv.top - tip.bottom); // >= 0: preview top sits below the thumbnail
+				}),
+			)
+			.toBeGreaterThanOrEqual(0);
+
+		// The emoji itself stays fully inside the capped preview (only empty top
+		// padding is trimmed), and its timestamp chip is dropped for room.
+		const state = await page.evaluate(() => {
+			const preview = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview');
+			const pv = preview.getBoundingClientRect();
+			const em = document.querySelector('.ytb-note-dot-reaction .ytb-preview-emoji').getBoundingClientRect();
+			return {
+				emojiInside: em.height > 0 && em.top >= pv.top - 0.5 && em.bottom <= pv.bottom + 0.5,
+				clamped: preview.classList.contains('ytb-preview-clamped'),
+				chipHidden: getComputedStyle(document.querySelector('.ytb-note-dot-reaction .ytb-preview-time')).display === 'none',
+			};
+		});
+		expect(state).toEqual({ emojiInside: true, clamped: true, chipHidden: true });
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 // A watch page with the Like/Share/Save actions row, where playlist-add.js
 // injects the "+ Buddy Room" recommend pill.
 const watchActionsFixture = `<!doctype html>
