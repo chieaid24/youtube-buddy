@@ -25,6 +25,12 @@
 
 	const ROW_ID = 'ytb-home-toggle';
 	const STYLE_ID = 'ytb-home-toggle-style';
+	const SVG_NS = 'http://www.w3.org/2000/svg';
+	// A two-person "buddies" glyph (Material "people"); tinted to YouTube's
+	// native guide-icon grey via currentColor so it matches Home / Shorts /
+	// Subscriptions in both themes.
+	const PEOPLE_PATH =
+		'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z';
 
 	let onHome = false;
 	let hidden = null; // null until the stored preference has been read
@@ -80,8 +86,9 @@
 		row.setAttribute('role', 'switch');
 		row.title = 'Show or hide the Buddy Room section on Home';
 
-		const dot = document.createElement('span');
-		dot.className = 'ytb-ht-dot';
+		const iconWrap = document.createElement('span');
+		iconWrap.className = 'ytb-ht-icon';
+		iconWrap.append(buildIcon());
 		const label = document.createElement('span');
 		label.className = 'ytb-ht-label';
 		label.textContent = 'Buddy Room';
@@ -90,7 +97,7 @@
 		const knob = document.createElement('span');
 		knob.className = 'ytb-ht-knob';
 		track.append(knob);
-		row.append(dot, label, track);
+		row.append(iconWrap, label, track);
 
 		row.addEventListener('click', async () => {
 			if (flipping || hidden === null) return;
@@ -134,6 +141,21 @@
 		document.getElementById(ROW_ID)?.remove();
 	});
 
+	/** The left buddies glyph as an inline SVG (fill follows currentColor). */
+	function buildIcon() {
+		const svg = document.createElementNS(SVG_NS, 'svg');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('width', '24');
+		svg.setAttribute('height', '24');
+		svg.setAttribute('aria-hidden', 'true');
+		svg.setAttribute('focusable', 'false');
+		const path = document.createElementNS(SVG_NS, 'path');
+		path.setAttribute('d', PEOPLE_PATH);
+		path.setAttribute('fill', 'currentColor');
+		svg.append(path);
+		return svg;
+	}
+
 	/** Inject the row stylesheet once (light + html[dark] themes). */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
@@ -141,61 +163,69 @@
 		style.id = STYLE_ID;
 		style.textContent = `
       #${ROW_ID} {
-        --ytbht-ink: #3a2e28;
-        --ytbht-ink-muted: #7a6656;
-        --ytbht-line: #ece1d6;
         --ytbht-accent: #f6a96b;
         box-sizing: border-box;
         display: flex;
         align-items: center;
-        gap: 8px;
-        width: calc(100% - 24px);
-        margin: 2px 12px;
-        padding: 5px 10px;
+        align-self: flex-start;      /* content-width even if #items is a flex column */
+        width: fit-content;
+        max-width: 100%;
+        height: 40px;                /* native guide-entry row height */
+        margin: 0;                   /* flush with the sibling guide rows */
+        padding: 0 12px 0 16px;      /* left pad seats the icon in the guide's icon column */
         border: 0;
-        border-radius: 10px;
+        border-radius: 10px;         /* native guide hover radius */
         background: transparent;
-        color: var(--ytbht-ink);
-        font-family: Nunito, ui-rounded, 'SF Pro Rounded', Roboto, system-ui, sans-serif;
-        font-size: 13px;
-        font-weight: 600;
-        line-height: 1;
+        color: var(--yt-spec-text-primary, #0f0f0f);
+        font-family: 'Roboto', 'Arial', sans-serif;
+        font-size: 14px;             /* native guide typography */
+        font-weight: 400;
+        line-height: normal;
         text-align: left;
         cursor: pointer;
+        -webkit-font-smoothing: antialiased;
       }
-      html[dark] #${ROW_ID} {
-        --ytbht-ink: #f4ece2;
-        --ytbht-ink-muted: #b3a091;
-        --ytbht-line: #3d332c;
-      }
-      #${ROW_ID}:hover { background: rgba(246, 169, 107, 0.14); }
-      #${ROW_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(246, 169, 107, 0.55); }
-      #${ROW_ID} .ytb-ht-dot {
+      html[dark] #${ROW_ID} { color: var(--yt-spec-text-primary, #f1f1f1); }
+      #${ROW_ID}:hover { background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.05)); }
+      html[dark] #${ROW_ID}:hover { background: var(--yt-spec-10-percent-layer, rgba(255, 255, 255, 0.1)); }
+      #${ROW_ID}:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytbht-accent); }
+      #${ROW_ID} .ytb-ht-icon {
         flex: none;
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: var(--ytbht-accent);
+        display: inline-flex;
+        width: 24px; height: 24px;
+        margin-right: 24px;          /* native icon-to-label gap: label aligns with siblings */
+        color: var(--yt-spec-icon-inactive, #606060);   /* native icon grey */
       }
-      #${ROW_ID} .ytb-ht-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      html[dark] #${ROW_ID} .ytb-ht-icon { color: var(--yt-spec-icon-inactive, #aaaaaa); }
+      #${ROW_ID} .ytb-ht-icon svg { display: block; width: 24px; height: 24px; }
+      #${ROW_ID} .ytb-ht-label {
+        flex: 0 1 auto;
+        min-width: 0;
+        margin-right: 10px;          /* switch clusters immediately after the label */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: inherit;
+      }
       #${ROW_ID} .ytb-ht-track {
         flex: none;
         position: relative;
-        width: 26px; height: 14px;
-        border-radius: 7px;
-        background: var(--ytbht-line);
+        width: 22px; height: 12px;   /* smaller than the old 26x14 */
+        border-radius: 6px;
+        background: var(--yt-spec-icon-disabled, #909090);   /* native grey OFF */
         transition: background 140ms;
       }
-      #${ROW_ID}.is-on .ytb-ht-track { background: var(--ytbht-accent); }
+      #${ROW_ID}.is-on .ytb-ht-track { background: var(--ytbht-accent); }   /* apricot ON */
       #${ROW_ID} .ytb-ht-knob {
         position: absolute;
         top: 2px; left: 2px;
-        width: 10px; height: 10px;
+        width: 8px; height: 8px;
         border-radius: 50%;
         background: #fff;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
       }
-      #${ROW_ID}.is-on .ytb-ht-knob { transform: translateX(12px); }
+      #${ROW_ID}.is-on .ytb-ht-knob { transform: translateX(10px); }   /* 22 - 8 - 2*2 */
       @media (prefers-reduced-motion: reduce) {
         #${ROW_ID} .ytb-ht-track, #${ROW_ID} .ytb-ht-knob { transition: none; }
       }
