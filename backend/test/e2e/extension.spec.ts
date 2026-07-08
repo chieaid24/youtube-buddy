@@ -103,7 +103,7 @@ const CORS = {
  */
 function stubRoomBackend(
 	context: BrowserContext,
-	read: { notes?: object[]; playlist?: object[]; progress?: object[] },
+	read: { notes?: object[]; replies?: object[]; playlist?: object[]; progress?: object[] },
 	calls: string[] = [],
 ) {
 	return context.route('http://localhost:8787/**', (route) => {
@@ -120,7 +120,7 @@ function stubRoomBackend(
 					progress: read.progress ?? [],
 					presence: [],
 					notes: read.notes ?? [],
-					replies: [],
+					replies: read.replies ?? [],
 					playlist: read.playlist ?? [],
 					events: [],
 				}),
@@ -635,6 +635,62 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		// A Dismiss never touches the Room's Recommendation on the backend: no
 		// playlist write of any kind hit the wire.
 		expect(calls.filter((call) => call.startsWith('DELETE ') || call.includes('/playlist'))).toEqual([]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('a Room Feed reply row navigates to the Note, seeks, and opens its Expanded Note on arrival', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		// The viewer authored a Note; a Buddy replied to it — so the Room Feed
+		// carries a "replied to your note" row pointing at that Note.
+		await stubRoomBackend(context, {
+			notes: [
+				{
+					id: 'note-1',
+					clientId: 'viewer-e2e',
+					name: 'Viewer',
+					videoId: 'parent-video',
+					timestamp: 4,
+					kind: 'text',
+					body: 'my moment',
+					spoiler: false,
+					createdAt: 1,
+				},
+			],
+			replies: [{ id: 'reply-1', noteId: 'note-1', clientId: 'buddy-1', name: 'Sam', body: 'love this', createdAt: 2 }],
+		});
+		// The home route serves the browse fixture (where the Feed injects); the
+		// watch route serves a playable fixture (where notes.js opens the panel).
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) => {
+			const body = new URL(route.request().url()).pathname === '/watch' ? playbackFixture(mediaSrc) : homeFixture;
+			return route.fulfill({ status: 200, contentType: 'text/html', body });
+		});
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		// The reply row is a link pointing at the Note, seek (t=) baked into the URL.
+		const link = page.locator('#ytb-home-section a.ytb-hs-item-link');
+		await nudgeUntil(page, () => expect(link).toHaveCount(1, { timeout: 700 }));
+		await expect(link).toContainText('replied to your note');
+		await expect(link).toHaveAttribute('href', '/watch?v=parent-video&t=4');
+
+		// Clicking records the open-target, then navigates to the video (a full
+		// reload here; an SPA nav on real YouTube — the handshake survives both).
+		await link.click();
+		await page.waitForURL(/\/watch\?v=parent-video&t=4$/);
+
+		// On arrival the parent Note's Expanded Note opens once its Room read lands.
+		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+		await expect(page.locator('#ytb-note-panel .ytb-panel-body')).toContainText('my moment');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

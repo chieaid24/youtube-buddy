@@ -176,8 +176,24 @@
 
 	function buildFeedRow(item, roster) {
 		const record = item.reply || item.note;
-		const row = document.createElement('div');
-		row.className = 'ytb-hs-item';
+		// The Note this row points at: the parent Note for a Reply or a
+		// Reply-Mention, the Note itself for a Note-Mention. Absent (parent not in
+		// this Room read) leaves the row non-clickable.
+		const target = item.note;
+		const canOpen = Boolean(target && target.videoId && target.id && Number.isFinite(Number(target.timestamp)));
+
+		const row = document.createElement(canOpen ? 'a' : 'div');
+		row.className = canOpen ? 'ytb-hs-item ytb-hs-item-link' : 'ytb-hs-item';
+		if (canOpen) {
+			const seconds = Math.max(0, Math.floor(Number(target.timestamp)));
+			row.href = '/watch?v=' + encodeURIComponent(target.videoId) + '&t=' + seconds;
+			// Record the open-target, then let the anchor navigate (SPA on YouTube,
+			// full reload in tests) — notes.js opens the Expanded Note on arrival's
+			// first Room read. No preventDefault: the anchor IS the navigation.
+			row.addEventListener('click', () => {
+				YTB.setPendingNoteOpen({ videoId: target.videoId, noteId: target.id });
+			});
+		}
 
 		const author = document.createElement('span');
 		author.className = 'ytb-hs-author';
@@ -549,6 +565,22 @@
       }
       #${SECTION_ID} .ytb-hs-day:first-child { margin-top: 0; }
       #${SECTION_ID} .ytb-hs-item { margin: 3px 0; overflow-wrap: anywhere; }
+      #${SECTION_ID} a.ytb-hs-item-link {
+        display: block;
+        margin: 3px -6px;
+        padding: 3px 6px;
+        border-radius: 8px;
+        color: inherit;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+      #${SECTION_ID} a.ytb-hs-item-link:hover { background: rgba(246, 169, 107, 0.16); }
+      #${SECTION_ID} a.ytb-hs-item-link:focus-visible {
+        outline: none;
+        background: rgba(246, 169, 107, 0.16);
+        box-shadow: 0 0 0 2px rgba(246, 169, 107, 0.55);
+      }
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
       #${SECTION_ID} .ytb-hs-action { color: var(--ytbhs-ink-muted); }
       #${SECTION_ID} .ytb-hs-when { margin-left: 6px; font-size: 10px; color: var(--ytbhs-ink-muted); white-space: nowrap; }
