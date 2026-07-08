@@ -33,9 +33,22 @@ const el = {
 	statusSub: document.getElementById('status-sub'),
 	roster: document.getElementById('roster'),
 	colorGrid: document.getElementById('color-grid'),
-	sharingToggle: document.getElementById('sharing-toggle'),
-	sharingLabel: document.getElementById('sharing-label'),
+	sharingOn: document.getElementById('sharing-on'),
+	sharingTurnOn: document.getElementById('sharing-turn-on'),
 	backendUrl: document.getElementById('backend-url'),
+	// Settings view (the fourth mutually-exclusive view; gear in the header).
+	roomSection: document.getElementById('room-section'),
+	viewSettings: document.getElementById('view-settings'),
+	settingsOpen: document.getElementById('settings-open'),
+	settingsBack: document.getElementById('settings-back'),
+	themeSeg: document.getElementById('theme-seg'),
+	zonePicker: document.getElementById('zone-picker'),
+	setNotes: document.getElementById('set-notes'),
+	setProgress: document.getElementById('set-progress'),
+	setSpoiler: document.getElementById('set-spoiler'),
+	setHome: document.getElementById('set-home'),
+	settingsRoom: document.getElementById('settings-room'),
+	settingsSharing: document.getElementById('settings-sharing'),
 	// Disconnect confirmation dialog.
 	confirmOverlay: document.getElementById('confirm-overlay'),
 	confirmTitle: document.getElementById('confirm-title'),
@@ -52,9 +65,16 @@ let myClientId = '';
 // cleared on cancel/confirm). One dialog serves Leave room AND Stop sharing.
 let pendingConfirm = null;
 
-// Last-known Sharing state + whether the pill is currently a live toggle.
+// Last-known Sharing state.
 let currentSharing = true;
-let sharingInteractive = false;
+
+// The Settings snapshot driving the Settings controls: the five YTB.getSettings
+// keys plus homeSectionHidden (which keeps its own storage seam). null until
+// init has read storage.
+let currentSettings = null;
+
+// The room view to land on when Settings closes (Back or the gear again).
+let settingsReturn = 'chooser';
 
 // Last-rendered roster, so a Buddy Color change can redraw without a re-GET.
 let currentRosterBuddies = [];
@@ -85,6 +105,15 @@ async function init() {
 	// The Display Name starts locked iff it already holds a non-empty committed
 	// value, so a fresh install (blank name) opens in edit mode (onboarding unchanged).
 	setFieldLocked(el.nameField, !!config.name);
+
+	// Settings: read the stored preferences once, build the zone picker, and
+	// reflect everything into the controls (theme.js already stamped data-theme).
+	currentSettings = {
+		...(await YTB.getSettings()),
+		homeSectionHidden: await YTB.getHomeSectionHidden(),
+	};
+	buildZonePicker();
+	renderSettingsControls();
 
 	wireHandlers();
 	setInterval(refreshConnectedRoom, ROSTER_POLL_MS);
@@ -201,11 +230,35 @@ function wireHandlers() {
 		closeColorGrid();
 	});
 
-	// Stopping Sharing is guarded by a confirm; starting is instant. The reporter
-	// reads `sharing` and stops/resumes its POSTs; the renderer keeps drawing the
+	// Starting Sharing is instant and unguarded; the main view only ever offers
+	// the turn-ON (the guarded stop lives in Settings). The reporter reads
+	// `sharing` and stops/resumes its POSTs; the renderer keeps drawing the
 	// Buddy either way.
-	el.sharingToggle.addEventListener('click', () => {
-		if (!sharingInteractive) return;
+	el.sharingTurnOn.addEventListener('click', () => setSharing(true));
+
+	// Settings: the gear toggles the view open/closed; Back returns to the
+	// room view that was showing when it opened.
+	el.settingsOpen.addEventListener('click', () => {
+		if (el.viewSettings.hidden) openSettings();
+		else closeSettings();
+	});
+	el.settingsBack.addEventListener('click', () => closeSettings());
+
+	// Theme Preference: persist and stamp data-theme immediately (theme.js's
+	// storage.onChanged listener does the same in every open YouTube tab).
+	for (const button of el.themeSeg.querySelectorAll('[data-theme-choice]')) {
+		button.addEventListener('click', () => saveSettings({ theme: button.dataset.themeChoice }));
+	}
+
+	// Visibility + Spoiler Default toggle rows (each stores its documented key).
+	el.setNotes.addEventListener('click', () => saveSettings({ notesHidden: !currentSettings.notesHidden }));
+	el.setProgress.addEventListener('click', () => saveSettings({ buddyProgressHidden: !currentSettings.buddyProgressHidden }));
+	el.setSpoiler.addEventListener('click', () => saveSettings({ spoilerDefault: !currentSettings.spoilerDefault }));
+	el.setHome.addEventListener('click', () => saveSettings({ homeSectionHidden: !currentSettings.homeSectionHidden }));
+
+	// Room actions relocated into Settings: stopping keeps its confirm dialog,
+	// starting stays instant.
+	el.settingsSharing.addEventListener('click', () => {
 		if (currentSharing) {
 			openConfirm({
 				title: 'Stop sharing?',
@@ -217,6 +270,19 @@ function wireHandlers() {
 		} else {
 			setSharing(true);
 		}
+	});
+
+	// Keep the Settings controls honest when a preference changes elsewhere
+	// while the popup is open (e.g. the Room Home Toggle in YouTube's guide).
+	chrome.storage.onChanged.addListener(async (changes, area) => {
+		if (area !== 'local' || !currentSettings) return;
+		const keys = ['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden', 'homeSectionHidden'];
+		if (!keys.some((key) => key in changes)) return;
+		currentSettings = {
+			...(await YTB.getSettings()),
+			homeSectionHidden: await YTB.getHomeSectionHidden(),
+		};
+		renderSettingsControls();
 	});
 }
 
@@ -374,8 +440,9 @@ async function setSharing(on) {
 	await refreshStatus(code);
 }
 
-// Confirmed disconnect via Leave room. Remove membership server-side before
-// clearing local state so the Room slot and Buddy markers are released.
+// Confirmed disconnect via Leave room (now in Settings). Remove membership
+// server-side before clearing local state so the Room slot and Buddy markers
+// are released; landing on the chooser also closes the Settings view.
 async function clearCodeAndChoose() {
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code: '' });
@@ -384,6 +451,8 @@ async function clearCodeAndChoose() {
 		await YTB.clearRoomColors(oldCode);
 	}
 	el.code.textContent = '';
+	activeRoomCode = '';
+	updateSettingsRoomControls();
 	showView('chooser');
 }
 
@@ -408,14 +477,124 @@ function hideConfirm() {
 	pendingConfirm = null;
 }
 
+// --- Settings ------------------------------------------------------------------
+
+// Remember which room view was showing, then present Settings.
+function openSettings() {
+	settingsReturn = !el.viewConnected.hidden ? 'connected' : !el.viewJoin.hidden ? 'join' : 'chooser';
+	showView('settings');
+}
+
+// Back: return to the room view Settings was opened from. Connected re-routes
+// through a real GET (state may have changed while in Settings); a cleared
+// code (left the room from Settings) falls back to the chooser.
+async function closeSettings() {
+	const { code } = await YTB.getConfig();
+	if (settingsReturn === 'connected' && code) {
+		showConnected(code);
+		await refreshStatus(code);
+	} else if (settingsReturn === 'join' || !code) {
+		showView(settingsReturn === 'join' ? 'join' : 'chooser');
+	} else {
+		showView('chooser');
+	}
+}
+
+// Merge-persist a Settings change and reflect it into the controls at once.
+// homeSectionHidden keeps its dedicated storage seam (shared with the guide
+// toggle); everything else goes through YTB.setSettings. A theme choice also
+// stamps data-theme on this document immediately — theme.js's onChanged
+// listener restyles every open YouTube tab (and would restyle us too, this is
+// just the zero-latency path).
+function saveSettings(partial) {
+	if (!currentSettings) return;
+	currentSettings = { ...currentSettings, ...partial };
+	renderSettingsControls();
+	if ('theme' in partial) {
+		if (partial.theme === 'light' || partial.theme === 'dark') document.documentElement.setAttribute('data-theme', partial.theme);
+		else document.documentElement.removeAttribute('data-theme');
+	}
+	const { homeSectionHidden, ...rest } = partial;
+	if (homeSectionHidden !== undefined) YTB.setHomeSectionHidden(homeSectionHidden);
+	if (Object.keys(rest).length > 0) YTB.setSettings(rest);
+}
+
+// The 3x3 Notification Position grid minus the dead-center cell, in grid order.
+function buildZonePicker() {
+	el.zonePicker.textContent = '';
+	const gridOrder = [
+		'top-left',
+		'top-center',
+		'top-right',
+		'middle-left',
+		null,
+		'middle-right',
+		'bottom-left',
+		'bottom-center',
+		'bottom-right',
+	];
+	for (const zone of gridOrder) {
+		if (!zone) {
+			// The dead-center cell: not a choice, just grid geometry.
+			el.zonePicker.appendChild(document.createElement('span'));
+			continue;
+		}
+		const cell = document.createElement('button');
+		cell.type = 'button';
+		cell.className = 'zone-cell';
+		cell.dataset.zone = zone;
+		cell.setAttribute('role', 'radio');
+		cell.setAttribute('aria-checked', 'false');
+		const label = 'Notifications at ' + zone.replace('-', ' ');
+		cell.title = zone.replace('-', ' ');
+		cell.setAttribute('aria-label', label);
+		cell.addEventListener('click', () => saveSettings({ notificationPosition: zone }));
+		el.zonePicker.appendChild(cell);
+	}
+}
+
+/** Reflect a switch row's on/off state (checked means the feature is ON). */
+function setSwitch(row, on) {
+	row.setAttribute('aria-checked', String(on));
+}
+
+// Reflect currentSettings into every Settings control. The visibility rows
+// read as "shown" switches, so their checked state is the INVERSE of the
+// stored *Hidden keys.
+function renderSettingsControls() {
+	if (!currentSettings) return;
+	for (const button of el.themeSeg.querySelectorAll('[data-theme-choice]')) {
+		button.setAttribute('aria-checked', String(button.dataset.themeChoice === currentSettings.theme));
+	}
+	for (const cell of el.zonePicker.querySelectorAll('.zone-cell')) {
+		cell.setAttribute('aria-checked', String(cell.dataset.zone === currentSettings.notificationPosition));
+	}
+	setSwitch(el.setNotes, !currentSettings.notesHidden);
+	setSwitch(el.setProgress, !currentSettings.buddyProgressHidden);
+	setSwitch(el.setSpoiler, currentSettings.spoilerDefault);
+	setSwitch(el.setHome, !currentSettings.homeSectionHidden);
+	updateSettingsRoomControls();
+}
+
+// The Room group in Settings: hidden while Unpaired; the sharing button
+// mirrors the current state (guarded stop / instant start).
+function updateSettingsRoomControls() {
+	el.settingsRoom.hidden = !activeRoomCode;
+	el.settingsSharing.textContent = currentSharing ? 'Stop sharing' : 'Start sharing';
+	el.settingsSharing.className = 'btn ' + (currentSharing ? 'btn-neutral' : 'btn-primary');
+}
+
 // --- view switching ----------------------------------------------------------
 
-// Show exactly one of the three Room Code views. Re-unhiding a view restarts its
-// CSS enter animation (fade + 6px rise). The Cancel link in the chooser only
-// makes sense when an active code exists (reached via "Leave room").
+// Show exactly one of the four views (chooser / join / connected / settings).
+// Re-unhiding a view restarts its CSS enter animation (fade + 6px rise). The
+// Cancel link in the chooser only makes sense when an active code exists
+// (reached via "Leave room").
 function showView(name) {
 	if (name === 'join') clearJoinError();
 	if (name !== 'chooser') clearCreateError();
+	el.roomSection.hidden = name === 'settings';
+	el.viewSettings.hidden = name !== 'settings';
 	el.viewChooser.hidden = name !== 'chooser';
 	el.viewJoin.hidden = name !== 'join';
 	el.viewConnected.hidden = name !== 'connected';
@@ -441,6 +620,7 @@ function showConnected(code) {
 //   Room full     -- 5 others already, I'm not one of them (the locked-out 6th).
 async function refreshStatus(code) {
 	if (!code) {
+		activeRoomCode = '';
 		setStatus('unpaired', 'Unpaired', 'Enter or generate a Room Code to join.');
 		renderRoster([]);
 		return;
@@ -479,31 +659,19 @@ async function refreshConnectedRoom() {
 	await refreshStatus(code);
 }
 
-// Render the status panel. Waiting and in-room states keep the Sharing pill live;
-// the pill itself carries the on/off boolean (green dot "Sharing" / muted dot
-// "Not sharing"), and the panel's data-state drives the cue line's look.
-function setStatus(state, text, sub, interactive = false) {
+// Render the status panel. Waiting and in-room states show the Sharing state:
+// a muted read-only "Sharing on" line while on (the guarded stop lives in
+// Settings), or a prominent one-click "Turn on sharing" while off. Unpaired
+// and Room-full states show neither.
+function setStatus(state, text, sub, memberStates = false) {
 	el.status.dataset.state = state;
 	el.statusText.textContent = text;
 	el.statusSub.textContent = sub;
 	el.statusSub.hidden = !sub;
 
-	el.sharingToggle.classList.toggle('is-off', !currentSharing);
-	el.sharingLabel.textContent = currentSharing ? 'Sharing' : 'Not sharing';
-
-	sharingInteractive = interactive;
-	if (interactive) {
-		const action = currentSharing ? 'Stop sharing' : 'Start sharing';
-		el.sharingToggle.disabled = false;
-		el.sharingToggle.setAttribute('aria-pressed', String(currentSharing));
-		el.sharingToggle.setAttribute('aria-label', action);
-		el.sharingToggle.title = action;
-	} else {
-		el.sharingToggle.disabled = true;
-		el.sharingToggle.removeAttribute('aria-pressed');
-		el.sharingToggle.removeAttribute('title');
-		el.sharingToggle.setAttribute('aria-label', 'Sharing status');
-	}
+	el.sharingOn.hidden = !memberStates || !currentSharing;
+	el.sharingTurnOn.hidden = !memberStates || currentSharing;
+	updateSettingsRoomControls();
 }
 
 // Render one row per Buddy: [color swatch] name ... last-seen. The swatch square

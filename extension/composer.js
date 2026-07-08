@@ -26,6 +26,28 @@
 	let openToken = 0;
 	let pauseLeaseActive = false; // opening the composer paused a playing video
 
+	// Settings (live via chrome.storage.onChanged): the Spoiler Default seeds
+	// the composer's checkbox on each open, and Notes Visibility off removes
+	// the Add Note (+) button entirely (the player carries zero YTB Note UI).
+	let spoilerDefault = true;
+	let notesHidden = false;
+
+	YTB.getSettings().then((settings) => {
+		spoilerDefault = settings.spoilerDefault;
+		notesHidden = settings.notesHidden;
+		ensureButton();
+	});
+
+	chrome.storage.onChanged.addListener((changes, area) => {
+		if (area !== 'local' || !YTB.isContextActive()) return;
+		if (changes.spoilerDefault) spoilerDefault = changes.spoilerDefault.newValue !== false;
+		if (changes.notesHidden) {
+			notesHidden = changes.notesHidden.newValue === true;
+			if (notesHidden) closeComposer(); // dismissal semantics: lease-aware resume
+			ensureButton();
+		}
+	});
+
 	// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face
 	// injected by theme.js (the shared on-video apricot foundation). The Add
 	// Note BUTTON stays player-native white — it lives inside YouTube's own
@@ -274,7 +296,7 @@
 		foot.className = 'ytb-note-foot';
 		const spoiler = document.createElement('input');
 		spoiler.type = 'checkbox';
-		spoiler.checked = true; // Spoiler starts checked on EVERY opening
+		spoiler.checked = spoilerDefault; // seeded from the Spoiler Default setting on EVERY opening
 		const spoilerLabel = document.createElement('label');
 		spoilerLabel.append(spoiler, document.createTextNode('Spoiler'));
 		const post = document.createElement('button');
@@ -360,7 +382,7 @@
 	function ensureButton() {
 		if (!YTB.isContextActive()) return;
 		ensureStyles();
-		if (!currentVideoId) {
+		if (!currentVideoId || notesHidden) {
 			closeComposer({ resume: false });
 			document.getElementById(BUTTON_ID)?.remove();
 			return;

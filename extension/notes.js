@@ -14,9 +14,14 @@
 //   - click-to-seek on Reaction dots: a bare, state-preserving seek to just
 //     before the Reaction (playing stays playing, paused stays paused — this
 //     is NOT Go here, which resumes playback);
-//   - Playback Notifications: bottom-center note cards (~4s, clickable) and
-//     animated Reaction bursts (~2s, non-interactive) on every NATURAL forward
+//   - Playback Notifications: note cards (~4s, clickable) and animated
+//     Reaction bursts (~2s, non-interactive) on every NATURAL forward
 //     crossing — rewind-and-replay triggers again, direct seeks stay silent.
+//     They render at the viewer's Notification Position (one of eight player
+//     zones, default bottom-center; live via chrome.storage.onChanged).
+//   - Notes Visibility ("Notes off"): while the notesHidden setting is on,
+//     this file renders NOTHING — no dots, previews, panels, or Playback
+//     Notifications (composer.js removes the + button) — updating live.
 //
 // Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
 // by theme.js (the shared on-video apricot foundation); theme.js also isolates
@@ -73,7 +78,36 @@
 	let pendingReply = false;
 	let pendingDelete = false;
 
+	// Settings (live via chrome.storage.onChanged below).
+	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
+	let notificationPosition = 'bottom-center'; // Playback Notification zone
+
 	injectStyle();
+
+	YTB.getSettings().then((settings) => {
+		notesHidden = settings.notesHidden;
+		notificationPosition = settings.notificationPosition;
+		renderDots();
+	});
+
+	chrome.storage.onChanged.addListener((changes, area) => {
+		if (area !== 'local' || !YTB.isContextActive()) return;
+		if (changes.notesHidden) {
+			notesHidden = changes.notesHidden.newValue === true;
+			if (notesHidden) {
+				dismissPanel(); // dismissal semantics: lease-aware resume
+				document.getElementById(ALERTS_ID)?.replaceChildren();
+			}
+			renderDots(); // reconciles to zero dots when hidden, back when shown
+		}
+		if (changes.notificationPosition) {
+			const zone = changes.notificationPosition.newValue;
+			notificationPosition = YTB.NOTIFICATION_ZONES.includes(zone) ? zone : 'bottom-center';
+			const wrap = document.getElementById(ALERTS_ID);
+			const host = player();
+			if (wrap && host) applyAlertsPosition(wrap, host); // live re-anchor
+		}
+	});
 
 	// ---------------------------------------------------------------------------
 	// Data intake: Room broadcasts, immediate post reconciliation.
@@ -145,7 +179,9 @@
 		const playhead = video ? Number(video.currentTime) : 0;
 		const desired = new Map(); // id -> { note, locked }
 		const naturals = []; // for spreadFractions
-		if (Number.isFinite(duration) && duration > 0) {
+		// Notes off: desired stays empty, so the reconciliation below strips
+		// every existing dot (and re-grows them all when turned back on).
+		if (!notesHidden && Number.isFinite(duration) && duration > 0) {
 			for (const note of notesForCurrentVideo()) {
 				const timestamp = Number(note.timestamp);
 				if (!Number.isFinite(timestamp)) continue;
@@ -858,8 +894,39 @@
 			wrap.id = ALERTS_ID;
 			host.appendChild(wrap);
 		}
-		wrap.style.bottom = alertsBottomPx(host) + 'px';
+		applyAlertsPosition(wrap, host);
 		return wrap;
+	}
+
+	/**
+	 * Anchor the alerts stack at the viewer's Notification Position: one of the
+	 * eight player zones (a 3x3 grid minus dead-center, default bottom-center).
+	 * Inline styles own the placement so a Settings change re-anchors an
+	 * existing stack live; the stylesheet only carries the static column look.
+	 */
+	function applyAlertsPosition(wrap, host) {
+		const zone = YTB.NOTIFICATION_ZONES.includes(notificationPosition) ? notificationPosition : 'bottom-center';
+		const [vertical, horizontal] = zone.split('-');
+		wrap.style.top = '';
+		wrap.style.bottom = '';
+		wrap.style.left = '';
+		wrap.style.right = '';
+		wrap.style.transform = '';
+		wrap.style.alignItems = horizontal === 'left' ? 'flex-start' : horizontal === 'right' ? 'flex-end' : 'center';
+		if (horizontal === 'left') wrap.style.left = '16px';
+		else if (horizontal === 'right') wrap.style.right = '16px';
+		else {
+			wrap.style.left = '50%';
+			wrap.style.transform = 'translateX(-50%)';
+		}
+		if (vertical === 'top') {
+			wrap.style.top = alertsTopPx(host) + 'px';
+		} else if (vertical === 'middle') {
+			wrap.style.top = '50%';
+			wrap.style.transform = horizontal === 'center' ? 'translate(-50%, -50%)' : 'translateY(-50%)';
+		} else {
+			wrap.style.bottom = alertsBottomPx(host) + 'px';
+		}
 	}
 
 	// Sit above the control bar and above any visible caption windows, inside
@@ -877,6 +944,19 @@
 			if (rect.height > 0) bottom = Math.max(bottom, hostRect.bottom - rect.top + 10);
 		}
 		return Math.min(bottom, Math.max(16, hostRect.height / 2));
+	}
+
+	// The top-zone mirror of alertsBottomPx: clear the player's top chrome
+	// (title/gradient) when visible, staying inside the player.
+	function alertsTopPx(host) {
+		const hostRect = host.getBoundingClientRect();
+		let top = 16;
+		const chromeTop = host.querySelector('.ytp-chrome-top');
+		if (chromeTop && !host.classList.contains('ytp-autohide')) {
+			const rect = chromeTop.getBoundingClientRect();
+			if (rect.height > 0) top = Math.max(top, rect.bottom - hostRect.top + 10);
+		}
+		return Math.min(top, Math.max(16, hostRect.height / 2));
 	}
 
 	function showNoteCard(note) {
@@ -942,7 +1022,15 @@
 		}
 		const previousTime = lastPlaybackTime;
 		lastPlaybackTime = currentTime;
-		if (previousTime === null || video.seeking || currentTime <= previousTime || currentTime - previousTime > NATURAL_DELTA_SECONDS) {
+		// Notes off suppresses the notification but keeps rebasing the crossing
+		// window, so turning Notes back on never replays a backlog.
+		if (
+			notesHidden ||
+			previousTime === null ||
+			video.seeking ||
+			currentTime <= previousTime ||
+			currentTime - previousTime > NATURAL_DELTA_SECONDS
+		) {
 			return;
 		}
 		for (const note of YTB.crossedNotes(notesForCurrentVideo(), previousTime, currentTime)) {
@@ -1306,15 +1394,14 @@
       .ytb-panel-confirm-delete:disabled, .ytb-panel-confirm-cancel:disabled { opacity: 0.5; cursor: default; }
       .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
 
-      /* --- Playback Notifications --- */
+      /* --- Playback Notifications ---
+         Placement (zone anchoring + alignment) is inline via
+         applyAlertsPosition; only the static column look lives here. */
       #${ALERTS_ID} {
         position: absolute;
-        left: 50%;
-        transform: translateX(-50%);
         z-index: 2050;
         display: flex;
         flex-direction: column;
-        align-items: center;
         gap: 8px;
         pointer-events: none;
       }

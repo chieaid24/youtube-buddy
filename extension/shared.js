@@ -107,8 +107,9 @@ const YTB = {
 	SPREAD_WINDOW_SECONDS: 2,
 
 	// --- storage (chrome.storage.local) ---
-	// Stored keys: name, code, clientId, sharing, homeSectionHidden, and the
-	// Room-scoped buddyColors + dismissedVideos maps.
+	// Stored keys: name, code, clientId, sharing, homeSectionHidden, the Settings
+	// keys (theme, spoilerDefault, notificationPosition, notesHidden,
+	// buddyProgressHidden), and the Room-scoped buddyColors + dismissedVideos maps.
 
 	/**
 	 * Read the full config, applying defaults for unset keys.
@@ -158,6 +159,62 @@ const YTB = {
 	 */
 	async setHomeSectionHidden(hidden) {
 		return await YTB._storageSet({ homeSectionHidden: hidden === true });
+	},
+
+	// --- Settings (per install, chrome.storage.local — mirrors homeSectionHidden) ---
+
+	// The Theme Preference's legal values (ADR-0008). 'system' follows the OS via
+	// @media (prefers-color-scheme); 'light'/'dark' stamp data-theme on the root.
+	THEMES: ['light', 'dark', 'system'],
+
+	// The Notification Position's eight zones: a 3x3 grid minus the dead-center
+	// cell. Playback Notifications render at the chosen zone (notes.js).
+	NOTIFICATION_ZONES: [
+		'top-left',
+		'top-center',
+		'top-right',
+		'middle-left',
+		'middle-right',
+		'bottom-left',
+		'bottom-center',
+		'bottom-right',
+	],
+
+	/**
+	 * Read every Settings key, coercing unset/junk values to the documented
+	 * defaults so consumers never validate: theme 'system', Spoiler Default on,
+	 * Notification Position bottom-center, Notes and Buddy Progress shown.
+	 * (The Room Home Section keeps its own getHomeSectionHidden seam above.)
+	 * @returns {Promise<{theme: string, spoilerDefault: boolean, notificationPosition: string, notesHidden: boolean, buddyProgressHidden: boolean}>}
+	 */
+	async getSettings() {
+		const stored = await YTB._storageGet(['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden']);
+		return {
+			theme: YTB.THEMES.includes(stored.theme) ? stored.theme : 'system',
+			spoilerDefault: stored.spoilerDefault !== false,
+			notificationPosition: YTB.NOTIFICATION_ZONES.includes(stored.notificationPosition) ? stored.notificationPosition : 'bottom-center',
+			notesHidden: stored.notesHidden === true,
+			buddyProgressHidden: stored.buddyProgressHidden === true,
+		};
+	},
+
+	/**
+	 * Merge-write a subset of the Settings keys, validating each value so the
+	 * stored state always round-trips getSettings exactly (an illegal theme/zone
+	 * is dropped; visibility/spoiler flags coerce to strict booleans).
+	 * @param {{theme?: string, spoilerDefault?: boolean, notificationPosition?: string, notesHidden?: boolean, buddyProgressHidden?: boolean}} partial
+	 * @returns {Promise<boolean>} false when the extension context is gone.
+	 */
+	async setSettings(partial) {
+		const next = {};
+		if ('theme' in partial && YTB.THEMES.includes(partial.theme)) next.theme = partial.theme;
+		if ('notificationPosition' in partial && YTB.NOTIFICATION_ZONES.includes(partial.notificationPosition)) {
+			next.notificationPosition = partial.notificationPosition;
+		}
+		for (const key of ['spoilerDefault', 'notesHidden', 'buddyProgressHidden']) {
+			if (key in partial) next[key] = partial[key] === true;
+		}
+		return await YTB._storageSet(next);
 	},
 
 	/**
@@ -216,7 +273,15 @@ const YTB = {
 	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>, notes: Array<{id: string, clientId: string, name: string, videoId: string, timestamp: number, kind: string, body: string, spoiler: boolean, createdAt: number}>}>}
 	 */
 	async getRecords(code) {
-		const empty = { progress: [], presence: [], notes: [], replies: [], playlist: [], events: [], ok: false };
+		const empty = {
+			progress: [],
+			presence: [],
+			notes: [],
+			replies: [],
+			playlist: [],
+			events: [],
+			ok: false,
+		};
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) {
@@ -334,7 +399,12 @@ const YTB = {
 	async postPlaylistAdd({ clientId, name, videoId, title }) {
 		const { code } = await YTB.getConfig();
 		if (!code) return { ok: false, category: 'unpaired' };
-		return YTB._postJson('/playlist?code=' + encodeURIComponent(code), { clientId, name, videoId, title });
+		return YTB._postJson('/playlist?code=' + encodeURIComponent(code), {
+			clientId,
+			name,
+			videoId,
+			title,
+		});
 	},
 
 	/**
@@ -350,7 +420,9 @@ const YTB = {
 		if (!code || !clientId || !videoId) return { ok: false, category: 'validation' };
 		try {
 			const query = new URLSearchParams({ code, clientId, videoId });
-			const res = await fetch(YTB.BACKEND_URL + '/playlist?' + query, { method: 'DELETE' });
+			const res = await fetch(YTB.BACKEND_URL + '/playlist?' + query, {
+				method: 'DELETE',
+			});
 			if (res.ok) return { ok: true };
 			const data = await res.json().catch(() => null);
 			return { ok: false, category: (data && data.category) || 'unexpected' };
@@ -531,8 +603,16 @@ const YTB = {
 	 */
 	dotActivation(note, playhead) {
 		const locked = Boolean(note.spoiler) && Number(playhead) < Number(note.timestamp);
-		if (locked) return { action: 'go-here', target: YTB.goHereTarget(Number(note.timestamp)) };
-		if (note.kind === 'emoji') return { action: 'seek', target: YTB.goHereTarget(Number(note.timestamp)) };
+		if (locked)
+			return {
+				action: 'go-here',
+				target: YTB.goHereTarget(Number(note.timestamp)),
+			};
+		if (note.kind === 'emoji')
+			return {
+				action: 'seek',
+				target: YTB.goHereTarget(Number(note.timestamp)),
+			};
 		return { action: 'open' };
 	},
 
@@ -785,7 +865,10 @@ const YTB = {
 		const [y, m, d] = String(dayKey)
 			.split('-')
 			.map((part) => Number(part));
-		return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+		return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+			month: 'short',
+			day: 'numeric',
+		});
 	},
 
 	/**
@@ -814,7 +897,12 @@ const YTB = {
 			const parent = noteById.get(reply.noteId);
 			const toMyNote = Boolean(parent) && parent.clientId === myClientId;
 			if (!toMyNote && !mentionsMe(reply)) continue;
-			items.push({ type: toMyNote ? 'reply' : 'mention', at: Number(reply.createdAt) || 0, reply, note: parent || null });
+			items.push({
+				type: toMyNote ? 'reply' : 'mention',
+				at: Number(reply.createdAt) || 0,
+				reply,
+				note: parent || null,
+			});
 		}
 		for (const note of notes) {
 			if (!note || note.clientId === myClientId || !mentionsMe(note)) continue;

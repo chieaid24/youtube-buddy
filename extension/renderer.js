@@ -51,7 +51,18 @@
 	let baselineReady = false; // skip toasts on the very first read (no false "joined")
 	let pollTimer = null;
 
+	// Buddy Progress Visibility (Settings): while hidden, draw neither markers
+	// nor thumbnail bars — but keep polling and rebroadcasting ytb:room-data
+	// (notes, the popup roster, presence, and the home section are unaffected).
+	let buddyProgressHidden = false;
+
 	injectStyle();
+
+	YTB.getSettings().then((settings) => {
+		buddyProgressHidden = settings.buddyProgressHidden;
+		renderWatchMarker(currentVideoId);
+		renderThumbnails();
+	});
 
 	// ---------------------------------------------------------------------------
 	// Data: fetch + cache the Buddies' records.
@@ -185,7 +196,9 @@
 		const bar = document.querySelector('.ytp-progress-bar');
 		if (!bar) return; // player not ready yet — a later ytb:mutation retries
 
-		const records = videoId ? buddyByVideoId.get(videoId) : null;
+		// Hidden Buddy Progress leaves `desired` empty, so the reconciliation
+		// below strips existing markers (and re-grows them all when re-shown).
+		const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
 		const desired = new Map(); // clientId -> { fraction, record }
 		if (records) {
 			for (const r of records) {
@@ -253,7 +266,9 @@
 			if (!anchor.querySelector('img')) continue;
 
 			const videoId = videoIdFromHref(anchor.getAttribute('href'));
-			const records = videoId ? buddyByVideoId.get(videoId) : null;
+			// Hidden Buddy Progress removes every tile's bar via the empty-segments
+			// branch below.
+			const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
 
 			// One band per Buddy with a computable position, sorted ascending. The
 			// clientId tiebreak keeps equal-position bands deterministic.
@@ -474,8 +489,18 @@
 	});
 
 	chrome.storage.onChanged.addListener((changes, area) => {
-		if (area !== 'local' || !changes.buddyColors) return;
-		YTB._buddyColors = changes.buddyColors.newValue || {};
+		if (area !== 'local') return;
+		let touched = false;
+		if (changes.buddyColors) {
+			YTB._buddyColors = changes.buddyColors.newValue || {};
+			touched = true;
+		}
+		if (changes.buddyProgressHidden) {
+			// Live Buddy Progress Visibility flip from the popup Settings.
+			buddyProgressHidden = changes.buddyProgressHidden.newValue === true;
+			touched = true;
+		}
+		if (!touched) return;
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	});

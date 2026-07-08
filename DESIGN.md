@@ -155,8 +155,13 @@ On-video specifics, on top of the popup values:
   in light, espresso in dark) with the elevation shadows, so text stays legible over
   bright frames. Reaction previews/bursts are the deliberate exception — transparent
   emoji-over-video with a text shadow, since they are not cards.
-- **Theme follows `prefers-color-scheme`**, independent of YouTube's own theme
-  toggle (the popup behaves the same way).
+- **Theme follows `prefers-color-scheme` as the System default** of the Theme
+  Preference (ADR-0008), independent of YouTube's own theme toggle (the popup
+  behaves the same way). An explicit Light/Dark choice in Settings stamps
+  `data-theme="light"|"dark"` on the document root, and the
+  `:root[data-theme=...]` token blocks (in `theme.js` and `popup.html`)
+  out-specify the media query, so a forced mode wins over the OS in both
+  directions; System removes the attribute and falls back to the media query.
 - The dark block also flips the light washes (`--ytb-accent-050/100/200`) dark and
   lifts `--ytb-danger-text`, mirroring the popup's inline dark overrides, so
   "hover = accent-050 wash" and "errors = danger-text" read correctly in both

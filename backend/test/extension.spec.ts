@@ -296,10 +296,12 @@ describe('shared playlist client API', () => {
 		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, item }) });
 		vi.stubGlobal('fetch', fetchMock);
 
-		await expect(window.YTB.postPlaylistAdd({ clientId: 'a1b2c3d4', name: 'Sam', videoId: 'v1', title: 'A Great Video' })).resolves.toEqual({
-			ok: true,
-			item,
-		});
+		await expect(window.YTB.postPlaylistAdd({ clientId: 'a1b2c3d4', name: 'Sam', videoId: 'v1', title: 'A Great Video' })).resolves.toEqual(
+			{
+				ok: true,
+				item,
+			},
+		);
 		expect(fetchMock).toHaveBeenCalledWith('http://localhost:8787/playlist?code=silly-otters', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -453,7 +455,17 @@ describe('room home section helpers', () => {
 		const base = new Date(2026, 6, 4, 12, 0, 0).getTime(); // local noon — no midnight straddle
 		const notes = [
 			{ id: 'n1', clientId: me, name: 'Aidan', videoId: 'v1', timestamp: 5, kind: 'text', body: 'mine', createdAt: base },
-			{ id: 'n2', clientId: 'bob22222', name: 'Bob', videoId: 'v1', timestamp: 6, kind: 'text', body: 'hey @Aidan', mentions: [me], createdAt: base + 1000 },
+			{
+				id: 'n2',
+				clientId: 'bob22222',
+				name: 'Bob',
+				videoId: 'v1',
+				timestamp: 6,
+				kind: 'text',
+				body: 'hey @Aidan',
+				mentions: [me],
+				createdAt: base + 1000,
+			},
 			{ id: 'n3', clientId: 'bob22222', name: 'Bob', videoId: 'v1', timestamp: 7, kind: 'text', body: 'unrelated', createdAt: base + 1500 },
 		];
 		const replies = [
@@ -490,7 +502,8 @@ describe('room home section helpers', () => {
 
 	it('labels Feed day dividers as Today / Yesterday / short date', () => {
 		const now = new Date(2026, 6, 5, 15, 0, 0).getTime();
-		const keyOf = (ms: number) => window.YTB.buildFeed({ events: [{ id: 'e', type: 'added', videoId: 'v', actorClientId: 'a', at: ms }] }, 'me')[0].dayKey;
+		const keyOf = (ms: number) =>
+			window.YTB.buildFeed({ events: [{ id: 'e', type: 'added', videoId: 'v', actorClientId: 'a', at: ms }] }, 'me')[0].dayKey;
 		expect(window.YTB.dayLabel(keyOf(now), now)).toBe('Today');
 		expect(window.YTB.dayLabel(keyOf(now - 24 * 3600_000), now)).toBe('Yesterday');
 		expect(window.YTB.dayLabel(keyOf(new Date(2026, 6, 3, 12).getTime()), now)).toMatch(/Jul/);
@@ -515,6 +528,76 @@ describe('room home section helpers', () => {
 
 		storage = { homeSectionHidden: 'truthy junk' };
 		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
+	});
+});
+
+describe('settings (per install)', () => {
+	it('defaults every Settings key and coerces junk back to the documented defaults', async () => {
+		storage = {};
+		await expect(window.YTB.getSettings()).resolves.toEqual({
+			theme: 'system',
+			spoilerDefault: true,
+			notificationPosition: 'bottom-center',
+			notesHidden: false,
+			buddyProgressHidden: false,
+		});
+
+		storage = {
+			theme: 'sepia',
+			spoilerDefault: 'nope',
+			notificationPosition: 'middle-center',
+			notesHidden: 1,
+			buddyProgressHidden: 'yes',
+		};
+		await expect(window.YTB.getSettings()).resolves.toEqual({
+			theme: 'system',
+			spoilerDefault: true,
+			notificationPosition: 'bottom-center',
+			notesHidden: false,
+			buddyProgressHidden: false,
+		});
+	});
+
+	it('round-trips every Settings key and merge-writes partials', async () => {
+		storage = {};
+		await window.YTB.setSettings({
+			theme: 'dark',
+			spoilerDefault: false,
+			notificationPosition: 'top-right',
+			notesHidden: true,
+			buddyProgressHidden: true,
+		});
+		await expect(window.YTB.getSettings()).resolves.toEqual({
+			theme: 'dark',
+			spoilerDefault: false,
+			notificationPosition: 'top-right',
+			notesHidden: true,
+			buddyProgressHidden: true,
+		});
+
+		// A partial write leaves every other key untouched.
+		await window.YTB.setSettings({ theme: 'light' });
+		await expect(window.YTB.getSettings()).resolves.toMatchObject({ theme: 'light', notesHidden: true, notificationPosition: 'top-right' });
+	});
+
+	it('validates writes: illegal theme/zone values are dropped, flags become strict booleans', async () => {
+		storage = {};
+		await window.YTB.setSettings({
+			theme: 'sepia',
+			notificationPosition: 'middle-center', // the dead-center cell is not a zone
+			spoilerDefault: 'yes' as unknown as boolean,
+		});
+		expect(storage.theme).toBeUndefined();
+		expect(storage.notificationPosition).toBeUndefined();
+		expect(storage.spoilerDefault).toBe(false);
+	});
+
+	it('exposes the three themes and the eight zones (3x3 minus dead-center)', () => {
+		expect(window.YTB.THEMES).toEqual(['light', 'dark', 'system']);
+		expect(window.YTB.NOTIFICATION_ZONES).toHaveLength(8);
+		expect(new Set(window.YTB.NOTIFICATION_ZONES).size).toBe(8);
+		expect(window.YTB.NOTIFICATION_ZONES).not.toContain('middle-center');
+		expect(window.YTB.NOTIFICATION_ZONES).toContain('bottom-center');
 	});
 });
 
@@ -627,11 +710,30 @@ declare global {
 			buildFeed(
 				records: object,
 				myClientId: string,
-			): Array<{ dayKey: string; items: Array<{ type: string; at: number; note?: { id: string } | null; reply?: object; event?: object }> }>;
+			): Array<{
+				dayKey: string;
+				items: Array<{ type: string; at: number; note?: { id: string } | null; reply?: object; event?: object }>;
+			}>;
 			dayLabel(dayKey: string, nowMs?: number): string;
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
 			getHomeSectionHidden(): Promise<boolean>;
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
+			THEMES: string[];
+			NOTIFICATION_ZONES: string[];
+			getSettings(): Promise<{
+				theme: string;
+				spoilerDefault: boolean;
+				notificationPosition: string;
+				notesHidden: boolean;
+				buddyProgressHidden: boolean;
+			}>;
+			setSettings(partial: {
+				theme?: string;
+				spoilerDefault?: boolean;
+				notificationPosition?: string;
+				notesHidden?: boolean;
+				buddyProgressHidden?: boolean;
+			}): Promise<boolean>;
 			syncBuddyColors(code: string, ids: string[], successful: boolean, random?: () => number): Promise<Record<string, string>>;
 			setBuddyColor(code: string, clientId: string, color: string): Promise<boolean>;
 			clearRoomColors(code: string): Promise<void>;
