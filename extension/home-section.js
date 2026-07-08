@@ -4,9 +4,12 @@
 // top of the YouTube HOME page, above the recommendations grid (which shifts
 // down). Left: the Room Feed — a chronological, chat-like feed of Replies to
 // the viewer's Notes, @-mentions of the viewer, deemphasized recommend System
-// Messages ("X recommended you ...", recipients only), and Watch Notices ("X
-// watched ...", shown to the recommender when a Buddy watches their pick),
-// grouped under day dividers, newest at the bottom, auto-scrolled.
+// Messages ("X recommended ..." to recipients, "You recommended ... to the
+// Room" to the recommender; struck through once un-recommended), and Watch
+// Notices ("X watched ...", shown to the recommender when a Buddy watches
+// their pick), grouped under day dividers, newest at the bottom,
+// auto-scrolled. On System Messages and Watch Notices only the quoted video
+// title is a link (to the video's watch page).
 // Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
 // `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
 // horizontal thumbnail row with a live "Watched by ..." attribution and a
@@ -216,17 +219,33 @@
 		return row;
 	}
 
-	// A recommend System Message, shown only to recipients (buildFeed drops the
-	// recommender's own). The stored event title survives an un-recommend, so it
-	// stays correct even after the live Playlist Item is gone.
+	// The quoted video title as a System Message / Watch Notice row's ONLY link
+	// (CONTEXT.md Room Feed link rule) — the rest of the line stays plain
+	// deemphasized text. Falls back to plain quoted text without a videoId.
+	function buildTitleLink(videoId, title) {
+		const label = '"' + (title || 'a video') + '"';
+		if (!videoId) return document.createTextNode(label);
+		const link = document.createElement('a');
+		link.className = 'ytb-hs-title-link';
+		link.href = '/watch?v=' + encodeURIComponent(videoId);
+		link.textContent = label;
+		return link;
+	}
+
+	// A recommendation System Message (ADR-0007 amendment): recipients see
+	// 'Bob recommended "Title"', the recommender their own 'You recommended
+	// "Title" to the Room'. Only the quoted title links to the video; the stored
+	// event title survives an un-recommend, so it stays correct even after the
+	// live Playlist Item is gone — buildFeed then flags the item `removed` and
+	// the whole line renders struck through (no removal event exists).
 	function buildSystemRow(item, roster) {
 		const event = item.event;
 		const row = document.createElement('div');
-		row.className = 'ytb-hs-item ytb-hs-system';
-		const actor = YTB.mentionName(roster, event.actorClientId);
-		const title = event.title || 'a video';
+		row.className = 'ytb-hs-item ytb-hs-system' + (item.removed ? ' ytb-hs-struck' : '');
 		const text = document.createElement('span');
-		text.textContent = actor + ' recommended you "' + title + '"';
+		const title = buildTitleLink(event.videoId, event.title);
+		if (item.own) text.append('You recommended ', title, ' to the Room');
+		else text.append(YTB.mentionName(roster, event.actorClientId) + ' recommended ', title);
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
@@ -236,12 +255,13 @@
 
 	// A Watch Notice, shown only to the recommender: a Buddy has a Progress
 	// Record for one of the viewer's Recommendations. Title comes from the live
-	// Recommendation (carried on the item); the watcher's name via buddyName.
+	// Recommendation (carried on the item) and is the row's only link; the
+	// watcher's name via buddyName.
 	function buildWatchRow(item, roster) {
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item ytb-hs-system';
 		const text = document.createElement('span');
-		text.textContent = YTB.buddyName(item.clientId, item.name, roster) + ' watched "' + (item.title || 'a video') + '"';
+		text.append(YTB.buddyName(item.clientId, item.name, roster) + ' watched ', buildTitleLink(item.videoId, item.title));
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
@@ -588,6 +608,17 @@
       #${SECTION_ID} .ytb-hs-action { color: var(--ytbhs-ink-muted); }
       #${SECTION_ID} .ytb-hs-when { margin-left: 6px; font-size: 10px; color: var(--ytbhs-ink-muted); white-space: nowrap; }
       #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytbhs-ink-muted); }
+      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link {
+        color: var(--ytbhs-accent-deep);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover,
+      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; }
+      /* An un-recommended System Message: strike the sentence (the title link
+         inherits the ancestor's line-through per CSS decoration propagation),
+         leaving the timestamp legible. */
+      #${SECTION_ID} .ytb-hs-struck > span { text-decoration: line-through; }
       #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 12px; color: var(--ytbhs-ink-muted); }
       #${SECTION_ID} .ytb-hs-pl-row {
         display: flex; gap: 10px;

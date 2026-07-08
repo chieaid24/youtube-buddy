@@ -529,7 +529,8 @@ describe('room home section helpers', () => {
 		];
 		const events = [
 			{ id: 'e1', type: 'added', videoId: 'v9', title: 'Cats', actorClientId: 'bob22222', at: base + 7000 },
-			// My own recommendation — a recommender never sees their own System Message.
+			// My own recommendation — since the ADR-0007 amendment the recommender
+			// sees their own line too, flagged `own` for the "You recommended" copy.
 			{ id: 'e3', type: 'added', videoId: 'v7', title: 'Mine', actorClientId: me, at: base + 6500 },
 			{ id: 'e2', type: 'added', videoId: 'v8', title: 'Dogs', actorClientId: 'ana33333', at: base + 26 * 3600_000 },
 		];
@@ -538,13 +539,17 @@ describe('room home section helpers', () => {
 		// Two local days -> two divider groups, both ascending.
 		expect(groups).toHaveLength(2);
 		const first = groups[0].items;
-		// My own note (n1), my own reply (r2), the unrelated note (n3), the
-		// not-for-me reply (r5), and my OWN recommendation event (e3) are all
-		// absent. r4 (reply-to-mine AND mention) appears exactly once, as a reply.
-		expect(first.map((item) => item.type)).toEqual(['mention', 'reply', 'mention', 'reply', 'system']);
-		expect(first.map((item) => item.at)).toEqual([base + 1000, base + 2000, base + 4000, base + 5000, base + 7000]);
+		// My own note (n1), my own reply (r2), the unrelated note (n3), and the
+		// not-for-me reply (r5) are all absent. r4 (reply-to-mine AND mention)
+		// appears exactly once, as a reply. Recommend events all surface — my own
+		// (e3) included — in timestamp order.
+		expect(first.map((item) => item.type)).toEqual(['mention', 'reply', 'mention', 'reply', 'system', 'system']);
+		expect(first.map((item) => item.at)).toEqual([base + 1000, base + 2000, base + 4000, base + 5000, base + 6500, base + 7000]);
 		expect(first[1].note.id).toBe('n1'); // a reply item carries its parent Note
-		expect(first[4].event.actorClientId).toBe('bob22222'); // a recipient's recommend message
+		expect(first[4].event.actorClientId).toBe(me); // my own recommend line...
+		expect(first[4].own).toBe(true); // ...marked own for "You recommended" copy
+		expect(first[5].event.actorClientId).toBe('bob22222'); // a recipient's recommend message
+		expect(first[5].own).toBe(false);
 		expect(groups[1].items.map((item) => item.type)).toEqual(['system']);
 		expect(groups[0].dayKey).not.toBe(groups[1].dayKey);
 
@@ -555,7 +560,7 @@ describe('room home section helpers', () => {
 		}
 	});
 
-	it('recommend System Messages are recipient-only, added-only, and carry the stored title', () => {
+	it('recommend System Messages reach every member, own-flagged, added-only, with the stored title', () => {
 		const at = new Date(2026, 6, 4, 12).getTime();
 		const events = [
 			{ id: 'e1', type: 'added', videoId: 'v9', title: 'Otters 101', actorClientId: 'bob22222', at },
@@ -564,18 +569,25 @@ describe('room home section helpers', () => {
 			{ id: 'e3', type: 'removed', videoId: 'v7', title: 'Old', actorClientId: 'ana33333', at: at + 2000 },
 		];
 
-		// The recipient (me) sees only Bob's recommend, with the stored title
-		// (survives an un-recommend since it's captured on the event).
-		const asRecipient = window.YTB.buildFeed({ events }, me)[0].items;
-		expect(asRecipient).toHaveLength(1);
-		expect(asRecipient[0].type).toBe('system');
-		expect(asRecipient[0].event.actorClientId).toBe('bob22222');
-		expect(asRecipient[0].event.title).toBe('Otters 101');
+		// I see Bob's recommend as a recipient line AND my own as an own line
+		// (ADR-0007 amendment), both with the stored title (survives an
+		// un-recommend since it's captured on the event).
+		const mine = window.YTB.buildFeed({ events }, me)[0].items;
+		expect(mine).toHaveLength(2);
+		expect(mine.every((i) => i.type === 'system')).toBe(true);
+		expect(mine[0].event.title).toBe('Otters 101');
+		expect(mine[0].own).toBe(false);
+		expect(mine[1].event.actorClientId).toBe(me);
+		expect(mine[1].own).toBe(true);
 
-		// The recommender (bob22222) never sees his own recommendation.
-		const asRecommender = window.YTB.buildFeed({ events }, 'bob22222');
-		const bobSystems = asRecommender.flatMap((g) => g.items).filter((i) => i.type === 'system');
-		expect(bobSystems.every((i) => i.event.actorClientId !== 'bob22222')).toBe(true);
+		// The recommender (bob22222) sees his own recommendation, own-flagged.
+		const bobSystems = window.YTB.buildFeed({ events }, 'bob22222')
+			.flatMap((g) => g.items)
+			.filter((i) => i.type === 'system');
+		expect(bobSystems.map((i) => [i.event.id, i.own])).toEqual([
+			['e1', true],
+			['e2', false],
+		]);
 		// And the removed-type event surfaces for nobody.
 		for (const viewer of [me, 'bob22222', 'ana33333', 'cid44444']) {
 			const systems = window.YTB.buildFeed({ events }, viewer)
@@ -583,6 +595,41 @@ describe('room home section helpers', () => {
 				.filter((i) => i.type === 'system');
 			expect(systems.some((i) => i.event.videoId === 'v7')).toBe(false);
 		}
+	});
+
+	it('derives removed vs live System Messages from the Room current Recommendation list', () => {
+		const at = new Date(2026, 6, 4, 12).getTime();
+		const events = [
+			{ id: 'e1', type: 'added', videoId: 'v1', title: 'Still Here', actorClientId: 'bob22222', at },
+			{ id: 'e2', type: 'added', videoId: 'v2', title: 'Taken Back', actorClientId: me, at: at + 1000 },
+		];
+		// Only v1 is still in the Room's live Recommendation list — v2 was
+		// un-recommended (removals emit NO event; ADR-0007).
+		const playlist = [{ videoId: 'v1', title: 'Still Here', addedBy: 'bob22222', addedByName: 'Bob', addedAt: at }];
+
+		const items = window.YTB.buildFeed({ events, playlist }, me)[0].items;
+		expect(items).toHaveLength(2);
+		const live = items.find((i) => i.event.videoId === 'v1')!;
+		const gone = items.find((i) => i.event.videoId === 'v2')!;
+		expect(live.removed).toBe(false);
+		expect(gone.removed).toBe(true);
+		// The struck line keeps its real title, captured on the event.
+		expect(gone.event.title).toBe('Taken Back');
+		// The recipient derives the same strike from the same read.
+		const bobsGone = window.YTB.buildFeed({ events, playlist }, 'bob22222')
+			.flatMap((g) => g.items)
+			.find((i) => i.type === 'system' && i.event.videoId === 'v2')!;
+		expect(bobsGone.removed).toBe(true);
+
+		// Re-recommending v2 (a fresh event + the videoId live again) un-strikes
+		// every line for that video, old and new.
+		const reEvents = [...events, { id: 'e3', type: 'added', videoId: 'v2', title: 'Taken Back', actorClientId: me, at: at + 5000 }];
+		const rePlaylist = [...playlist, { videoId: 'v2', title: 'Taken Back', addedBy: me, addedByName: 'Aidan', addedAt: at + 5000 }];
+		const after = window.YTB.buildFeed({ events: reEvents, playlist: rePlaylist }, me)
+			.flatMap((g) => g.items)
+			.filter((i) => i.type === 'system' && i.event.videoId === 'v2');
+		expect(after).toHaveLength(2);
+		expect(after.every((i) => i.removed === false)).toBe(true);
 	});
 
 	it('Watch Notices: the recommender sees a Buddy watch their pick; others do not', () => {
