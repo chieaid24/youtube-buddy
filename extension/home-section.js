@@ -317,8 +317,10 @@
 			render();
 		});
 
-		const title = document.createElement('div');
+		const title = document.createElement('a');
 		title.className = 'ytb-hs-card-title';
+		title.href = '/watch?v=' + encodeURIComponent(item.videoId);
+		title.title = item.title;
 		title.textContent = item.title;
 
 		const watched = document.createElement('div');
@@ -598,7 +600,10 @@
         margin-top: 3px;
         font-size: 11px; font-weight: 600; line-height: 1.3;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        color: inherit; text-decoration: none;
       }
+      #${SECTION_ID} .ytb-hs-card-title:hover,
+      #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; }
       #${SECTION_ID} .ytb-hs-watched { margin-top: 1px; font-size: 10px; color: var(--ytbhs-ink-muted); }
       #${SECTION_ID} .ytb-hs-remove {
         position: absolute; top: 3px; right: 3px;
