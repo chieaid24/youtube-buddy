@@ -100,7 +100,11 @@ const CORS = {
  * built from `read`; writes are acknowledged with `{ ok: true }`. Records each
  * request as "METHOD url" into `calls` so tests can assert what hit the wire.
  */
-function stubRoomBackend(context: BrowserContext, read: { notes?: object[]; playlist?: object[] }, calls: string[] = []) {
+function stubRoomBackend(
+	context: BrowserContext,
+	read: { notes?: object[]; playlist?: object[]; progress?: object[] },
+	calls: string[] = [],
+) {
 	return context.route('http://localhost:8787/**', (route) => {
 		const request = route.request();
 		calls.push(`${request.method()} ${request.url()}`);
@@ -110,7 +114,14 @@ function stubRoomBackend(context: BrowserContext, read: { notes?: object[]; play
 				status: 200,
 				contentType: 'application/json',
 				headers: CORS,
-				body: JSON.stringify({ progress: [], presence: [], notes: read.notes ?? [], replies: [], playlist: read.playlist ?? [], events: [] }),
+				body: JSON.stringify({
+					progress: read.progress ?? [],
+					presence: [],
+					notes: read.notes ?? [],
+					replies: [],
+					playlist: read.playlist ?? [],
+					events: [],
+				}),
 			});
 		}
 		return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
@@ -201,7 +212,16 @@ test('hovering a Note dot hides the native scrubber timecode, keeping the thumbn
 						myClientId: 'me-client',
 						roomCode: 'silly-otters',
 						notes: [
-							{ id: 'note-1', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 2, kind: 'text', body: 'great moment', createdAt: 1 },
+							{
+								id: 'note-1',
+								clientId: 'buddy-1',
+								name: 'Sam',
+								videoId: 'fixture-video',
+								timestamp: 2,
+								kind: 'text',
+								body: 'great moment',
+								createdAt: 1,
+							},
 						],
 						replies: [],
 					},
@@ -261,7 +281,9 @@ test('Room Home Toggle hides and restores the Room Home Section, persisting acro
 	const errors = collectErrors(context);
 
 	try {
-		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }));
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
 
@@ -385,9 +407,39 @@ function silentWav(seconds: number): Buffer {
 // One Buddy-authored Note of each dot kind on a 20s video. goHereTarget is 1s
 // before the timestamp, so the Reaction seeks to 7 and the Spoiler to 15.
 const roomNotes = [
-	{ id: 'n-text', clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 4, kind: 'text', body: 'hello', spoiler: false, createdAt: 1 },
-	{ id: 'n-react', clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 8, kind: 'emoji', body: '\u{1F525}', spoiler: false, createdAt: 2 },
-	{ id: 'n-spoiler', clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 16, kind: 'text', body: 'secret', spoiler: true, createdAt: 3 },
+	{
+		id: 'n-text',
+		clientId: 'buddy-1',
+		name: 'Buddy',
+		videoId: 'fixture-video',
+		timestamp: 4,
+		kind: 'text',
+		body: 'hello',
+		spoiler: false,
+		createdAt: 1,
+	},
+	{
+		id: 'n-react',
+		clientId: 'buddy-1',
+		name: 'Buddy',
+		videoId: 'fixture-video',
+		timestamp: 8,
+		kind: 'emoji',
+		body: '\u{1F525}',
+		spoiler: false,
+		createdAt: 2,
+	},
+	{
+		id: 'n-spoiler',
+		clientId: 'buddy-1',
+		name: 'Buddy',
+		videoId: 'fixture-video',
+		timestamp: 16,
+		kind: 'text',
+		body: 'secret',
+		spoiler: true,
+		createdAt: 3,
+	},
 ];
 
 test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots keep their behavior', async () => {
@@ -540,7 +592,9 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 			},
 			calls,
 		);
-		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }));
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
 		// The cards load real i.ytimg.com thumbnail URLs; the fixture videoIds
 		// would 404 there and fail the console-error gate.
 		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
@@ -579,6 +633,128 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		// A Dismiss never touches the Room's Recommendation on the backend: no
 		// playlist write of any kind hit the wire.
 		expect(calls.filter((call) => call.startsWith('DELETE ') || call.includes('/playlist'))).toEqual([]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, sharing relocation, home-section sync', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {
+			notes: roomNotes,
+			progress: [{ clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 5, duration: 20, updatedAt: Date.now() }],
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) => {
+			const url = new URL(route.request().url());
+			return route.fulfill({
+				status: 200,
+				contentType: 'text/html',
+				body: url.pathname === '/watch' ? playbackFixture(mediaSrc) : homeFixture,
+			});
+		});
+		const popup = await seedPairedRoom(context);
+		await popup.reload(); // re-init the popup UI onto the seeded Room
+
+		// Sharing was seeded OFF: the main view offers the prominent turn-on and
+		// no read-only line. Turning it on is instant and flips the presentation.
+		await expect(popup.locator('#view-connected')).toBeVisible();
+		await expect(popup.locator('#sharing-turn-on')).toBeVisible();
+		await expect(popup.locator('#sharing-on')).toBeHidden();
+		await popup.locator('#sharing-turn-on').click();
+		await expect(popup.locator('#sharing-on')).toBeVisible();
+		await expect(popup.locator('#sharing-turn-on')).toBeHidden();
+
+		// The gear opens Settings as a mutually-exclusive view.
+		await popup.locator('#settings-open').click();
+		await expect(popup.locator('#view-settings')).toBeVisible();
+		await expect(popup.locator('#room-section')).toBeHidden();
+
+		// A watch page with three Note dots, a Buddy marker, and the + button.
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0);
+		});
+		const dots = page.locator('.ytb-note-dot');
+		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
+
+		// Theme Preference: Dark stamps data-theme on BOTH surfaces live; System
+		// removes it again (back to prefers-color-scheme).
+		await popup.locator('[data-theme-choice="dark"]').click();
+		await expect(popup.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await popup.locator('[data-theme-choice="system"]').click();
+		await expect.poll(() => popup.evaluate(() => document.documentElement.hasAttribute('data-theme'))).toBe(false);
+		await expect.poll(() => page.evaluate(() => document.documentElement.hasAttribute('data-theme'))).toBe(false);
+
+		// Notes off: zero Note UI on the player, live — dots AND the + button —
+		// while the Buddy marker (independent setting) survives. Back on restores.
+		await popup.locator('#set-notes').click();
+		await expect(dots).toHaveCount(0);
+		await expect(page.locator('#ytb-note-button')).toHaveCount(0);
+		await expect(page.locator('.ytb-watch-marker')).toHaveCount(1);
+		await popup.locator('#set-notes').click();
+		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+
+		// Buddy Progress off: the timeline marker disappears live; dots stay.
+		await popup.locator('#set-progress').click();
+		await expect(page.locator('.ytb-watch-marker')).toHaveCount(0);
+		await expect(dots).toHaveCount(3);
+		await popup.locator('#set-progress').click();
+		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
+
+		// Notification Position + Spoiler Default persist under their keys.
+		await popup.locator('.zone-cell[data-zone="top-left"]').click();
+		await expect(popup.locator('.zone-cell[data-zone="top-left"]')).toHaveAttribute('aria-checked', 'true');
+		await popup.locator('#set-spoiler').click();
+		await expect
+			.poll(async () => popup.evaluate(() => chrome.storage.local.get(['notificationPosition', 'spoilerDefault'])))
+			.toEqual({ notificationPosition: 'top-left', spoilerDefault: false });
+
+		// The composer seeds its Spoiler checkbox from the new default.
+		await page.locator('#ytb-note-button').click();
+		const spoilerBox = page.locator('#ytb-note-composer input[type="checkbox"]');
+		await expect(spoilerBox).toBeVisible();
+		await expect(spoilerBox).not.toBeChecked();
+		await page.keyboard.press('Escape');
+
+		// Stop sharing now lives in Settings, confirm dialog intact.
+		await popup.locator('#settings-sharing').click();
+		await expect(popup.locator('#confirm-overlay')).toBeVisible();
+		await popup.locator('#confirm-disconnect').click();
+		await expect(popup.locator('#settings-sharing')).toHaveText('Start sharing');
+		await popup.locator('#settings-sharing').click(); // starting is instant
+		await expect(popup.locator('#settings-sharing')).toHaveText('Stop sharing');
+
+		// Room Home Section visibility: the popup control and the guide toggle
+		// drive the same key and stay in sync live, both directions.
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		const guideToggle = home.locator('#ytb-home-toggle');
+		const homeSection = home.locator('#ytb-home-section');
+		await expect(guideToggle).toBeVisible();
+		await expect(homeSection).toHaveCount(1);
+		await popup.locator('#set-home').click();
+		await expect(homeSection).toHaveCount(0);
+		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
+		await guideToggle.click();
+		await expect(homeSection).toHaveCount(1);
+		await expect(popup.locator('#set-home')).toHaveAttribute('aria-checked', 'true');
+
+		// Back returns to the room view Settings was opened from.
+		await popup.locator('#settings-back').click();
+		await expect(popup.locator('#view-settings')).toBeHidden();
+		await expect(popup.locator('#view-connected')).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

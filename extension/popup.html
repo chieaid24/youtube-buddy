@@ -103,6 +103,65 @@
 				}
 			}
 
+			/* --- Theme Preference overrides (ADR-0008) ---
+			   theme.js stamps data-theme="light"|"dark" on <html> from the stored
+			   preference ('system' leaves it unset). :root[data-theme=...] (0,2,0)
+			   out-specifies the media query's bare :root (0,1,0), so a forced mode
+			   wins over the OS in both directions. Each block re-asserts exactly
+			   the tokens the dark media block flips. */
+			:root[data-theme='dark'] {
+				--c-surface: oklch(23% 0.014 52);
+				--c-surface-tint: oklch(27% 0.018 52);
+				--c-surface-sunk: oklch(20% 0.014 52);
+				--c-line: oklch(33% 0.018 52);
+				--c-line-strong: oklch(40% 0.02 52);
+				--c-ink: oklch(94% 0.015 68);
+				--c-ink-muted: oklch(74% 0.02 62);
+				--c-ink-faint: oklch(58% 0.018 58);
+				--c-accent-050: oklch(29% 0.025 55);
+				--c-accent-100: oklch(33% 0.035 55);
+				--c-accent-200: oklch(46% 0.06 55);
+				--c-accent-500: oklch(78% 0.13 58);
+				--c-accent-600: oklch(84% 0.125 60);
+				--c-accent-700: oklch(68% 0.14 55);
+				--c-accent-800: oklch(82% 0.12 60);
+				--c-success-text: oklch(78% 0.13 150);
+				--c-danger-text: oklch(72% 0.15 28);
+				--c-on-accent: oklch(25% 0.02 50);
+				--c-backdrop: oklch(10% 0.01 52 / 0.5);
+				--c-ring: oklch(78% 0.13 58 / 0.55);
+				--c-raised: oklch(28% 0.018 52);
+				--e-pop: 0 8px 24px oklch(0% 0 0 / 0.45);
+				--e-dialog: 0 14px 40px oklch(0% 0 0 / 0.55);
+				color-scheme: dark;
+			}
+			:root[data-theme='light'] {
+				--c-surface: oklch(99.2% 0.006 62);
+				--c-surface-tint: oklch(97.5% 0.018 62);
+				--c-surface-sunk: oklch(95% 0.02 60);
+				--c-line: oklch(91% 0.018 60);
+				--c-line-strong: oklch(85% 0.025 58);
+				--c-ink: oklch(28% 0.022 50);
+				--c-ink-muted: oklch(50% 0.028 52);
+				--c-ink-faint: oklch(64% 0.025 54);
+				--c-accent-050: oklch(97.5% 0.018 62);
+				--c-accent-100: oklch(94% 0.045 60);
+				--c-accent-200: oklch(88% 0.075 58);
+				--c-accent-500: oklch(76% 0.115 55);
+				--c-accent-600: oklch(70% 0.13 52);
+				--c-accent-700: oklch(60% 0.14 50);
+				--c-accent-800: oklch(50% 0.13 48);
+				--c-success-text: oklch(52% 0.14 150);
+				--c-danger-text: oklch(53% 0.16 30);
+				--c-on-accent: oklch(28% 0.022 50);
+				--c-backdrop: oklch(28% 0.022 50 / 0.32);
+				--c-ring: oklch(76% 0.115 55 / 0.55);
+				--c-raised: oklch(99.2% 0.006 62);
+				--e-pop: 0 6px 20px oklch(52% 0.06 52 / 0.2);
+				--e-dialog: 0 12px 34px oklch(45% 0.06 52 / 0.26);
+				color-scheme: light;
+			}
+
 			* {
 				box-sizing: border-box;
 			}
@@ -150,7 +209,7 @@
 			}
 
 			#name-field {
-				width: 148px;
+				width: 130px;
 			}
 			#name-field.is-locked .field-edit {
 				display: none;
@@ -230,6 +289,14 @@
 			#name-edit svg {
 				width: 14px;
 				height: 14px;
+			}
+			#settings-open {
+				width: 26px;
+				height: 26px;
+			}
+			#settings-open svg {
+				width: 15px;
+				height: 15px;
 			}
 
 			/* ---------- section eyebrow ---------- */
@@ -514,52 +581,27 @@
 				color: var(--c-ink-muted);
 			}
 
-			/* Sharing pill: state dot + word; stopping is confirmed, so hovering the
-			   live "Sharing" pill strikes the word as the stop affordance. */
-			.pill {
+			/* Sharing state on the main view: a muted read-only line while Sharing
+			   is on (the interactive stop lives in Settings), or a prominent
+			   turn-on button while it is off (starting is instant, unguarded). */
+			.sharing-on {
 				display: inline-flex;
 				align-items: center;
 				flex: none;
 				gap: 6px;
-				padding: 4px 10px;
-				border: 1px solid var(--c-line);
-				border-radius: var(--r-pill);
-				background: var(--c-surface);
 				font: 600 11px/1.3 var(--font);
-				color: var(--c-ink);
-				cursor: pointer;
-				transition:
-					color var(--dur-base) var(--ease-out),
-					border-color var(--dur-base) var(--ease-out);
+				color: var(--c-ink-muted);
 			}
-			.pill:focus-visible {
-				outline: none;
-				box-shadow: 0 0 0 3px var(--c-ring);
-			}
-			.pill-dot {
+			.sharing-dot {
 				width: 7px;
 				height: 7px;
 				border-radius: var(--r-pill);
 				background: var(--c-success);
-				transition: background var(--dur-base) var(--ease-out);
 			}
-			.pill.is-off {
-				color: var(--c-ink-muted);
-			}
-			.pill.is-off .pill-dot {
-				background: var(--c-ink-faint);
-			}
-			.pill:not(.is-off):hover #sharing-label,
-			.pill:not(.is-off):focus-visible #sharing-label {
-				text-decoration: line-through;
-			}
-			.pill.is-off:hover .pill-dot,
-			.pill.is-off:focus-visible .pill-dot {
-				background: var(--c-success);
-			}
-			.status-panel[data-state='full'] .pill,
-			.status-panel[data-state='unpaired'] .pill {
-				display: none;
+			.btn-compact {
+				flex: none;
+				padding: 6px 11px;
+				font-size: 12px;
 			}
 
 			/* ---------- roster ---------- */
@@ -652,9 +694,185 @@
 				white-space: nowrap;
 			}
 
-			#leave-room {
+			/* ---------- settings view ---------- */
+
+			.settings-head {
+				display: flex;
+				align-items: center;
+				gap: var(--sp-2);
+				margin-bottom: var(--sp-3);
+			}
+			.settings-title {
+				margin: 0;
+				font-size: 14px;
+				line-height: 1.2;
+				font-weight: 800;
+			}
+			#settings-back {
+				width: 26px;
+				height: 26px;
+			}
+			#settings-back svg {
+				width: 15px;
+				height: 15px;
+			}
+
+			.set-group {
+				margin-bottom: var(--sp-4);
+			}
+			.set-group:last-child {
+				margin-bottom: 0;
+			}
+
+			/* Theme: a three-way segmented control on a sunk track. */
+			.seg {
+				display: flex;
+				gap: 2px;
+				padding: 3px;
+				background: var(--c-surface-sunk);
+				border-radius: var(--r-md);
+			}
+			.seg-btn {
+				flex: 1;
+				padding: 6px 0;
+				border: none;
+				border-radius: var(--r-sm);
+				background: transparent;
+				font: 600 12px/1.3 var(--font);
+				color: var(--c-ink-muted);
+				cursor: pointer;
+				transition:
+					background var(--dur-quick) var(--ease-out),
+					color var(--dur-quick) var(--ease-out);
+			}
+			.seg-btn:hover {
+				color: var(--c-ink);
+			}
+			.seg-btn:focus-visible {
+				outline: none;
+				box-shadow: 0 0 0 3px var(--c-ring);
+			}
+			.seg-btn[aria-checked='true'] {
+				background: var(--c-surface);
+				color: var(--c-ink);
+				font-weight: 700;
+				box-shadow: 0 1px 3px oklch(45% 0.06 52 / 0.18);
+			}
+
+			/* Notification Position: a 16:9 "monitor" of eight clickable zones
+			   (a 3x3 grid minus the dead-center cell). */
+			.zone-picker {
+				box-sizing: border-box;
+				display: grid;
+				grid-template-columns: repeat(3, 1fr);
+				grid-template-rows: repeat(3, 1fr);
+				gap: 4px;
+				width: 176px;
+				aspect-ratio: 16 / 9;
+				padding: 6px;
+				border: 1px solid var(--c-line-strong);
+				border-radius: var(--r-md);
+				background: var(--c-surface-sunk);
+			}
+			.zone-cell {
+				padding: 0;
+				border: 1px solid var(--c-line-strong);
+				border-radius: 4px;
+				background: var(--c-surface);
+				cursor: pointer;
+				transition:
+					background var(--dur-quick) var(--ease-out),
+					border-color var(--dur-quick) var(--ease-out);
+			}
+			.zone-cell:hover {
+				border-color: var(--c-accent-500);
+				background: var(--c-accent-100);
+			}
+			.zone-cell:focus-visible {
+				outline: none;
+				box-shadow: 0 0 0 2px var(--c-ring);
+			}
+			.zone-cell[aria-checked='true'] {
+				background: var(--c-accent-500);
+				border-color: var(--c-accent-600);
+			}
+			.set-hint {
+				margin: var(--sp-1) 0 0 2px;
+				font-size: 11px;
+				line-height: 1.3;
+				font-weight: 500;
+				color: var(--c-ink-muted);
+			}
+
+			/* Toggle rows: label (+ small sub-line) left, switch right. */
+			.set-row {
+				display: flex;
+				align-items: center;
+				gap: var(--sp-2);
 				width: 100%;
-				margin-top: var(--sp-3);
+				margin: 0;
+				padding: 7px 6px;
+				border: none;
+				border-radius: var(--r-sm);
+				background: none;
+				font: 600 13px/1.3 var(--font);
+				color: var(--c-ink);
+				text-align: left;
+				cursor: pointer;
+				transition: background var(--dur-quick) var(--ease-out);
+			}
+			.set-row:hover {
+				background: var(--c-accent-050);
+			}
+			.set-row:focus-visible {
+				outline: none;
+				box-shadow: 0 0 0 3px var(--c-ring);
+			}
+			.set-row-text {
+				flex: 1 1 auto;
+				min-width: 0;
+			}
+			.set-sub {
+				display: block;
+				font-size: 11px;
+				line-height: 1.3;
+				font-weight: 500;
+				color: var(--c-ink-muted);
+			}
+			.switch {
+				position: relative;
+				flex: none;
+				width: 30px;
+				height: 16px;
+				border-radius: var(--r-pill);
+				background: var(--c-line-strong);
+				transition: background var(--dur-base) var(--ease-out);
+			}
+			.set-row[aria-checked='true'] .switch {
+				background: var(--c-accent-500);
+			}
+			.switch-knob {
+				position: absolute;
+				top: 2px;
+				left: 2px;
+				width: 12px;
+				height: 12px;
+				border-radius: 50%;
+				background: var(--c-surface);
+				box-shadow: 0 1px 2px oklch(0% 0 0 / 0.25);
+				transition: transform var(--dur-base) var(--ease-spring);
+			}
+			.set-row[aria-checked='true'] .switch-knob {
+				transform: translateX(14px);
+			}
+
+			/* Room actions relocated from the main view (confirm dialogs intact). */
+			.room-actions {
+				display: flex;
+				gap: var(--sp-2);
+			}
+			.room-actions .btn {
+				flex: 1;
 			}
 
 			/* ---------- color grid popover ---------- */
@@ -793,6 +1011,10 @@
 					transform: none;
 					transition-property: background, color, border-color, box-shadow;
 				}
+				.switch,
+				.switch-knob {
+					transition: none;
+				}
 				#copy-code svg {
 					transition: opacity var(--dur-quick) ease-out;
 					transform: translate(-50%, -50%);
@@ -831,9 +1053,25 @@
 					<input id="name" type="text" placeholder='Buddy "Buddy" McGee' autocomplete="off" />
 				</div>
 			</div>
+			<button id="settings-open" type="button" class="icon-btn" aria-label="Settings" title="Settings">
+				<svg
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="3"></circle>
+					<path
+						d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+					></path>
+				</svg>
+			</button>
 		</header>
 
-		<section>
+		<section id="room-section">
 			<h2 class="eyebrow">Room code</h2>
 
 			<!-- Chooser: shown when there is no code yet, or after "Leave room". -->
@@ -909,16 +1147,99 @@
 							</svg>
 							<span id="status-text"></span>
 						</span>
-						<button id="sharing-toggle" type="button" class="pill">
-							<span class="pill-dot" aria-hidden="true"></span>
-							<span id="sharing-label">Sharing</span>
-						</button>
+						<!-- Sharing on: glanceable read-only line (stop lives in Settings).
+						     Sharing off: a prominent one-click turn-on. -->
+						<span id="sharing-on" class="sharing-on" hidden>
+							<span class="sharing-dot" aria-hidden="true"></span>
+							Sharing on
+						</span>
+						<button id="sharing-turn-on" type="button" class="btn btn-primary btn-compact" hidden>Turn on sharing</button>
 					</div>
 					<p id="status-sub" hidden></p>
 					<div id="roster" class="roster"></div>
 				</div>
+			</div>
+		</section>
 
-				<button id="leave-room" type="button" class="btn btn-danger">Leave room</button>
+		<!-- Settings: the fourth mutually-exclusive view (gear in the header). -->
+		<section id="view-settings" class="view" hidden>
+			<div class="settings-head">
+				<button id="settings-back" type="button" class="icon-btn" aria-label="Back">
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M19 12H5"></path>
+						<path d="m12 19-7-7 7-7"></path>
+					</svg>
+				</button>
+				<h2 class="settings-title">Settings</h2>
+			</div>
+
+			<div class="set-group">
+				<h3 class="eyebrow">Theme</h3>
+				<div id="theme-seg" class="seg" role="radiogroup" aria-label="Theme Preference">
+					<button type="button" class="seg-btn" role="radio" aria-checked="false" data-theme-choice="light">Light</button>
+					<button type="button" class="seg-btn" role="radio" aria-checked="false" data-theme-choice="dark">Dark</button>
+					<button type="button" class="seg-btn" role="radio" aria-checked="true" data-theme-choice="system">System</button>
+				</div>
+			</div>
+
+			<div class="set-group">
+				<h3 class="eyebrow">Notification position</h3>
+				<!-- Zone cells are built by popup.js from YTB.NOTIFICATION_ZONES. -->
+				<div id="zone-picker" class="zone-picker" role="radiogroup" aria-label="Notification Position"></div>
+				<p class="set-hint">Where playback notifications appear on the video.</p>
+			</div>
+
+			<div class="set-group">
+				<h3 class="eyebrow">On video</h3>
+				<button id="set-notes" type="button" class="set-row" role="switch" aria-checked="true">
+					<span class="set-row-text">
+						Notes
+						<span class="set-sub">Dots, previews, and playback notifications</span>
+					</span>
+					<span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+				</button>
+				<button id="set-progress" type="button" class="set-row" role="switch" aria-checked="true">
+					<span class="set-row-text">
+						Buddy progress
+						<span class="set-sub">Timeline markers and thumbnail bars</span>
+					</span>
+					<span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+				</button>
+				<button id="set-spoiler" type="button" class="set-row" role="switch" aria-checked="true">
+					<span class="set-row-text">
+						Spoiler by default
+						<span class="set-sub">New notes start marked as spoilers</span>
+					</span>
+					<span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+				</button>
+			</div>
+
+			<div class="set-group">
+				<h3 class="eyebrow">Home page</h3>
+				<button id="set-home" type="button" class="set-row" role="switch" aria-checked="true">
+					<span class="set-row-text">
+						Buddy Room section
+						<span class="set-sub">The Room panel on YouTube Home</span>
+					</span>
+					<span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+				</button>
+			</div>
+
+			<!-- Room actions, relocated from the main view. Hidden while Unpaired. -->
+			<div id="settings-room" class="set-group" hidden>
+				<h3 class="eyebrow">Room</h3>
+				<div class="room-actions">
+					<button id="settings-sharing" type="button" class="btn btn-neutral">Stop sharing</button>
+					<button id="leave-room" type="button" class="btn btn-danger">Leave room</button>
+				</div>
 			</div>
 		</section>
 

@@ -37,6 +37,16 @@
 		ensureRow();
 	});
 
+	// A popup-Settings flip of the same homeSectionHidden key must reflect in
+	// this guide row live (our own click also lands here — idempotent).
+	chrome.storage.onChanged.addListener((changes, area) => {
+		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
+		hidden = changes.homeSectionHidden.newValue === true;
+		const row = document.getElementById(ROW_ID);
+		if (row) syncRow(row);
+		else ensureRow();
+	});
+
 	function isHomePath() {
 		return location.pathname === '/';
 	}

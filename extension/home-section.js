@@ -388,7 +388,11 @@
 		// Nudge the single poller (renderer.js) to re-read the Room immediately
 		// instead of waiting out its 60s cycle. Idempotent for every consumer:
 		// it re-emits the CURRENT location, exactly like a same-page navigation.
-		document.dispatchEvent(new CustomEvent('ytb:navigate', { detail: { url: location.href, videoId: null } }));
+		document.dispatchEvent(
+			new CustomEvent('ytb:navigate', {
+				detail: { url: location.href, videoId: null },
+			}),
+		);
 	}
 
 	// ---------------------------------------------------------------------------
@@ -437,8 +441,24 @@
 	document.addEventListener('ytb:home-section-visibility', (event) => {
 		if (!YTB.isContextActive()) return;
 		hiddenPref = Boolean(event.detail && event.detail.hidden);
-		ensureSection();
+		applyVisibility();
 	});
+
+	// The same preference can now also flip in the popup's Settings view; the
+	// storage change is the only signal that reaches this tab, so follow it
+	// live too (the guide-toggle path above also lands here — idempotent).
+	chrome.storage.onChanged.addListener((changes, area) => {
+		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
+		hiddenPref = changes.homeSectionHidden.newValue === true;
+		applyVisibility();
+	});
+
+	// Re-gate the section after a visibility flip: gone while hidden, freshly
+	// injected AND rendered from the latest Room data when re-shown.
+	function applyVisibility() {
+		const section = ensureSection();
+		if (section) render(section);
+	}
 
 	YTB.onContextInvalidated(() => {
 		document.getElementById(SECTION_ID)?.remove();
