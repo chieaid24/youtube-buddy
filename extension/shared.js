@@ -892,6 +892,33 @@ const YTB = {
 	},
 
 	/**
+	 * Tooltip for a Room Feed row's quoted-body link. The visible text is the
+	 * Note's or Reply's body, so the link's destination — the Note's video, at the
+	 * Note's moment — is nowhere on the row; the tooltip names both:
+	 * `Open this note on "Title" at 6:52`. The `on "Title"` clause drops when the
+	 * Note carries no title, the same no-placeholder rule as videoContext.
+	 * @param {{videoTitle?: string, timestamp: number}} note
+	 * @returns {string}
+	 */
+	noteLinkTooltip(note) {
+		const context = YTB.videoContext(note);
+		const at = YTB.formatTime(note && note.timestamp);
+		return 'Open this note ' + (context === '' ? '' : context + ' ') + 'at ' + at;
+	},
+
+	/**
+	 * Tooltip for a System Message / Watch Notice's title link, which opens the
+	 * video's watch page: `Watch "Title"`. Falls back to `Watch this video` when
+	 * the row has no title, mirroring the link's own "a video" label.
+	 * @param {?string} title
+	 * @returns {string}
+	 */
+	titleLinkTooltip(title) {
+		const trimmed = typeof title === 'string' ? title.trim() : '';
+		return trimmed === '' ? 'Watch this video' : 'Watch "' + trimmed + '"';
+	},
+
+	/**
 	 * "Watched by" attribution for one recommended video, derived live from
 	 * the Room's Progress Records: "You" first (only when you have a record for
 	 * the video), then up to two Buddy Display Names most-recent first (blank

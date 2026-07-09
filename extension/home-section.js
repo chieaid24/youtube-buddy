@@ -243,6 +243,9 @@
 		if (canOpen) {
 			const seconds = Math.max(0, Math.floor(Number(target.timestamp)));
 			body.href = '/watch?v=' + encodeURIComponent(target.videoId) + '&t=' + seconds;
+			// On a reply row the quoted text is the Reply, but the link lands on its
+			// parent Note's video and moment — neither of which the row always shows.
+			body.title = YTB.noteLinkTooltip(target);
 			body.addEventListener('click', () => {
 				YTB.setPendingNoteOpen({ videoId: target.videoId, noteId: target.id });
 			});
@@ -276,6 +279,7 @@
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-title-link';
 		link.href = '/watch?v=' + encodeURIComponent(videoId);
+		link.title = YTB.titleLinkTooltip(title);
 		link.textContent = label;
 		return link;
 	}
