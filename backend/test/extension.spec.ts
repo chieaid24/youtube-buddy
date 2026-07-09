@@ -859,6 +859,25 @@ describe('settings (per install)', () => {
 		expect(new Set(window.YTB.NOTIFICATION_EDGES)).toEqual(new Set(['top', 'bottom', 'left', 'right']));
 		expect(window.YTB.NOTIFICATION_EDGES).toContain('bottom');
 	});
+
+	it('themeMarker maps preference x page-darkness to the data-theme value (ADR-0009)', () => {
+		const marker = window.YTB.themeMarker;
+		// Forced Light/Dark win regardless of the surrounding page (or its absence).
+		for (const pageDark of [true, false, null]) {
+			expect(marker('light', pageDark)).toBe('light');
+			expect(marker('dark', pageDark)).toBe('dark');
+		}
+		// Auto ('system') on a YouTube page follows YouTube's own theme.
+		expect(marker('system', true)).toBe('dark');
+		expect(marker('system', false)).toBe('light');
+		// Auto off-page (the popup, pageDark null) leaves the marker unset so the
+		// OS @media (prefers-color-scheme) fallback rules.
+		expect(marker('system', null)).toBeNull();
+		// Any unexpected/absent preference is treated as Auto.
+		expect(marker(undefined as unknown as string, true)).toBe('dark');
+		expect(marker('sepia', false)).toBe('light');
+		expect(marker('sepia', null)).toBeNull();
+	});
 });
 
 describe('recommended for you helpers (ADR-0007)', () => {
@@ -1038,6 +1057,7 @@ declare global {
 			clearPendingNoteOpen(): Promise<boolean>;
 			THEMES: string[];
 			NOTIFICATION_EDGES: string[];
+			themeMarker(preference: string, pageDark: boolean | null): 'light' | 'dark' | null;
 			getSettings(): Promise<{
 				theme: string;
 				spoilerDefault: boolean;

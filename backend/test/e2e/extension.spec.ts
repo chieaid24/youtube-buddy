@@ -1502,14 +1502,25 @@ test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, shari
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
 		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
 
-		// Theme Preference: Dark stamps data-theme on BOTH surfaces live; System
-		// removes it again (back to prefers-color-scheme).
+		// Theme Preference: forced Dark stamps data-theme on BOTH surfaces live.
 		await popup.locator('[data-theme-choice="dark"]').click();
 		await expect(popup.locator('html')).toHaveAttribute('data-theme', 'dark');
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+		// Auto (stored 'system', ADR-0009): the popup follows the OS so its marker
+		// is unset, but in-page surfaces follow YouTube's own theme. The fixture is
+		// a light page, so the watch page stamps data-theme="light".
 		await popup.locator('[data-theme-choice="system"]').click();
 		await expect.poll(() => popup.evaluate(() => document.documentElement.hasAttribute('data-theme'))).toBe(false);
-		await expect.poll(() => page.evaluate(() => document.documentElement.hasAttribute('data-theme'))).toBe(false);
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+		// Flipping YouTube's appearance restamps the page live — no reload — while
+		// the popup, which cannot see the page, stays unset.
+		await page.evaluate(() => document.documentElement.setAttribute('dark', ''));
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await page.evaluate(() => document.documentElement.removeAttribute('dark'));
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+		await expect(popup.evaluate(() => document.documentElement.hasAttribute('data-theme'))).resolves.toBe(false);
 
 		// Notes off: zero Note UI on the player, live — dots AND the + button —
 		// while the Buddy marker (independent setting) survives. Back on restores.

@@ -3,9 +3,15 @@
 	<head>
 		<meta charset="utf-8" />
 		<title>YouTube Buddy</title>
+		<!-- shared.js first (as in the content-script order) so window.YTB — and
+		     its themeMarker helper — is defined before theme.js stamps the Theme
+		     Preference. It only defines the YTB global (no DOM), so it is safe to
+		     run in <head>; popup.js/room-code.js still load at the end of body. -->
+		<script src="shared.js"></script>
 		<!-- theme.js is the single home of the bundled Nunito subset: it injects
 		     the 'YTB Rounded' @font-face (and the namespaced on-video tokens,
-		     inert here) so the popup and the on-video Note UI share one blob. -->
+		     inert here) so the popup and the on-video Note UI share one blob. It
+		     stamps the marker from the stored preference (ADR-0008/0009). -->
 		<script src="theme.js"></script>
 		<style>
 			:root {
@@ -103,11 +109,13 @@
 				}
 			}
 
-			/* --- Theme Preference overrides (ADR-0008) ---
+			/* --- Theme Preference overrides (ADR-0008/0009) ---
 			   theme.js stamps data-theme="light"|"dark" on <html> from the stored
-			   preference ('system' leaves it unset). :root[data-theme=...] (0,2,0)
-			   out-specifies the media query's bare :root (0,1,0), so a forced mode
-			   wins over the OS in both directions. Each block re-asserts exactly
+			   preference. The popup keeps 'system' (the "Auto" option) unset, so the
+			   media query below rules — it cannot see a YouTube page to follow (only
+			   in-page surfaces track YouTube under Auto, ADR-0009). :root[data-theme=...]
+			   (0,2,0) out-specifies the media query's bare :root (0,1,0), so a forced
+			   mode wins over the OS in both directions. Each block re-asserts exactly
 			   the tokens the dark media block flips. */
 			:root[data-theme='dark'] {
 				--c-surface: oklch(23% 0.014 52);
@@ -1199,7 +1207,7 @@
 				<div id="theme-seg" class="seg" role="radiogroup" aria-label="Theme Preference">
 					<button type="button" class="seg-btn" role="radio" aria-checked="false" data-theme-choice="light">Light</button>
 					<button type="button" class="seg-btn" role="radio" aria-checked="false" data-theme-choice="dark">Dark</button>
-					<button type="button" class="seg-btn" role="radio" aria-checked="true" data-theme-choice="system">System</button>
+					<button type="button" class="seg-btn" role="radio" aria-checked="true" data-theme-choice="system">Auto</button>
 				</div>
 			</div>
 
@@ -1272,7 +1280,6 @@
 			</div>
 		</div>
 
-		<script src="shared.js"></script>
 		<script src="room-code.js"></script>
 		<script src="popup.js"></script>
 	</body>

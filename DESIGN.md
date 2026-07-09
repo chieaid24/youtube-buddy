@@ -155,13 +155,21 @@ On-video specifics, on top of the popup values:
   in light, espresso in dark) with the elevation shadows, so text stays legible over
   bright frames. Reaction previews/bursts are the deliberate exception — transparent
   emoji-over-video with a text shadow, since they are not cards.
-- **Theme follows `prefers-color-scheme` as the System default** of the Theme
-  Preference (ADR-0008), independent of YouTube's own theme toggle (the popup
-  behaves the same way). An explicit Light/Dark choice in Settings stamps
-  `data-theme="light"|"dark"` on the document root, and the
-  `:root[data-theme=...]` token blocks (in `theme.js` and `popup.html`)
-  out-specify the media query, so a forced mode wins over the OS in both
-  directions; System removes the attribute and falls back to the media query.
+- **Theme Preference: forced Light/Dark, or Auto** (ADR-0008/0009). An explicit
+  Light/Dark choice in Settings stamps `data-theme="light"|"dark"` on the
+  document root, and the `:root[data-theme=...]` token blocks (in `theme.js` and
+  `popup.html`) out-specify the media query, so a forced mode wins over the OS in
+  both directions. The third option is **Auto** (stored `'system'`): on YouTube
+  pages the marker follows YouTube's own theme (`<html dark>` maps to
+  `data-theme`, restamped live on the `ytb:yt-theme` flip content.js emits) so
+  in-page surfaces match their surroundings; in the popup — which cannot see a
+  page — Auto leaves the marker unset and falls back to `prefers-color-scheme`.
+  The pure marker decision lives in `shared.js` (`YTB.themeMarker`).
+- **The Room Home Section** (ADR-0005) is a normal token surface too: it consumes
+  these `--ytb-*` tokens with no private palette, so it follows the Theme
+  Preference — including Auto tracking YouTube's theme — exactly like the Note UI.
+  Its thumbnail Dismiss keeps a fixed dark scrim + light glyph (a media overlay,
+  the same exception as reaction previews), not a palette color.
 - The dark block also flips the light washes (`--ytb-accent-050/100/200`) dark and
   lifts `--ytb-danger-text`, mirroring the popup's inline dark overrides, so
   "hover = accent-050 wash" and "errors = danger-text" read correctly in both
