@@ -363,17 +363,25 @@ describe('POST /notes?code=', () => {
 		expect(await res.json()).toEqual({ error: 'a reaction cannot be a spoiler', category: 'validation' });
 	});
 
+	// The offending field named in `error` is part of the contract, and so is the
+	// order the fields are checked in — pin both, so a validator rewrite cannot
+	// silently start blaming a different field.
 	it.each([
-		['missing clientId', noteBody({ clientId: undefined })],
-		['missing videoId', noteBody({ videoId: undefined })],
-		['missing timestamp', noteBody({ timestamp: undefined })],
-		['missing body', noteBody({ body: '' })],
-		['invalid kind', noteBody({ kind: 'gif' })],
-		['oversized text', noteBody({ body: 'x'.repeat(101) })],
-		['non-curated emoji', noteBody({ kind: 'emoji', body: '\u{1F4A9}' })],
-	])('rejects %s', async (_name, payload) => {
+		['missing clientId', noteBody({ clientId: undefined }), 'missing or invalid field: clientId'],
+		['missing videoId', noteBody({ videoId: undefined }), 'missing or invalid field: videoId'],
+		['missing timestamp', noteBody({ timestamp: undefined }), 'missing or invalid field: timestamp'],
+		['missing body', noteBody({ body: '' }), 'missing or invalid field: body'],
+		['a non-string body', noteBody({ body: 123 }), 'missing or invalid field: body'],
+		['invalid kind', noteBody({ kind: 'gif' }), 'missing or invalid field: kind'],
+		['oversized text', noteBody({ body: 'x'.repeat(101) }), 'text body exceeds 100 characters'],
+		['non-curated emoji', noteBody({ kind: 'emoji', body: '\u{1F4A9}' }), 'invalid emoji body'],
+		['missing clientId ahead of a missing body', noteBody({ clientId: undefined, body: undefined }), 'missing or invalid field: clientId'],
+		['missing body ahead of a missing timestamp', noteBody({ body: undefined, timestamp: undefined }), 'missing or invalid field: body'],
+		['missing body ahead of an invalid kind', noteBody({ body: undefined, kind: 'gif' }), 'missing or invalid field: body'],
+	])('rejects %s', async (_name, payload, error) => {
 		const res = await postNote('note-invalid', payload);
 		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error, category: 'validation' });
 	});
 
 	it('accepts a curated emoji and defaults optional fields', async () => {
@@ -589,15 +597,18 @@ describe('POST /replies?code=', () => {
 	});
 
 	it.each([
-		['missing clientId', { clientId: undefined }],
-		['missing body', { body: '' }],
-		['oversized body', { body: 'x'.repeat(101) }],
-	])('rejects %s with a validation category', async (_name, overrides) => {
+		['missing clientId', { clientId: undefined }, 'missing or invalid field: clientId'],
+		['missing noteId', { noteId: undefined }, 'missing or invalid field: noteId'],
+		['missing body', { body: '' }, 'missing or invalid field: body'],
+		['a non-string body', { body: 7 }, 'missing or invalid field: body'],
+		['oversized body', { body: 'x'.repeat(101) }, 'reply body exceeds 100 characters'],
+		['missing noteId ahead of a missing body', { noteId: undefined, body: undefined }, 'missing or invalid field: noteId'],
+	])('rejects %s with a validation category', async (_name, overrides, error) => {
 		const code = 'reply-invalid';
 		const note = await createNote(code);
 		const res = await postReply(code, replyBody(note.id, overrides));
 		expect(res.status).toBe(400);
-		expect(((await res.json()) as { category: string }).category).toBe('validation');
+		expect(await res.json()).toEqual({ error, category: 'validation' });
 	});
 
 	it('accepts a body of exactly 100 characters', async () => {

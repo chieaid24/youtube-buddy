@@ -487,31 +487,41 @@ async function recordPlaylistEvent(env: Env, prefix: string, videoId: string, ti
 	}
 }
 
-async function deleteMember(env: Env, prefix: string, clientId: string): Promise<void> {
-	// Cascade the member's own conversations first: collect their Note ids
-	// (last key segment), then drop each Note's Replies wholesale.
-	const ownNoteIds: string[] = [];
+// Walk a KV prefix listing to completion and collect every key name. Use this
+// when the names must all be in hand before acting on them — when the action
+// only streams (delete every match) prefer deleteKeysWithPrefix, which keeps a
+// single page in memory.
+async function listAllKeyNames(env: Env, prefix: string): Promise<string[]> {
+	const names: string[] = [];
 	let cursor: string | undefined;
 	do {
-		const page = await env.PROGRESS.list({ prefix: `${prefix}note:${clientId}:`, cursor, limit: 500 });
+		const page = await env.PROGRESS.list({ prefix, cursor, limit: 500 });
 		for (const { name } of page.keys) {
-			const parts = name.split(':');
-			ownNoteIds.push(parts[parts.length - 1]);
+			names.push(name);
 		}
 		cursor = page.list_complete ? undefined : page.cursor;
 	} while (cursor);
+	return names;
+}
+
+async function deleteMember(env: Env, prefix: string, clientId: string): Promise<void> {
+	// Cascade the member's own conversations first: collect their Note ids
+	// (last key segment), then drop each Note's Replies wholesale.
+	const ownNoteKeys = await listAllKeyNames(env, `${prefix}note:${clientId}:`);
+	const ownNoteIds = ownNoteKeys.map((name) => {
+		const parts = name.split(':');
+		return parts[parts.length - 1];
+	});
 	await Promise.all(ownNoteIds.map((noteId) => deleteKeysWithPrefix(env, `${prefix}reply:${noteId}:`)));
 
 	// Replies the member left under OTHER authors' Notes: the author sits in the
 	// third key segment (`reply:${noteId}:${clientId}:${id}`), so no value reads.
-	cursor = undefined;
-	do {
-		const page = await env.PROGRESS.list({ prefix: `${prefix}reply:`, cursor, limit: 500 });
-		await Promise.all(
-			page.keys.filter(({ name }) => name.slice(prefix.length).split(':')[2] === clientId).map(({ name }) => env.PROGRESS.delete(name)),
-		);
-		cursor = page.list_complete ? undefined : page.cursor;
-	} while (cursor);
+	// The listing completes before any delete, so the scan never races its own
+	// mutations.
+	const replyKeys = await listAllKeyNames(env, `${prefix}reply:`);
+	await Promise.all(
+		replyKeys.filter((name) => name.slice(prefix.length).split(':')[2] === clientId).map((name) => env.PROGRESS.delete(name)),
+	);
 
 	await deleteKeysWithPrefix(env, `${prefix}${clientId}:`);
 	await env.PROGRESS.delete(`${prefix}presence:${clientId}`);
@@ -581,10 +591,16 @@ function validate(body: Partial<ProgressBody>): string | null {
 }
 
 function validateNote(body: Partial<NoteBody>): string | null {
-	for (const field of ['clientId', 'videoId', 'body'] as const) {
+	for (const field of ['clientId', 'videoId'] as const) {
 		if (typeof body[field] !== 'string' || body[field] === '') {
 			return `missing or invalid field: ${field}`;
 		}
+	}
+	// Checked through a local: iterating over field names cannot narrow
+	// `body.body` for the length and emoji tests below.
+	const text = body.body;
+	if (typeof text !== 'string' || text === '') {
+		return 'missing or invalid field: body';
 	}
 	if (typeof body.timestamp !== 'number' || !Number.isFinite(body.timestamp)) {
 		return 'missing or invalid field: timestamp';
@@ -592,10 +608,10 @@ function validateNote(body: Partial<NoteBody>): string | null {
 	if (body.kind !== 'text' && body.kind !== 'emoji') {
 		return 'missing or invalid field: kind';
 	}
-	if (body.kind === 'text' && body.body.length > NOTE_MAX_CHARS) {
+	if (body.kind === 'text' && text.length > NOTE_MAX_CHARS) {
 		return `text body exceeds ${NOTE_MAX_CHARS} characters`;
 	}
-	if (body.kind === 'emoji' && !(NOTE_EMOJIS as readonly string[]).includes(body.body)) {
+	if (body.kind === 'emoji' && !(NOTE_EMOJIS as readonly string[]).includes(text)) {
 		return 'invalid emoji body';
 	}
 	if (body.spoiler !== undefined && typeof body.spoiler !== 'boolean') {
@@ -610,12 +626,16 @@ function validateNote(body: Partial<NoteBody>): string | null {
 }
 
 function validateReply(body: Partial<ReplyBody>): string | null {
-	for (const field of ['clientId', 'noteId', 'body'] as const) {
+	for (const field of ['clientId', 'noteId'] as const) {
 		if (typeof body[field] !== 'string' || body[field] === '') {
 			return `missing or invalid field: ${field}`;
 		}
 	}
-	if (body.body!.length > NOTE_MAX_CHARS) {
+	const text = body.body;
+	if (typeof text !== 'string' || text === '') {
+		return 'missing or invalid field: body';
+	}
+	if (text.length > NOTE_MAX_CHARS) {
 		return `reply body exceeds ${NOTE_MAX_CHARS} characters`;
 	}
 	return validateMentions(body.mentions);

@@ -6,6 +6,7 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
+		"check": "tsc --noEmit -p tsconfig.json && prettier --config .prettierrc --check 'src/**' 'test/**' '../extension/**'",
 		"test": "vitest",
 		"test:e2e": "playwright test",
 		"test:e2e:live": "YTB_LIVE_YOUTUBE=1 playwright test --grep @live",

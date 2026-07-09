@@ -12,28 +12,26 @@
 // (docs/adr/0001-content-script-owned-sync.md).
 
 (() => {
-  "use strict";
+	'use strict';
 
-  const ASSERT_INTERVAL_MS = 5 * 60_000; // throttle: at most once per ~5 min/tab
+	const ASSERT_INTERVAL_MS = 5 * 60_000; // throttle: at most once per ~5 min/tab
 
-  let lastAssert = 0;
+	let lastAssert = 0;
 
-  // (Re)assert presence if the throttle window has elapsed. Best-effort and
-  // independent of Sharing — presence means "I joined this Code", not "I'm
-  // sharing my video position". Not gated to /watch: any page counts.
-  async function maybeAssert() {
-    if (!YTB.isContextActive()) return;
-    if (Date.now() - lastAssert < ASSERT_INTERVAL_MS) return;
-    const { code } = await YTB.getConfig();
-    if (!code) return; // Unpaired — nobody to appear to.
-    lastAssert = Date.now();
-    YTB.assertPresence(code);
-  }
+	// (Re)assert presence if the throttle window has elapsed. Best-effort and
+	// independent of Sharing — presence means "I joined this Code", not "I'm
+	// sharing my video position". Not gated to /watch: any page counts.
+	async function maybeAssert() {
+		if (!YTB.isContextActive()) return;
+		if (Date.now() - lastAssert < ASSERT_INTERVAL_MS) return;
+		const { code } = await YTB.getConfig();
+		if (!code) return; // Unpaired — nobody to appear to.
+		lastAssert = Date.now();
+		YTB.assertPresence(code);
+	}
 
-  // Every navigation (not just /watch) is a chance to (re)assert; the throttle
-  // keeps it to ~once per 5 min per tab regardless of how often the user nav's.
-  document.addEventListener("ytb:navigate", maybeAssert);
-  YTB.onContextInvalidated(() =>
-    document.removeEventListener("ytb:navigate", maybeAssert),
-  );
+	// Every navigation (not just /watch) is a chance to (re)assert; the throttle
+	// keeps it to ~once per 5 min per tab regardless of how often the user nav's.
+	document.addEventListener('ytb:navigate', maybeAssert);
+	YTB.onContextInvalidated(() => document.removeEventListener('ytb:navigate', maybeAssert));
 })();
