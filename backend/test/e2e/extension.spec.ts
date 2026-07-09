@@ -1094,17 +1094,17 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		const rows = page.locator('#ytb-home-section .ytb-hs-system');
 		await nudgeUntil(page, () => expect(rows).toHaveCount(4, { timeout: 700 }));
 
-		// Recipient copy drops "you"; ONLY the quoted title is a link.
-		const recipient = rows.filter({ hasText: 'Sam recommended "Buddy Pick"' });
+		// Recipient copy drops "you"; ONLY the title is a link, and it is unquoted.
+		const recipient = rows.filter({ hasText: 'Sam recommended Buddy Pick' });
 		await expect(recipient).toHaveCount(1);
 		await expect(page.locator('#ytb-home-section')).not.toContainText('recommended you');
 		await expect(recipient.locator('a')).toHaveCount(1);
-		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveText('"Buddy Pick"');
+		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveText('Buddy Pick');
 		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-live');
 		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('title', 'Watch "Buddy Pick"');
 
 		// The recommender now sees their own line, title-linked the same way.
-		const own = rows.filter({ hasText: 'You recommended "My Pick" to the Room' });
+		const own = rows.filter({ hasText: 'You recommended My Pick to the Room' });
 		await expect(own).toHaveCount(1);
 		await expect(own.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
 
@@ -1112,13 +1112,13 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		// live one does not.
 		const decorationOf = (row: typeof recipient) =>
 			row.evaluate((el) => getComputedStyle(el.querySelector('span') as Element).textDecorationLine);
-		const struck = rows.filter({ hasText: 'Sam recommended "Gone Pick"' });
+		const struck = rows.filter({ hasText: 'Sam recommended Gone Pick' });
 		await expect(struck).toHaveCount(1);
 		expect(await decorationOf(struck)).toBe('line-through');
 		expect(await decorationOf(recipient)).not.toBe('line-through');
 
-		// The Watch Notice's quoted title links to the video too.
-		const watch = rows.filter({ hasText: 'Sam watched "My Pick"' });
+		// The Watch Notice's title links to the video too.
+		const watch = rows.filter({ hasText: 'Sam started watching My Pick' });
 		await expect(watch).toHaveCount(1);
 		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
 		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('title', 'Watch "My Pick"');

@@ -6,12 +6,12 @@
 // the viewer's Notes, @-mentions of the viewer, deemphasized recommend System
 // Messages ("X recommended ..." to recipients, "You recommended ... to the
 // Room" to the recommender; struck through once un-recommended), and Watch
-// Notices ("X watched ...", shown to the recommender when a Buddy watches
-// their pick), grouped under day dividers, newest at the bottom,
+// Notices ("X started watching ...", shown to the recommender when a Buddy
+// watches their pick), grouped under day dividers, newest at the bottom,
 // auto-scrolled. Feed link rule (CONTEXT.md): on a reply/mention row only the
 // quoted body links — to the video at the Note's timestamp, opening its
 // Expanded Note on arrival; on System Messages and Watch Notices only the
-// quoted video title links (to the video's watch page). Everything else in a
+// video title links (to the video's watch page). Everything else in a
 // row — author, action, context, timestamp — is plain text.
 // Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
 // `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
@@ -270,11 +270,11 @@
 		return row;
 	}
 
-	// The quoted video title as a System Message / Watch Notice row's ONLY link
+	// The video title as a System Message / Watch Notice row's ONLY link
 	// (CONTEXT.md Room Feed link rule) — the rest of the line stays plain
-	// deemphasized text. Falls back to plain quoted text without a videoId.
+	// deemphasized text. Falls back to plain text without a videoId.
 	function buildTitleLink(videoId, title) {
-		const label = '"' + (title || 'a video') + '"';
+		const label = title || 'a video';
 		if (!videoId) return document.createTextNode(label);
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-title-link';
@@ -285,11 +285,11 @@
 	}
 
 	// A recommendation System Message (ADR-0007 amendment): recipients see
-	// 'Bob recommended "Title"', the recommender their own 'You recommended
-	// "Title" to the Room'. Only the quoted title links to the video; the stored
-	// event title survives an un-recommend, so it stays correct even after the
-	// live Playlist Item is gone — buildFeed then flags the item `removed` and
-	// the whole line renders struck through (no removal event exists).
+	// 'Bob recommended Title', the recommender their own 'You recommended Title
+	// to the Room'. Only the title links to the video; the stored event title
+	// survives an un-recommend, so it stays correct even after the live Playlist
+	// Item is gone — buildFeed then flags the item `removed` and the whole line
+	// renders struck through (no removal event exists).
 	function buildSystemRow(item, roster) {
 		const event = item.event;
 		const row = document.createElement('div');
@@ -313,7 +313,7 @@
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item ytb-hs-system';
 		const text = document.createElement('span');
-		text.append(YTB.buddyName(item.clientId, item.name, roster) + ' watched ', buildTitleLink(item.videoId, item.title));
+		text.append(YTB.buddyName(item.clientId, item.name, roster) + ' started watching ', buildTitleLink(item.videoId, item.title));
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
