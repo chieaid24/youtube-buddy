@@ -2,6 +2,30 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 let storage: Record<string, unknown>;
 
+// The extension exposes its API as classic-script globals on `window` (ADR-0001),
+// so `window.YTB`'s methods surface as `any`. These aliases give the values the
+// specs read back the concrete shapes the pure helpers actually return, so the
+// callbacks below are checked instead of silently `any`.
+type RosterEntry = { clientId: string; name: string };
+type FeedItem = {
+	type: string;
+	at: number;
+	own: boolean;
+	removed: boolean;
+	clientId: string;
+	name: string;
+	videoId: string;
+	title: string;
+	note: { id: string };
+	event: { id: string; videoId: string; title: string; actorClientId: string };
+};
+type FeedGroup = { dayKey: string; items: FeedItem[] };
+type PlaylistRec = { videoId: string };
+
+// `window.YTB.buildFeed` surfaces as `any` (a classic-script global; ADR-0001);
+// wrap it once so the Room Feed shape flows into the callbacks that read it back.
+const buildFeed = (records: object, viewer: string): FeedGroup[] => window.YTB.buildFeed(records, viewer);
+
 // Every describe in this file reads `window.YTB`, so the extension globals are
 // installed once per FILE rather than inside one describe's beforeAll — that way
 // a filtered run (`npx vitest run -t "..."`) of any single test still has them.
@@ -23,7 +47,11 @@ beforeAll(async () => {
 			},
 		},
 	});
-	await import('../../extension/shared.js');
+	// shared.js is a classic content script (no import/export; ADR-0001), so it is
+	// loaded here purely for its side effect of populating window.YTB. The `as
+	// string` keeps the literal specifier for the bundler while telling TypeScript
+	// to treat it as a dynamic (non-module) import rather than erroring on it.
+	await import('../../extension/shared.js' as string);
 });
 
 describe('extension member API', () => {
@@ -474,7 +502,7 @@ describe('room home section helpers', () => {
 	};
 
 	it('derives the roster from every record kind, latest nonblank name winning', () => {
-		const roster = window.YTB.roomRoster(roomRead);
+		const roster: RosterEntry[] = window.YTB.roomRoster(roomRead);
 		const byId = new Map(roster.map((m) => [m.clientId, m.name]));
 		// Union across progress + presence + playlist + events.
 		expect([...byId.keys()].sort()).toEqual(['ana33333', 'bob22222', 'cid44444', 'eve55555', me, 'pia66666'].sort());
@@ -494,14 +522,14 @@ describe('room home section helpers', () => {
 			{ clientId: 'c', name: 'Ana' },
 			{ clientId: 'd', name: '' },
 		];
-		expect(window.YTB.filterRoster(roster, 'bo').map((m) => m.clientId)).toEqual(['a', 'b']);
+		expect(window.YTB.filterRoster(roster, 'bo').map((m: RosterEntry) => m.clientId)).toEqual(['a', 'b']);
 		// Prefix outranks substring: "Ana" before "Bobby Tables" (a in "Tables").
-		expect(window.YTB.filterRoster(roster, 'a').map((m) => m.clientId)).toEqual(['c', 'b']);
+		expect(window.YTB.filterRoster(roster, 'a').map((m: RosterEntry) => m.clientId)).toEqual(['c', 'b']);
 		// In-order subsequence: "bbt" finds Bobby Tables only.
-		expect(window.YTB.filterRoster(roster, 'bbt').map((m) => m.clientId)).toEqual(['b']);
+		expect(window.YTB.filterRoster(roster, 'bbt').map((m: RosterEntry) => m.clientId)).toEqual(['b']);
 		expect(window.YTB.filterRoster(roster, 'zzz')).toEqual([]);
 		// Empty query returns the whole roster in roster order.
-		expect(window.YTB.filterRoster(roster, '').map((m) => m.clientId)).toEqual(['a', 'b', 'c', 'd']);
+		expect(window.YTB.filterRoster(roster, '').map((m: RosterEntry) => m.clientId)).toEqual(['a', 'b', 'c', 'd']);
 	});
 
 	it('disambiguates duplicate labels within a Room by prefixing "Very "', () => {
@@ -553,7 +581,7 @@ describe('room home section helpers', () => {
 			{ clientId: 'b', name: 'Sam' },
 		];
 		// "b" reads "Very Sam"; a "very" query finds it and not the bare "a".
-		expect(window.YTB.filterRoster(roster, 'very').map((m) => m.clientId)).toEqual(['b']);
+		expect(window.YTB.filterRoster(roster, 'very').map((m: RosterEntry) => m.clientId)).toEqual(['b']);
 	});
 
 	it('resolves a Mention to the current Display Name, falling back to the Buddy token', () => {
@@ -623,7 +651,7 @@ describe('room home section helpers', () => {
 			{ id: 'e2', type: 'added', videoId: 'v8', title: 'Dogs', actorClientId: 'ana33333', at: base + 26 * 3600_000 },
 		];
 
-		const groups = window.YTB.buildFeed({ notes, replies, events }, me);
+		const groups: FeedGroup[] = buildFeed({ notes, replies, events }, me);
 		// Two local days -> two divider groups, both ascending.
 		expect(groups).toHaveLength(2);
 		const first = groups[0].items;
@@ -660,7 +688,7 @@ describe('room home section helpers', () => {
 		// I see Bob's recommend as a recipient line AND my own as an own line
 		// (ADR-0007 amendment), both with the stored title (survives an
 		// un-recommend since it's captured on the event).
-		const mine = window.YTB.buildFeed({ events }, me)[0].items;
+		const mine: FeedItem[] = buildFeed({ events }, me)[0].items;
 		expect(mine).toHaveLength(2);
 		expect(mine.every((i) => i.type === 'system')).toBe(true);
 		expect(mine[0].event.title).toBe('Otters 101');
@@ -669,7 +697,7 @@ describe('room home section helpers', () => {
 		expect(mine[1].own).toBe(true);
 
 		// The recommender (bob22222) sees his own recommendation, own-flagged.
-		const bobSystems = window.YTB.buildFeed({ events }, 'bob22222')
+		const bobSystems = buildFeed({ events }, 'bob22222')
 			.flatMap((g) => g.items)
 			.filter((i) => i.type === 'system');
 		expect(bobSystems.map((i) => [i.event.id, i.own])).toEqual([
@@ -678,7 +706,7 @@ describe('room home section helpers', () => {
 		]);
 		// And the removed-type event surfaces for nobody.
 		for (const viewer of [me, 'bob22222', 'ana33333', 'cid44444']) {
-			const systems = window.YTB.buildFeed({ events }, viewer)
+			const systems = buildFeed({ events }, viewer)
 				.flatMap((g) => g.items)
 				.filter((i) => i.type === 'system');
 			expect(systems.some((i) => i.event.videoId === 'v7')).toBe(false);
@@ -695,7 +723,7 @@ describe('room home section helpers', () => {
 		// un-recommended (removals emit NO event; ADR-0007).
 		const playlist = [{ videoId: 'v1', title: 'Still Here', addedBy: 'bob22222', addedByName: 'Bob', addedAt: at }];
 
-		const items = window.YTB.buildFeed({ events, playlist }, me)[0].items;
+		const items: FeedItem[] = buildFeed({ events, playlist }, me)[0].items;
 		expect(items).toHaveLength(2);
 		const live = items.find((i) => i.event.videoId === 'v1')!;
 		const gone = items.find((i) => i.event.videoId === 'v2')!;
@@ -704,7 +732,7 @@ describe('room home section helpers', () => {
 		// The struck line keeps its real title, captured on the event.
 		expect(gone.event.title).toBe('Taken Back');
 		// The recipient derives the same strike from the same read.
-		const bobsGone = window.YTB.buildFeed({ events, playlist }, 'bob22222')
+		const bobsGone = buildFeed({ events, playlist }, 'bob22222')
 			.flatMap((g) => g.items)
 			.find((i) => i.type === 'system' && i.event.videoId === 'v2')!;
 		expect(bobsGone.removed).toBe(true);
@@ -713,7 +741,7 @@ describe('room home section helpers', () => {
 		// every line for that video, old and new.
 		const reEvents = [...events, { id: 'e3', type: 'added', videoId: 'v2', title: 'Taken Back', actorClientId: me, at: at + 5000 }];
 		const rePlaylist = [...playlist, { videoId: 'v2', title: 'Taken Back', addedBy: me, addedByName: 'Aidan', addedAt: at + 5000 }];
-		const after = window.YTB.buildFeed({ events: reEvents, playlist: rePlaylist }, me)
+		const after = buildFeed({ events: reEvents, playlist: rePlaylist }, me)
 			.flatMap((g) => g.items)
 			.filter((i) => i.type === 'system' && i.event.videoId === 'v2');
 		expect(after).toHaveLength(2);
@@ -738,7 +766,7 @@ describe('room home section helpers', () => {
 
 		// As the recommender: one notice per Buddy on my pick, titled from the
 		// live Recommendation, timestamped by each record's updatedAt.
-		const mine = window.YTB.buildFeed({ playlist, progress }, me).flatMap((g) => g.items);
+		const mine = buildFeed({ playlist, progress }, me).flatMap((g) => g.items);
 		const watches = mine.filter((i) => i.type === 'watch');
 		expect(watches).toHaveLength(2);
 		expect(watches.map((w) => w.clientId).sort()).toEqual(['ana33333', 'bob22222']);
@@ -748,14 +776,14 @@ describe('room home section helpers', () => {
 
 		// Another member (Bob recommended v8; nobody has a record for it) sees no
 		// Watch Notice for my pick — Watch Notices go only to the recommender.
-		const bobsFeed = window.YTB.buildFeed({ playlist, progress }, 'bob22222').flatMap((g) => g.items);
+		const bobsFeed = buildFeed({ playlist, progress }, 'bob22222').flatMap((g) => g.items);
 		expect(bobsFeed.some((i) => i.type === 'watch')).toBe(false);
 	});
 
 	it('labels Feed day dividers as Today / Yesterday / short date', () => {
 		const now = new Date(2026, 6, 5, 15, 0, 0).getTime();
 		const keyOf = (ms: number) =>
-			window.YTB.buildFeed({ events: [{ id: 'e', type: 'added', videoId: 'v', actorClientId: 'a', at: ms }] }, 'me')[0].dayKey;
+			buildFeed({ events: [{ id: 'e', type: 'added', videoId: 'v', actorClientId: 'a', at: ms }] }, 'me')[0].dayKey;
 		expect(window.YTB.dayLabel(keyOf(now), now)).toBe('Today');
 		expect(window.YTB.dayLabel(keyOf(now - 24 * 3600_000), now)).toBe('Yesterday');
 		expect(window.YTB.dayLabel(keyOf(new Date(2026, 6, 3, 12).getTime()), now)).toMatch(/Jul/);
@@ -890,13 +918,18 @@ describe('recommended for you helpers (ADR-0007)', () => {
 
 	it('filters the grid to Buddy Recommendations minus Dismissed, newest first', () => {
 		// Own Recommendations never appear, even with nothing Dismissed.
-		expect(window.YTB.recommendedForYou(playlist, 'me111111', []).map((i) => i.videoId)).toEqual(['v4', 'v3', 'v2']);
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', []).map((i: PlaylistRec) => i.videoId)).toEqual(['v4', 'v3', 'v2']);
 		// A Dismissed videoId is hidden for this viewer only (pure filter).
-		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v3']).map((i) => i.videoId)).toEqual(['v4', 'v2']);
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v3']).map((i: PlaylistRec) => i.videoId)).toEqual(['v4', 'v2']);
 		// Dismissing every foreign item empties the grid.
 		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v2', 'v3', 'v4'])).toEqual([]);
 		// A member with no Recommendations of their own sees the whole list.
-		expect(window.YTB.recommendedForYou(playlist, 'zoe77777', undefined).map((i) => i.videoId)).toEqual(['v4', 'v3', 'v2', 'v1']);
+		expect(window.YTB.recommendedForYou(playlist, 'zoe77777', undefined).map((i: PlaylistRec) => i.videoId)).toEqual([
+			'v4',
+			'v3',
+			'v2',
+			'v1',
+		]);
 		// Defensive: an absent Room read yields an empty grid.
 		expect(window.YTB.recommendedForYou(undefined, 'me111111', [])).toEqual([]);
 	});

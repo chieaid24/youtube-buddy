@@ -125,7 +125,7 @@ describe('POST /?code=', () => {
 		const { duration, ...withoutDuration } = body();
 		const res = await post(code, withoutDuration);
 		expect(res.status).toBe(400);
-		expect((await res.json()).error).toMatch(/duration/);
+		expect(((await res.json()) as { error: string }).error).toMatch(/duration/);
 	});
 
 	it('accepts an empty name, storing it as "" (Display Name is optional)', async () => {
@@ -152,7 +152,7 @@ describe('POST /?code=', () => {
 		const code = 'post-bad-timestamp';
 		const res = await post(code, body({ timestamp: 'nope' }));
 		expect(res.status).toBe(400);
-		expect((await res.json()).error).toMatch(/timestamp/);
+		expect(((await res.json()) as { error: string }).error).toMatch(/timestamp/);
 	});
 
 	it('rejects a missing code with 400', async () => {
@@ -248,7 +248,7 @@ describe('POST /presence?code=', () => {
 		const code = 'presence-empty-client';
 		const res = await postPresence(code, { clientId: '', name: 'nobody' });
 		expect(res.status).toBe(400);
-		expect((await res.json()).error).toMatch(/clientId/);
+		expect(((await res.json()) as { error: string }).error).toMatch(/clientId/);
 	});
 });
 
@@ -560,7 +560,7 @@ describe('cross-cutting', () => {
 			method: 'OPTIONS',
 		});
 		const ctx = createExecutionContext();
-		const res = await worker.fetch(request, env, ctx);
+		const res = await worker.fetch(request, env);
 		await waitOnExecutionContext(ctx);
 
 		expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');

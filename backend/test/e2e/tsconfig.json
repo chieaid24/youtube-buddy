@@ -1,0 +1,9 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"lib": ["es2024", "dom", "dom.iterable"],
+		"types": ["@types/chrome", "node"]
+	},
+	"include": ["./**/*.ts"],
+	"exclude": []
+}

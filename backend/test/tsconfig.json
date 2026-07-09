@@ -1,8 +1,8 @@
 {
 	"extends": "../tsconfig.json",
 	"compilerOptions": {
-		"types": ["@cloudflare/vitest-pool-workers"]
+		"types": ["@cloudflare/vitest-pool-workers/types", "@types/chrome", "node"]
 	},
-	"include": ["./**/*.ts", "../worker-configuration.d.ts"],
+	"include": ["./*.spec.ts", "./env.d.ts", "../worker-configuration.d.ts", "../../extension/shared.js", "../../extension/room-code.js"],
 	"exclude": []
 }
