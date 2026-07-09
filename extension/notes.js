@@ -83,6 +83,11 @@
 	// a full reload) and mirrored live from storage (covers SPA nav, where this
 	// script stays alive) — see below.
 	let pendingNoteOpen = null;
+	// Timestamp until which a `play` is treated as watch-page load churn (autoplay
+	// settling in after a Room Feed row opened this Note) instead of a deliberate
+	// resume: within it the panel is kept open and the video re-paused. Armed only
+	// by a pending open; a real navigation clears it. See YTB.panelPlayAction.
+	let pendingOpenGuardUntil = 0;
 
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
@@ -184,6 +189,10 @@
 		const note = (notesByVideoId.get(currentVideoId) || []).find((candidate) => candidate.id === target.noteId);
 		if (!note) return; // not in this read yet — retry on the next one (until TTL)
 		clearPendingOpen();
+		// Arm the load-churn grace BEFORE opening: the watch page is still settling
+		// on arrival, and its autoplay `play` must re-pause and keep this panel open
+		// rather than dismiss it (the whole point of the Feed handshake).
+		pendingOpenGuardUntil = Date.now() + YTB.PANEL_LOAD_GRACE_MS;
 		openPanel(note);
 	}
 
@@ -987,15 +996,28 @@
 		}
 	});
 
-	// Manually resuming playback closes the panel (without re-pausing).
+	// Manually resuming playback closes the panel (without re-pausing) — EXCEPT a
+	// play during the load-churn grace after a Room Feed row opened the panel,
+	// where autoplay kicking in as the watch page settles must not dismiss it.
 	document.addEventListener(
 		'play',
 		(event) => {
 			if (!(event.target instanceof HTMLVideoElement)) return;
-			if (document.getElementById(PANEL_ID)) {
-				pauseLease = false;
-				dismissPanel({ resume: false });
+			const action = YTB.panelPlayAction({
+				panelOpen: Boolean(document.getElementById(PANEL_ID)),
+				withinGrace: Date.now() < pendingOpenGuardUntil,
+			});
+			if (action === 'ignore') return;
+			if (action === 'hold') {
+				// Re-assert the pause so the viewer can read the Note. Take the lease
+				// if OPENING didn't (the video wasn't playing yet), so an outside-click
+				// dismissal still resumes the playback the viewer was sent to.
+				pauseLease = true;
+				event.target.pause();
+				return;
 			}
+			pauseLease = false;
+			dismissPanel({ resume: false });
 		},
 		true,
 	);
@@ -1166,9 +1188,20 @@
 	// ---------------------------------------------------------------------------
 
 	document.addEventListener('ytb:navigate', (event) => {
-		currentVideoId = (event.detail && event.detail.videoId) || null;
+		const nextVideoId = (event.detail && event.detail.videoId) || null;
+		// A duplicate navigation-finish for the SAME video — YouTube re-emits these
+		// as the watch page loads (content.js forwards every yt-navigate-finish).
+		// Treat it as a no-op: tearing the panel down here is what dismissed an
+		// Expanded Note a Room Feed row had just opened. Keep the panel, lease, and
+		// alerts; only reconcile dots.
+		if (nextVideoId === currentVideoId) {
+			renderDots();
+			return;
+		}
+		currentVideoId = nextVideoId;
 		lastPlaybackTime = null;
 		burstCount = 0;
+		pendingOpenGuardUntil = 0;
 		dismissPanel({ resume: false });
 		pauseLease = false;
 		document.getElementById(ALERTS_ID)?.replaceChildren();
