@@ -527,6 +527,97 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 	}
 });
 
+test('Playback Notifications anchor at each of the four Notification Position edges, live', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+
+		const popup = await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(3, { timeout: 700 }));
+
+		// Cross the t=4 text Note by ordinary forward playback: that is what
+		// builds the alerts stack, which then persists for the rest of the test.
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.currentTime = 3.5;
+			return v.play();
+		});
+		await expect(page.locator('.ytb-alert-card')).toHaveCount(1);
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+
+		// Inline styles own the placement (applyAlertsPosition).
+		const anchor = () =>
+			page.locator('#ytb-note-alerts').evaluate((node) => {
+				const s = (node as HTMLElement).style;
+				return { top: s.top, bottom: s.bottom, left: s.left, right: s.right, transform: s.transform, alignItems: s.alignItems };
+			});
+		const setEdge = (edge: string) => popup.evaluate((e) => chrome.storage.local.set({ notificationPosition: e }), edge);
+
+		// Default is bottom: horizontally centered, offset up from the bottom.
+		let a = await anchor();
+		expect(a.left).toBe('50%');
+		expect(a.transform).toBe('translateX(-50%)');
+		expect(a.top).toBe('');
+		expect(a.right).toBe('');
+		expect(a.alignItems).toBe('center');
+		expect(a.bottom).toMatch(/^\d+(\.\d+)?px$/);
+
+		// top: horizontally centered, offset down from the top.
+		await setEdge('top');
+		await expect.poll(async () => (await anchor()).bottom).toBe('');
+		a = await anchor();
+		expect(a.left).toBe('50%');
+		expect(a.transform).toBe('translateX(-50%)');
+		expect(a.alignItems).toBe('center');
+		expect(a.top).toMatch(/^\d+(\.\d+)?px$/);
+
+		// left: vertically centered against the left edge.
+		await setEdge('left');
+		await expect.poll(async () => (await anchor()).left).toBe('16px');
+		a = await anchor();
+		expect(a.top).toBe('50%');
+		expect(a.transform).toBe('translateY(-50%)');
+		expect(a.bottom).toBe('');
+		expect(a.right).toBe('');
+		expect(a.alignItems).toBe('flex-start');
+
+		// right: vertically centered against the right edge.
+		await setEdge('right');
+		await expect.poll(async () => (await anchor()).right).toBe('16px');
+		a = await anchor();
+		expect(a.top).toBe('50%');
+		expect(a.transform).toBe('translateY(-50%)');
+		expect(a.bottom).toBe('');
+		expect(a.left).toBe('');
+		expect(a.alignItems).toBe('flex-end');
+
+		// A stale 8-zone value is not an edge: fall back to the bottom default.
+		await setEdge('top-right');
+		await expect.poll(async () => (await anchor()).top).toBe('');
+		a = await anchor();
+		expect(a.left).toBe('50%');
+		expect(a.transform).toBe('translateX(-50%)');
+		expect(a.bottom).toMatch(/^\d+(\.\d+)?px$/);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native, Escape closes', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -1287,12 +1378,12 @@ test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, shari
 		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
 
 		// Notification Position + Spoiler Default persist under their keys.
-		await popup.locator('.zone-cell[data-zone="top-left"]').click();
-		await expect(popup.locator('.zone-cell[data-zone="top-left"]')).toHaveAttribute('aria-checked', 'true');
+		await popup.locator('.edge-cell[data-edge="left"]').click();
+		await expect(popup.locator('.edge-cell[data-edge="left"]')).toHaveAttribute('aria-checked', 'true');
 		await popup.locator('#set-spoiler').click();
 		await expect
 			.poll(async () => popup.evaluate(() => chrome.storage.local.get(['notificationPosition', 'spoilerDefault'])))
-			.toEqual({ notificationPosition: 'top-left', spoilerDefault: false });
+			.toEqual({ notificationPosition: 'left', spoilerDefault: false });
 
 		// The composer seeds its Spoiler checkbox from the new default.
 		await page.locator('#ytb-note-button').click();

@@ -701,7 +701,7 @@ describe('settings (per install)', () => {
 		await expect(window.YTB.getSettings()).resolves.toEqual({
 			theme: 'system',
 			spoilerDefault: true,
-			notificationPosition: 'bottom-center',
+			notificationPosition: 'bottom',
 			notesHidden: false,
 			buddyProgressHidden: false,
 		});
@@ -716,10 +716,19 @@ describe('settings (per install)', () => {
 		await expect(window.YTB.getSettings()).resolves.toEqual({
 			theme: 'system',
 			spoilerDefault: true,
-			notificationPosition: 'bottom-center',
+			notificationPosition: 'bottom',
 			notesHidden: false,
 			buddyProgressHidden: false,
 		});
+	});
+
+	// Installs predating the four-edge set may hold an 8-zone value; it is simply
+	// not a legal edge, so the existing validation coerces it to the default.
+	it('coerces a stale 8-zone stored Notification Position to the bottom default', async () => {
+		for (const stale of ['top-right', 'middle-left', 'bottom-center']) {
+			storage = { notificationPosition: stale };
+			await expect(window.YTB.getSettings()).resolves.toMatchObject({ notificationPosition: 'bottom' });
+		}
 	});
 
 	it('round-trips every Settings key and merge-writes partials', async () => {
@@ -727,28 +736,28 @@ describe('settings (per install)', () => {
 		await window.YTB.setSettings({
 			theme: 'dark',
 			spoilerDefault: false,
-			notificationPosition: 'top-right',
+			notificationPosition: 'top',
 			notesHidden: true,
 			buddyProgressHidden: true,
 		});
 		await expect(window.YTB.getSettings()).resolves.toEqual({
 			theme: 'dark',
 			spoilerDefault: false,
-			notificationPosition: 'top-right',
+			notificationPosition: 'top',
 			notesHidden: true,
 			buddyProgressHidden: true,
 		});
 
 		// A partial write leaves every other key untouched.
 		await window.YTB.setSettings({ theme: 'light' });
-		await expect(window.YTB.getSettings()).resolves.toMatchObject({ theme: 'light', notesHidden: true, notificationPosition: 'top-right' });
+		await expect(window.YTB.getSettings()).resolves.toMatchObject({ theme: 'light', notesHidden: true, notificationPosition: 'top' });
 	});
 
-	it('validates writes: illegal theme/zone values are dropped, flags become strict booleans', async () => {
+	it('validates writes: illegal theme/edge values are dropped, flags become strict booleans', async () => {
 		storage = {};
 		await window.YTB.setSettings({
 			theme: 'sepia',
-			notificationPosition: 'middle-center', // the dead-center cell is not a zone
+			notificationPosition: 'top-right', // a stale 8-zone name is not an edge
 			spoilerDefault: 'yes' as unknown as boolean,
 		});
 		expect(storage.theme).toBeUndefined();
@@ -756,12 +765,11 @@ describe('settings (per install)', () => {
 		expect(storage.spoilerDefault).toBe(false);
 	});
 
-	it('exposes the three themes and the eight zones (3x3 minus dead-center)', () => {
+	it('exposes the three themes and the four edges', () => {
 		expect(window.YTB.THEMES).toEqual(['light', 'dark', 'system']);
-		expect(window.YTB.NOTIFICATION_ZONES).toHaveLength(8);
-		expect(new Set(window.YTB.NOTIFICATION_ZONES).size).toBe(8);
-		expect(window.YTB.NOTIFICATION_ZONES).not.toContain('middle-center');
-		expect(window.YTB.NOTIFICATION_ZONES).toContain('bottom-center');
+		expect(window.YTB.NOTIFICATION_EDGES).toHaveLength(4);
+		expect(new Set(window.YTB.NOTIFICATION_EDGES)).toEqual(new Set(['top', 'bottom', 'left', 'right']));
+		expect(window.YTB.NOTIFICATION_EDGES).toContain('bottom');
 	});
 });
 
@@ -937,7 +945,7 @@ declare global {
 			getPendingNoteOpen(): Promise<{ videoId: string; noteId: string; at: number } | null>;
 			clearPendingNoteOpen(): Promise<boolean>;
 			THEMES: string[];
-			NOTIFICATION_ZONES: string[];
+			NOTIFICATION_EDGES: string[];
 			getSettings(): Promise<{
 				theme: string;
 				spoilerDefault: boolean;

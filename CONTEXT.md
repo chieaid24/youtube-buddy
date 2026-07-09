@@ -85,7 +85,7 @@ A text-only message appended to one parent Note and shown as part of that Note's
 _Avoid_: Note (a Reply has no independent timeline position), Reaction, generic comment
 
 **Playback Notification**:
-The transient bottom-center presentation triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment.
+The transient presentation, anchored at the viewer's Notification Position, triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment.
 _Avoid_: Note Preview, Expanded Note, popup (ambiguous)
 
 **Note Composer**:

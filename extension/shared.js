@@ -212,23 +212,15 @@ const YTB = {
 	// @media (prefers-color-scheme); 'light'/'dark' stamp data-theme on the root.
 	THEMES: ['light', 'dark', 'system'],
 
-	// The Notification Position's eight zones: a 3x3 grid minus the dead-center
-	// cell. Playback Notifications render at the chosen zone (notes.js).
-	NOTIFICATION_ZONES: [
-		'top-left',
-		'top-center',
-		'top-right',
-		'middle-left',
-		'middle-right',
-		'bottom-left',
-		'bottom-center',
-		'bottom-right',
-	],
+	// The Notification Position's four edges. Playback Notifications render
+	// centered along the chosen player edge (notes.js): top/bottom are
+	// horizontally centered, left/right vertically centered.
+	NOTIFICATION_EDGES: ['top', 'bottom', 'left', 'right'],
 
 	/**
 	 * Read every Settings key, coercing unset/junk values to the documented
 	 * defaults so consumers never validate: theme 'system', Spoiler Default on,
-	 * Notification Position bottom-center, Notes and Buddy Progress shown.
+	 * Notification Position bottom, Notes and Buddy Progress shown.
 	 * (The Room Home Section keeps its own getHomeSectionHidden seam above.)
 	 * @returns {Promise<{theme: string, spoilerDefault: boolean, notificationPosition: string, notesHidden: boolean, buddyProgressHidden: boolean}>}
 	 */
@@ -237,7 +229,7 @@ const YTB = {
 		return {
 			theme: YTB.THEMES.includes(stored.theme) ? stored.theme : 'system',
 			spoilerDefault: stored.spoilerDefault !== false,
-			notificationPosition: YTB.NOTIFICATION_ZONES.includes(stored.notificationPosition) ? stored.notificationPosition : 'bottom-center',
+			notificationPosition: YTB.NOTIFICATION_EDGES.includes(stored.notificationPosition) ? stored.notificationPosition : 'bottom',
 			notesHidden: stored.notesHidden === true,
 			buddyProgressHidden: stored.buddyProgressHidden === true,
 		};
@@ -245,7 +237,7 @@ const YTB = {
 
 	/**
 	 * Merge-write a subset of the Settings keys, validating each value so the
-	 * stored state always round-trips getSettings exactly (an illegal theme/zone
+	 * stored state always round-trips getSettings exactly (an illegal theme/edge
 	 * is dropped; visibility/spoiler flags coerce to strict booleans).
 	 * @param {{theme?: string, spoilerDefault?: boolean, notificationPosition?: string, notesHidden?: boolean, buddyProgressHidden?: boolean}} partial
 	 * @returns {Promise<boolean>} false when the extension context is gone.
@@ -253,7 +245,7 @@ const YTB = {
 	async setSettings(partial) {
 		const next = {};
 		if ('theme' in partial && YTB.THEMES.includes(partial.theme)) next.theme = partial.theme;
-		if ('notificationPosition' in partial && YTB.NOTIFICATION_ZONES.includes(partial.notificationPosition)) {
+		if ('notificationPosition' in partial && YTB.NOTIFICATION_EDGES.includes(partial.notificationPosition)) {
 			next.notificationPosition = partial.notificationPosition;
 		}
 		for (const key of ['spoilerDefault', 'notesHidden', 'buddyProgressHidden']) {

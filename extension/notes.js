@@ -17,8 +17,8 @@
 //   - Playback Notifications: note cards (~4s, clickable) and animated
 //     Reaction bursts (~2s, non-interactive) on every NATURAL forward
 //     crossing — rewind-and-replay triggers again, direct seeks stay silent.
-//     They render at the viewer's Notification Position (one of eight player
-//     zones, default bottom-center; live via chrome.storage.onChanged).
+//     They render at the viewer's Notification Position (one of four player
+//     edges, default bottom; live via chrome.storage.onChanged).
 //   - Notes Visibility ("Notes off"): while the notesHidden setting is on,
 //     this file renders NOTHING — no dots, previews, panels, or Playback
 //     Notifications (composer.js removes the + button) — updating live.
@@ -86,7 +86,7 @@
 
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
-	let notificationPosition = 'bottom-center'; // Playback Notification zone
+	let notificationPosition = 'bottom'; // Playback Notification edge
 
 	injectStyle();
 
@@ -115,8 +115,8 @@
 			renderDots(); // reconciles to zero dots when hidden, back when shown
 		}
 		if (changes.notificationPosition) {
-			const zone = changes.notificationPosition.newValue;
-			notificationPosition = YTB.NOTIFICATION_ZONES.includes(zone) ? zone : 'bottom-center';
+			const edge = changes.notificationPosition.newValue;
+			notificationPosition = YTB.NOTIFICATION_EDGES.includes(edge) ? edge : 'bottom';
 			const wrap = document.getElementById(ALERTS_ID);
 			const host = player();
 			if (wrap && host) applyAlertsPosition(wrap, host); // live re-anchor
@@ -1025,32 +1025,29 @@
 
 	/**
 	 * Anchor the alerts stack at the viewer's Notification Position: one of the
-	 * eight player zones (a 3x3 grid minus dead-center, default bottom-center).
-	 * Inline styles own the placement so a Settings change re-anchors an
-	 * existing stack live; the stylesheet only carries the static column look.
+	 * four player edges (default bottom). Each edge centers the stack along
+	 * itself — top/bottom horizontally, left/right vertically. Inline styles own
+	 * the placement so a Settings change re-anchors an existing stack live; the
+	 * stylesheet only carries the static column look.
 	 */
 	function applyAlertsPosition(wrap, host) {
-		const zone = YTB.NOTIFICATION_ZONES.includes(notificationPosition) ? notificationPosition : 'bottom-center';
-		const [vertical, horizontal] = zone.split('-');
+		const edge = YTB.NOTIFICATION_EDGES.includes(notificationPosition) ? notificationPosition : 'bottom';
 		wrap.style.top = '';
 		wrap.style.bottom = '';
 		wrap.style.left = '';
 		wrap.style.right = '';
 		wrap.style.transform = '';
-		wrap.style.alignItems = horizontal === 'left' ? 'flex-start' : horizontal === 'right' ? 'flex-end' : 'center';
-		if (horizontal === 'left') wrap.style.left = '16px';
-		else if (horizontal === 'right') wrap.style.right = '16px';
-		else {
+		wrap.style.alignItems = edge === 'left' ? 'flex-start' : edge === 'right' ? 'flex-end' : 'center';
+		if (edge === 'top' || edge === 'bottom') {
 			wrap.style.left = '50%';
 			wrap.style.transform = 'translateX(-50%)';
-		}
-		if (vertical === 'top') {
-			wrap.style.top = alertsTopPx(host) + 'px';
-		} else if (vertical === 'middle') {
-			wrap.style.top = '50%';
-			wrap.style.transform = horizontal === 'center' ? 'translate(-50%, -50%)' : 'translateY(-50%)';
+			if (edge === 'top') wrap.style.top = alertsTopPx(host) + 'px';
+			else wrap.style.bottom = alertsBottomPx(host) + 'px';
 		} else {
-			wrap.style.bottom = alertsBottomPx(host) + 'px';
+			wrap.style.top = '50%';
+			wrap.style.transform = 'translateY(-50%)';
+			if (edge === 'left') wrap.style.left = '16px';
+			else wrap.style.right = '16px';
 		}
 	}
 
@@ -1536,7 +1533,7 @@
       .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
 
       /* --- Playback Notifications ---
-         Placement (zone anchoring + alignment) is inline via
+         Placement (edge anchoring + alignment) is inline via
          applyAlertsPosition; only the static column look lives here. */
       #${ALERTS_ID} {
         position: absolute;
