@@ -32,10 +32,11 @@
 // writes are Create/Join and their presence assert; a Dismiss only touches
 // chrome.storage.local).
 //
-// Styling extends the DESIGN.md system (apricot accent, warm neutrals, gentle
-// motion) to this surface. The popup's bundled Nunito is not re-embedded here
-// (a base64 font per content script is too heavy); the stack falls back to
-// rounded system faces. Both YouTube themes are supported via html[dark].
+// Styling consumes theme.js's shared --ytb-* tokens (ADR-0009): this is a normal
+// on-page token surface with no private palette of its own, so it inherits the
+// apricot ramp, warm neutrals, motion, and the bundled 'YTB Rounded' font, and
+// follows the Theme Preference — including Auto tracking YouTube's own theme —
+// exactly like the on-video Note UI.
 
 (function () {
 	'use strict';
@@ -538,56 +539,40 @@
 		document.getElementById(SECTION_ID)?.remove();
 	});
 
-	/** Inject the section stylesheet once (light + html[dark] themes). */
+	/** Inject the section stylesheet once (consumes theme.js's --ytb-* tokens). */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
       #${SECTION_ID} {
-        --ytbhs-surface: #fffdfb;
-        --ytbhs-tint: #fff3e9;
-        --ytbhs-line: #ece1d6;
-        --ytbhs-ink: #3a2e28;
-        --ytbhs-ink-muted: #7a6656;
-        --ytbhs-accent: #f6a96b;
-        --ytbhs-accent-deep: #9e551f;
         box-sizing: border-box;
         margin: 12px 8px 4px;
         padding: 10px 14px 12px;
-        border: 1px solid var(--ytbhs-line);
-        border-radius: 16px;
-        background: var(--ytbhs-surface);
-        color: var(--ytbhs-ink);
-        font-family: Nunito, ui-rounded, 'SF Pro Rounded', Roboto, system-ui, sans-serif;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-lg);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
+        font-family: var(--ytb-font);
         font-size: 13px;
         line-height: 1.45;
-      }
-      html[dark] #${SECTION_ID} {
-        --ytbhs-surface: #221c18;
-        --ytbhs-tint: #2b241f;
-        --ytbhs-line: #3d332c;
-        --ytbhs-ink: #f4ece2;
-        --ytbhs-ink-muted: #b3a091;
-        --ytbhs-accent: #f6a96b;
-        --ytbhs-accent-deep: #f8c79a;
       }
       #${SECTION_ID} .ytb-hs-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
       #${SECTION_ID} .ytb-hs-dot {
         align-self: center;
         width: 8px; height: 8px;
         border-radius: 50%;
-        background: var(--ytbhs-accent);
+        background: var(--ytb-accent-500);
       }
-      #${SECTION_ID} .ytb-hs-title { margin: 0; font-size: 15px; font-weight: 800; color: var(--ytbhs-ink); }
-      #${SECTION_ID} .ytb-hs-code { margin-left: auto; font-size: 13px; font-weight: 800; color: var(--ytbhs-accent-deep); }
+      #${SECTION_ID} .ytb-hs-title { margin: 0; font-size: 15px; font-weight: 800; color: var(--ytb-ink); }
+      #${SECTION_ID} .ytb-hs-code { margin-left: auto; font-size: 13px; font-weight: 800; color: var(--ytb-accent-800); }
       #${SECTION_ID} .ytb-hs-body { display: flex; gap: 12px; align-items: stretch; }
       #${SECTION_ID} .ytb-hs-feed { flex: 1 1 46%; min-width: 0; }
       #${SECTION_ID} .ytb-hs-playlist { flex: 1 1 54%; min-width: 0; }
       #${SECTION_ID} .ytb-hs-col-head {
         display: flex; justify-content: space-between; align-items: baseline;
         margin-bottom: 4px;
-        font-size: 11px; font-weight: 600; color: var(--ytbhs-ink-muted);
+        font-size: 11px; font-weight: 600; color: var(--ytb-ink-muted);
       }
       #${SECTION_ID} .ytb-hs-count { font-weight: 500; }
       #${SECTION_ID} .ytb-hs-feed-scroll {
@@ -595,13 +580,13 @@
         overflow-y: auto;
         padding: 6px 8px;
         border-radius: 12px;
-        background: var(--ytbhs-tint);
+        background: var(--ytb-surface-tint);
       }
       #${SECTION_ID} .ytb-hs-day {
         margin: 6px 0 2px;
         text-align: center;
         font-size: 10px; font-weight: 600;
-        color: var(--ytbhs-ink-muted);
+        color: var(--ytb-ink-muted);
       }
       #${SECTION_ID} .ytb-hs-day:first-child { margin-top: 0; }
       #${SECTION_ID} .ytb-hs-item { margin: 3px 0; overflow-wrap: anywhere; }
@@ -614,22 +599,22 @@
         transition: background 120ms ease;
       }
       #${SECTION_ID} a.ytb-hs-text-link:hover {
-        background: rgba(246, 169, 107, 0.16);
+        background: var(--ytb-accent-050);
         text-decoration: underline;
       }
       #${SECTION_ID} a.ytb-hs-text-link:focus-visible {
         outline: none;
-        background: rgba(246, 169, 107, 0.16);
-        box-shadow: 0 0 0 2px rgba(246, 169, 107, 0.55);
+        background: var(--ytb-accent-050);
+        box-shadow: 0 0 0 2px var(--ytb-ring);
         text-decoration: underline;
       }
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
-      #${SECTION_ID} .ytb-hs-action { color: var(--ytbhs-ink-muted); }
-      #${SECTION_ID} .ytb-hs-context { color: var(--ytbhs-ink-muted); }
-      #${SECTION_ID} .ytb-hs-when { margin-left: 6px; font-size: 10px; color: var(--ytbhs-ink-muted); white-space: nowrap; }
-      #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytbhs-ink-muted); }
+      #${SECTION_ID} .ytb-hs-action { color: var(--ytb-ink-muted); }
+      #${SECTION_ID} .ytb-hs-context { color: var(--ytb-ink-muted); }
+      #${SECTION_ID} .ytb-hs-when { margin-left: 6px; font-size: 10px; color: var(--ytb-ink-muted); white-space: nowrap; }
+      #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link {
-        color: var(--ytbhs-accent-deep);
+        color: var(--ytb-accent-800);
         font-weight: 600;
         text-decoration: none;
       }
@@ -639,7 +624,7 @@
          inherits the ancestor's line-through per CSS decoration propagation),
          leaving the timestamp legible. */
       #${SECTION_ID} .ytb-hs-struck > span { text-decoration: line-through; }
-      #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 12px; color: var(--ytbhs-ink-muted); }
+      #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 12px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pl-row {
         display: flex; gap: 10px;
         overflow-x: auto;
@@ -656,7 +641,10 @@
       }
       #${SECTION_ID} .ytb-hs-card-title:hover,
       #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; }
-      #${SECTION_ID} .ytb-hs-watched { margin-top: 1px; font-size: 10px; color: var(--ytbhs-ink-muted); }
+      #${SECTION_ID} .ytb-hs-watched { margin-top: 1px; font-size: 10px; color: var(--ytb-ink-muted); }
+      /* Dismiss control: a dark scrim + light glyph over the thumbnail image,
+         kept theme-independent on purpose (like the Note UI's over-video
+         treatments) so it stays legible on any frame — not a palette color. */
       #${SECTION_ID} .ytb-hs-remove {
         position: absolute; top: 3px; right: 3px;
         width: 20px; height: 20px;
@@ -671,14 +659,14 @@
       #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; }
       #${SECTION_ID} .ytb-hs-remove:disabled { opacity: 0.4; cursor: default; }
       #${SECTION_ID} .ytb-hs-pair { display: flex; flex-direction: column; gap: 8px; }
-      #${SECTION_ID} .ytb-hs-pitch { margin: 0; color: var(--ytbhs-ink-muted); }
+      #${SECTION_ID} .ytb-hs-pitch { margin: 0; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pair-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       #${SECTION_ID} .ytb-hs-btn {
         padding: 7px 14px;
-        border: 1px solid var(--ytbhs-line);
+        border: 1px solid var(--ytb-line);
         border-radius: 12px;
-        background: var(--ytbhs-tint);
-        color: var(--ytbhs-ink);
+        background: var(--ytb-surface-tint);
+        color: var(--ytb-ink);
         font-family: inherit;
         font-size: 13px;
         font-weight: 600;
@@ -687,21 +675,21 @@
         transition: transform 140ms cubic-bezier(0.34, 1.3, 0.64, 1), background 140ms;
       }
       #${SECTION_ID} .ytb-hs-btn:active { transform: scale(0.97); }
-      #${SECTION_ID} .ytb-hs-btn-primary { border: 0; background: var(--ytbhs-accent); color: #3a2e28; }
+      #${SECTION_ID} .ytb-hs-btn-primary { border: 0; background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
       #${SECTION_ID} .ytb-hs-input {
         min-width: 190px;
         padding: 7px 10px;
-        border: 1px solid var(--ytbhs-line);
+        border: 1px solid var(--ytb-line);
         border-radius: 8px;
-        background: var(--ytbhs-surface);
-        color: var(--ytbhs-ink);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
         font-family: inherit;
         font-size: 13px;
         line-height: 1.2;
       }
-      #${SECTION_ID} .ytb-hs-input:focus { outline: none; border-color: var(--ytbhs-accent); box-shadow: 0 0 0 3px rgba(246, 169, 107, 0.35); }
-      #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(246, 169, 107, 0.55); }
-      #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 12px; color: #c0392b; }
+      #${SECTION_ID} .ytb-hs-input:focus { outline: none; border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 12px; color: var(--ytb-danger-text); }
       @media (prefers-reduced-motion: reduce) {
         #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove { transition: none; }
       }

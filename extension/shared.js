@@ -221,8 +221,10 @@ const YTB = {
 
 	// --- Settings (per install, chrome.storage.local — mirrors homeSectionHidden) ---
 
-	// The Theme Preference's legal values (ADR-0008). 'system' follows the OS via
-	// @media (prefers-color-scheme); 'light'/'dark' stamp data-theme on the root.
+	// The Theme Preference's legal values (ADR-0008/0009). 'light'/'dark' stamp
+	// data-theme on the root everywhere. 'system' is the "Auto" option: in the
+	// popup it follows the OS via @media (prefers-color-scheme); on a YouTube page
+	// it follows YouTube's own theme (see themeMarker below + theme.js).
 	THEMES: ['light', 'dark', 'system'],
 
 	// The Notification Position's four edges. Playback Notifications render
@@ -265,6 +267,25 @@ const YTB = {
 			if (key in partial) next[key] = partial[key] === true;
 		}
 		return await YTB._storageSet(next);
+	},
+
+	/**
+	 * The pure Theme Preference -> data-theme marker decision (ADR-0008/0009).
+	 * Forced 'light'/'dark' win everywhere. Under Auto ('system', or any
+	 * unexpected/absent value) the marker follows the surrounding page: on a
+	 * YouTube page `pageDark` is a boolean (from `<html dark>`) and the marker
+	 * mirrors it; off-page (the popup, `pageDark === null`) there is nothing to
+	 * follow, so the marker is left unset (null) and the OS
+	 * @media (prefers-color-scheme) fallback rules.
+	 * @param {string} preference stored Theme Preference
+	 * @param {boolean|null} pageDark YouTube page darkness, or null off-page (popup)
+	 * @returns {'light'|'dark'|null} the data-theme value, or null to leave it unset
+	 */
+	themeMarker(preference, pageDark) {
+		if (preference === 'light' || preference === 'dark') return preference;
+		if (pageDark === true) return 'dark';
+		if (pageDark === false) return 'light';
+		return null;
 	},
 
 	/**

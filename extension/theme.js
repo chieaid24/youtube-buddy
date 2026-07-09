@@ -4,15 +4,19 @@
 // namespaced --ytb-* design tokens (apricot ramp, warm neutrals, semantic
 // colors, radii, spacing, motion) mirroring DESIGN.md sections 1/2/4, plus the
 // bundled "YTB Rounded" Nunito @font-face. Every token is --ytb-* prefixed so
-// nothing collides with YouTube's own custom properties; dark mode follows
-// prefers-color-scheme (warm espresso), independent of YouTube's own theme —
-// UNLESS the stored Theme Preference (ADR-0008) forces a mode: this file reads
-// the per-install `theme` key, stamps data-theme="light"|"dark" on the
-// document root ('system' leaves it unset), and the :root[data-theme=...]
-// token blocks below out-specify the bare @media :root blocks. It follows
-// chrome.storage.onChanged, so a popup change restyles an open tab live. The
-// same code runs inside the popup document (popup.html loads this file), so
-// one implementation themes both surfaces.
+// nothing collides with YouTube's own custom properties. A forced Light/Dark
+// Theme Preference stamps data-theme="light"|"dark" on the document root, and
+// the :root[data-theme=...] token blocks below out-specify the bare @media
+// :root blocks so it wins over the OS in both directions. Under Auto ('system',
+// ADR-0009) the marker follows the surroundings: on a YouTube page it mirrors
+// YouTube's own theme (`<html dark>`), restamping live on the `ytb:yt-theme`
+// flip content.js emits (this file grows NO observer of its own — ADR-0001); in
+// the popup, which cannot see a page, the marker is left unset so the OS
+// @media (prefers-color-scheme, warm espresso) rules. The pure marker decision
+// lives in shared.js (YTB.themeMarker). It also follows chrome.storage.onChanged,
+// so a popup change restyles an open tab live. The same code runs inside the
+// popup document (popup.html loads this file), so one implementation themes both
+// surfaces.
 //
 // This file is the single home of the base64 Nunito subset: popup.html loads
 // it as a plain <script> (the popup's @font-face comes from here too), and the
@@ -213,16 +217,34 @@
 	}
 	injectTheme();
 
-	// --- Theme Preference stamping (ADR-0008) ---
-	// Deliberately self-contained (raw chrome.storage, no window.YTB): in the
-	// popup this file loads BEFORE shared.js, and on the watch page the marker
-	// should land as early as possible. 'system' (or anything unexpected)
-	// removes the attribute so the prefers-color-scheme media query rules.
+	// --- Theme Preference stamping (ADR-0008 / ADR-0009) ---
+	// The pure marker decision lives in shared.js (YTB.themeMarker): forced
+	// Light/Dark win everywhere; under Auto the marker follows the page. shared.js
+	// loads BEFORE theme.js in both contexts (first in the content-script array,
+	// and first in the popup <head>), so window.YTB is defined here. The
+	// stylesheet injection above stays dependency-free so it lands as early as
+	// possible.
+
+	// null off-page (the popup): under Auto there is no page theme to follow, so
+	// the marker is left unset and the OS media query rules. On a YouTube page
+	// YouTube stamps `dark` on <html> for its dark theme.
+	const IN_POPUP = location.protocol === 'chrome-extension:';
+	let currentTheme; // last stored Theme Preference, so a YouTube flip can restamp
+
+	function pageDark() {
+		return IN_POPUP ? null : document.documentElement.hasAttribute('dark');
+	}
+
+	function restamp() {
+		const marker = window.YTB.themeMarker(currentTheme, pageDark());
+		const root = document.documentElement;
+		if (marker) root.setAttribute('data-theme', marker);
+		else root.removeAttribute('data-theme');
+	}
 
 	function applyTheme(theme) {
-		const root = document.documentElement;
-		if (theme === 'light' || theme === 'dark') root.setAttribute('data-theme', theme);
-		else root.removeAttribute('data-theme');
+		currentTheme = theme;
+		restamp();
 	}
 
 	try {
@@ -236,6 +258,16 @@
 			// Chrome stops delivering events to it anyway, but guard the apply.
 			try {
 				applyTheme(changes.theme.newValue);
+			} catch {
+				/* extension context gone — nothing to restyle */
+			}
+		});
+		// A live YouTube theme flip (content.js watches `<html dark>` and emits
+		// this): re-decide the marker under the current preference. Never fires in
+		// the popup, so it is a no-op there.
+		document.addEventListener('ytb:yt-theme', () => {
+			try {
+				restamp();
 			} catch {
 				/* extension context gone — nothing to restyle */
 			}

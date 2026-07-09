@@ -12,6 +12,9 @@
 // Events emitted on `document` (Contract C):
 //   - ytb:navigate { url, videoId }  — once on load + on every SPA navigation.
 //   - ytb:mutation                   — throttled (<= once / 500ms) on DOM churn.
+//   - ytb:yt-theme { dark }          — on each YouTube <html dark> flip, so the
+//                                      Auto Theme Preference can follow the page
+//                                      live (ADR-0009; theme.js restamps).
 
 (function () {
   "use strict";
@@ -87,9 +90,30 @@
   // somehow misses.
   urlPollTimer = setInterval(emitNavigateIfUrlChanged, URL_POLL_MS);
 
+  // --- YouTube theme tracking (ADR-0009) ---
+  // YouTube toggles a `dark` attribute on <html> for its dark theme. Watch it so
+  // on-page YTB surfaces under the Auto Theme Preference can follow YouTube live
+  // (theme.js restamps on this event; per ADR-0001 the theming layer grows no
+  // observer of its own — DOM observation stays here). Only real flips emit.
+  let lastDark = document.documentElement.hasAttribute("dark");
+  function emitYtThemeIfChanged() {
+    const dark = document.documentElement.hasAttribute("dark");
+    if (dark === lastDark) return;
+    lastDark = dark;
+    document.dispatchEvent(
+      new CustomEvent("ytb:yt-theme", { detail: { dark } }),
+    );
+  }
+  const themeObserver = new MutationObserver(emitYtThemeIfChanged);
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["dark"],
+  });
+
   YTB.onContextInvalidated(() => {
     document.removeEventListener("yt-navigate-finish", emitNavigate);
     observer.disconnect();
+    themeObserver.disconnect();
     if (trailingTimer !== null) clearTimeout(trailingTimer);
     if (urlPollTimer !== null) clearInterval(urlPollTimer);
     trailingTimer = null;
