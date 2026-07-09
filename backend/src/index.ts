@@ -19,6 +19,7 @@ interface NoteBody {
 	clientId: string;
 	name: string;
 	videoId: string;
+	videoTitle?: string;
 	timestamp: number;
 	kind: 'text' | 'emoji';
 	body: string;
@@ -71,13 +72,15 @@ const MAX_PLAYLIST_ITEMS = 30;
 // older ones are pruned best-effort on each write. They also share TTL_SECONDS.
 const MAX_EVENTS = 50;
 
-// A Playlist Item's title is captured at add time; YouTube titles top out
-// around 100 chars, so this bound only rejects abuse, never real titles.
+// A video title is captured at write time — a Playlist Item's at add time, a
+// Note's at post time. YouTube titles top out around 100 chars, so this bound
+// only rejects abuse, never real titles.
 const TITLE_MAX_CHARS = 200;
 
 // Stable machine-readable error categories. The extension branches on these —
 // never on the prose in `error`.
-type ErrorCategory = 'validation' | 'room_full' | 'reply_cap' | 'missing_parent' | 'forbidden' | 'not_allowed' | 'unexpected' | 'playlist_full';
+type ErrorCategory =
+	'validation' | 'room_full' | 'reply_cap' | 'missing_parent' | 'forbidden' | 'not_allowed' | 'unexpected' | 'playlist_full';
 
 const corsHeaders: Record<string, string> = {
 	'Access-Control-Allow-Origin': '*',
@@ -240,11 +243,15 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		}
 
 		const id = crypto.randomUUID();
+		const videoTitle = sanitizeVideoTitle(body.videoTitle);
 		const record = {
 			id,
 			clientId: body.clientId,
 			name: typeof body.name === 'string' ? body.name : '',
 			videoId: body.videoId,
+			// The video's title, frozen at post time (like a Playlist Event's, see
+			// recordPlaylistEvent). Absent means the poster had no title to give.
+			...(videoTitle !== undefined ? { videoTitle } : {}),
 			timestamp: body.timestamp,
 			kind: body.kind,
 			body: body.body,
@@ -624,6 +631,19 @@ function validateMentions(mentions: unknown): string | null {
 		return 'missing or invalid field: mentions';
 	}
 	return null;
+}
+
+// A Note's `videoTitle` is OPTIONAL context, never a reason to lose a Note: a
+// missing, blank, non-string, or over-long title is dropped rather than
+// rejected, so validateNote never sees it. Absent means "no title", and the
+// Room Feed then shows no context fragment at all — never a placeholder.
+// A Playlist Item's title, by contrast, IS the item, so validatePlaylist
+// rejects a bad one.
+function sanitizeVideoTitle(value: unknown): string | undefined {
+	if (typeof value !== 'string') return undefined;
+	const title = value.trim();
+	if (title === '' || title.length > TITLE_MAX_CHARS) return undefined;
+	return title;
 }
 
 function validatePlaylist(body: Partial<PlaylistBody>): string | null {

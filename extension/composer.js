@@ -340,6 +340,9 @@
 				clientId,
 				name: config.name,
 				videoId: currentVideoId,
+				// Frozen at post time, so a Buddy's Room Feed can name the video this
+				// conversation is on. Best-effort: '' is simply not sent.
+				videoTitle: YTB.watchTitle(document),
 				timestamp,
 				kind,
 				body,
