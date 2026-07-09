@@ -65,11 +65,15 @@ The player-native rendering of one Buddy's Progress Record on the Video Timeline
 _Avoid_: Note Dot, pin, Note marker
 
 **Progress Bar**:
-The player-native fractional bar overlaid on a feed thumbnail showing how far a Buddy has watched that video, drawn in the Buddy Color — the thumbnail-surface counterpart to the Progress Marker (which sits on the active Video Timeline). Kept player-native, not part of the apricot Note UI.
+The player-native fractional bar overlaid on a feed thumbnail showing how far a Buddy has watched that video, drawn in the Buddy Color — the thumbnail-surface counterpart to the Progress Marker (which sits on the active Video Timeline). Kept player-native, not part of the apricot Note UI: it mirrors the geometry of YouTube's own **Watched Bar** (inset, rounded, 4px), and where a tile shows both, the Progress Bar stacks directly above the Watched Bar rather than covering it. It is drawn inside the thumbnail's own box, so it never overhangs the image or floats in the gap beneath it.
 _Avoid_: Video Timeline / YouTube's own progress bar (the active player's live scrubber — a different surface), thumbnail overlay
 
+**Watched Bar**:
+YouTube's own red resume-playback bar on a thumbnail — how far **you** watched that video, from YouTube's history, nothing to do with a Room. Never drawn or owned by the extension; it is only something the Progress Bar positions itself against (a tile may show both, the Progress Bar above). Distinct from the Progress Bar (a Buddy's position, in the Buddy Color).
+_Avoid_: progress bar (alone), resume bar, red bar
+
 **Note Dot**:
-The small dot placed on the Video Timeline at a Note's timestamp — the base timeline element from which a Note Preview (on hover) and an Expanded Note (on click) open. A locked Spoiler shows an obscured Note Dot; a Reaction and a text Note each show their own dot. Distinct from a Progress Marker (a live watch position, not authored content).
+The small dot placed on the Video Timeline at a Note's timestamp — the base timeline element from which a Note Preview (on hover) and an Expanded Note (on click) open. A locked Spoiler shows an obscured Note Dot; a Reaction and a text Note each show their own dot. An **Unseen** Note Dot pulses an apricot halo until Acknowledged; the dot itself never moves or resizes. Distinct from a Progress Marker (a live watch position, not authored content).
 _Avoid_: marker, Progress Marker, pin
 
 **Note Preview**:
@@ -85,7 +89,7 @@ A text-only message appended to one parent Note and shown as part of that Note's
 _Avoid_: Note (a Reply has no independent timeline position), Reaction, generic comment
 
 **Playback Notification**:
-The transient presentation, anchored at the viewer's Notification Position, triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment.
+The transient presentation, anchored at the viewer's Notification Position, triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment. Crossing a Note also Acknowledges it (see Acknowledge).
 _Avoid_: Note Preview, Expanded Note, popup (ambiguous)
 
 **Note Composer**:
@@ -121,7 +125,7 @@ A recipient hiding one Recommendation from just their own Recommended-for-you gr
 _Avoid_: remove, delete, un-recommend, hide (alone)
 
 **Room Feed**:
-The personalized, chronological, chat-like feed on the left of the Room Home Section. For the viewer it shows: Replies to Notes the viewer authored; Notes or Replies that Mention the viewer; deemphasized System Messages for recommendations (both received — "X recommended \"Title\"" — and the viewer's own — "You recommended \"Title\" to the Room"); and Watch Notices that a Buddy watched a video the viewer recommended ("X watched \"Title\""). Link rule: only the quoted content is a link. On a Note/Reply/Mention item the quoted message body links to the video, seeks to the Note's timestamp, and opens that Note's Expanded Note (a Reply-Mention opens the parent Note's conversation); the item also names the video it was left on ("on \"Title\"", plain text) when the Note carries a title. On a System Message or Watch Notice the quoted video title links to the video. A System Message whose Recommendation has since been removed renders struck through. Items are grouped under day dividers (Today / Yesterday / date), oldest at the top and newest at the bottom, auto-scrolled to newest like a chat. There is **no** read/unread state: the Feed simply shows the most recent activity. It is derived entirely on the client from the Room read plus Playlist Events; nothing is stored per-recipient.
+The personalized, chronological, chat-like feed on the left of the Room Home Section. For the viewer it shows: Replies to Notes the viewer authored; Notes or Replies that Mention the viewer; deemphasized System Messages for recommendations (both received — "X recommended Title" — and the viewer's own — "You recommended Title to the Room"); and Watch Notices that a Buddy started watching a video the viewer recommended ("X started watching Title"). Link rule: only the message body (quoted) or the video title (unquoted) is a link. On a Note/Reply/Mention item the quoted message body links to the video, seeks to the Note's timestamp, and opens that Note's Expanded Note (a Reply-Mention opens the parent Note's conversation); the item also names the video it was left on ("on \"Title\"", plain text) when the Note carries a title. On a System Message or Watch Notice the video title links to the video. A System Message whose Recommendation has since been removed renders struck through. Items are grouped under day dividers (Today / Yesterday / date), oldest at the top and newest at the bottom, auto-scrolled to newest like a chat. There is **no** read/unread state: the Feed simply shows the most recent activity. It is derived entirely on the client from the Room read plus Playlist Events; nothing is stored per-recipient.
 _Avoid_: inbox, notifications (as a stored entity), activity log
 
 **Mention**:
@@ -133,11 +137,11 @@ The @-mention autocomplete popover shown beneath the Note Composer or a Reply fi
 _Avoid_: mention popup, tag menu, autocomplete (alone)
 
 **System Message**:
-A small, deemphasized Room Feed line for a recommendation: recipients see "Bob recommended \"Title\"", and the recommender sees their own "You recommended \"Title\" to the Room". The quoted title links to the video. An un-recommend still produces no new Feed line and no Event; instead, the existing line renders **struck through**, derived client-side by noticing the Event's videoId is no longer in the Room's live Recommendation list. The title comes from the Playlist Event itself, so the message survives (struck) after the video is un-recommended. Rendered visually quieter than personal Feed items.
+A small, deemphasized Room Feed line for a recommendation: recipients see "Bob recommended Title", and the recommender sees their own "You recommended Title to the Room". The title links to the video. An un-recommend still produces no new Feed line and no Event; instead, the existing line renders **struck through**, derived client-side by noticing the Event's videoId is no longer in the Room's live Recommendation list. The title comes from the Playlist Event itself, so the message survives (struck) after the video is un-recommended. Rendered visually quieter than personal Feed items.
 _Avoid_: notification, alert, toast
 
 **Watch Notice**:
-A Room Feed line telling the recommender that a Buddy started watching a video they recommended ("Alice watched \"Title\""). Derived live on the client from the Room read — a Buddy's Progress Record for one of your Recommendations, timestamped by that record's `updatedAt` — and never stored, so it is best-effort: it may reorder as the Buddy keeps watching and cannot distinguish watched-before vs watched-after the recommendation. Shown only to the recommender.
+A Room Feed line telling the recommender that a Buddy started watching a video they recommended ("Alice started watching Title"). Derived live on the client from the Room read — a Buddy's Progress Record for one of your Recommendations, timestamped by that record's `updatedAt` — and never stored, so it is best-effort: it may reorder as the Buddy keeps watching and cannot distinguish watched-before vs watched-after the recommendation. Shown only to the recommender.
 _Avoid_: watched alert, view notification
 
 **Playlist Event**:
