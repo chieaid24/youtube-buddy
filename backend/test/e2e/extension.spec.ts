@@ -278,7 +278,7 @@ const homeFixture = `<!doctype html>
   </body>
 </html>`;
 
-test('Room Home Toggle hides and restores the Room Home Section, persisting across reload and SPA nav', async () => {
+test('Room Home Toggle and the header close control both hide the Room Home Section, persisting across reload and SPA nav', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -341,6 +341,27 @@ test('Room Home Toggle hides and restores the Room Home Section, persisting acro
 		await toggle.click();
 		await expect(toggle).toHaveAttribute('aria-checked', 'true');
 		await expect(section).toHaveCount(1);
+
+		// The section header's own close control writes the SAME preference: the
+		// section goes away completely, the guide row follows live (over
+		// storage.onChanged) and stays available as the way back, and mutation
+		// churn must not re-inject the section.
+		await section.locator('.ytb-hs-close').click();
+		await expect(section).toHaveCount(0);
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(icon).toHaveCSS('color', 'rgb(15, 15, 15)');
+		await nudge();
+		await page.waitForTimeout(600);
+		await expect(section).toHaveCount(0);
+
+		// It persists like any other flip, and the guide row restores it.
+		await page.reload();
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await page.waitForTimeout(600);
+		await expect(section).toHaveCount(0);
+		await toggle.click();
+		await expect(section).toHaveCount(1);
+		await expect(section.locator('.ytb-hs-close')).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
