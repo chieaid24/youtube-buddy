@@ -230,23 +230,42 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.goHereTarget(Number.NaN)).toBe(0);
 	});
 
-	it('routes dot activation: Reaction = bare state-preserving seek, locked Spoiler = Go here, text = open', () => {
-		// A Reaction seeks to just before its moment WITHOUT touching playback
-		// state: the action is 'seek' (bare), never 'go-here' (which resumes
-		// play), whether the playhead sits before or after the Reaction.
-		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 42 }, 5)).toEqual({ action: 'seek', target: 41 });
-		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 42 }, 90)).toEqual({ action: 'seek', target: 41 });
-		// The seek target clamps at zero like Go here.
-		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 0.5 }, 30)).toEqual({ action: 'seek', target: 0 });
-		// A locked Spoiler (playhead before its moment) still performs Go here.
-		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 }, 5)).toEqual({ action: 'go-here', target: 41 });
-		// An unlocked Spoiler and a plain text Note open the conversation.
-		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 }, 50)).toEqual({ action: 'open' });
-		expect(window.YTB.dotActivation({ kind: 'text', timestamp: 42 }, 5)).toEqual({ action: 'open' });
-		// No player = Infinity playhead: nothing locks, Reactions still route
-		// to the bare seek (the executor skips it without a video element).
-		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 }, Infinity)).toEqual({ action: 'open' });
-		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 1 }, Infinity)).toEqual({ action: 'seek', target: 0 });
+	it('routes dot activation to "open" for every Note kind — the click never seeks', () => {
+		// Activating ANY dot/preview opens its Expanded Note; the timeline no
+		// longer seeks (Go here inside the panel is the only seek). Text Notes,
+		// Reactions, and locked or unlocked Spoilers all route the same.
+		expect(window.YTB.dotActivation({ kind: 'text', timestamp: 42 })).toEqual({ action: 'open' });
+		expect(window.YTB.dotActivation({ kind: 'emoji', timestamp: 42 })).toEqual({ action: 'open' });
+		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 })).toEqual({ action: 'open' });
+	});
+
+	it('chooses the Expanded Note variant from the panel-open playhead', () => {
+		// A Spoiler whose moment is still ahead of the playhead opens masked.
+		expect(window.YTB.notePanelVariant({ kind: 'text', spoiler: true, timestamp: 42 }, 5)).toBe('spoiler');
+		// Once the playhead reaches/passes it, the Spoiler is a normal text panel.
+		expect(window.YTB.notePanelVariant({ kind: 'text', spoiler: true, timestamp: 42 }, 42)).toBe('text');
+		expect(window.YTB.notePanelVariant({ kind: 'text', spoiler: true, timestamp: 42 }, 90)).toBe('text');
+		// A Reaction is always the read-only reaction panel (never a Spoiler).
+		expect(window.YTB.notePanelVariant({ kind: 'emoji', timestamp: 42 }, 5)).toBe('reaction');
+		expect(window.YTB.notePanelVariant({ kind: 'emoji', timestamp: 42 }, 90)).toBe('reaction');
+		// A plain text Note is always the text panel.
+		expect(window.YTB.notePanelVariant({ kind: 'text', timestamp: 42 }, 5)).toBe('text');
+		// No player (Infinity): nothing locks, so a Spoiler opens as text.
+		expect(window.YTB.notePanelVariant({ kind: 'text', spoiler: true, timestamp: 42 }, Infinity)).toBe('text');
+		expect(window.YTB.notePanelVariant({ kind: 'emoji', timestamp: 42 }, Infinity)).toBe('reaction');
+	});
+
+	it('hides Go here only when the playhead sits within 2s of the moment', () => {
+		// Within the 2s window (inclusive of the boundary) there is nowhere to go.
+		expect(window.YTB.nearNoteMoment(42, 42)).toBe(true);
+		expect(window.YTB.nearNoteMoment(42, 40)).toBe(true);
+		expect(window.YTB.nearNoteMoment(42, 44)).toBe(true);
+		// Just outside the window Go here shows again.
+		expect(window.YTB.nearNoteMoment(42, 39.9)).toBe(false);
+		expect(window.YTB.nearNoteMoment(42, 44.1)).toBe(false);
+		// No player (non-finite playhead) is never near, so Go here shows.
+		expect(window.YTB.nearNoteMoment(42, Infinity)).toBe(false);
+		expect(window.YTB.nearNoteMoment(42, Number.NaN)).toBe(false);
 	});
 
 	it('spreads dots within the 2-second window, preserving order and clamping to the bar', () => {
@@ -1040,6 +1059,9 @@ declare global {
 			errorCopy(category: string, action: 'note' | 'reply' | 'reaction'): string;
 			spreadFractions(dots: Array<{ id: string; timestamp: number; fraction: number }>, minGap?: number): Map<string, number>;
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];
+			dotActivation(note: { kind?: string; spoiler?: boolean; timestamp?: number }): { action: 'open' };
+			notePanelVariant(note: { kind?: string; spoiler?: boolean; timestamp?: number }, playhead: number): 'text' | 'reaction' | 'spoiler';
+			nearNoteMoment(timestamp: number, playhead: number): boolean;
 		};
 	}
 }

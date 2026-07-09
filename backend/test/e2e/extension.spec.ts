@@ -414,8 +414,9 @@ function silentWav(seconds: number): Buffer {
 	return wav;
 }
 
-// One Buddy-authored Note of each dot kind on a 20s video. goHereTarget is 1s
-// before the timestamp, so the Reaction seeks to 7 and the Spoiler to 15.
+// One Buddy-authored Note of each dot kind on a 20s video. Go here (the panel's
+// only seek) targets 1s before the timestamp, so it lands at 3 for the text
+// Note, 7 for the Reaction, and 15 for the Spoiler.
 const roomNotes = [
 	{
 		id: 'n-text',
@@ -452,7 +453,7 @@ const roomNotes = [
 	},
 ];
 
-test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots keep their behavior', async () => {
+test('every Note Dot opens its Expanded Note variant; the click never seeks or changes playback', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -481,45 +482,79 @@ test('Reaction dot click is a bare state-preserving seek; text and Spoiler dots 
 		await expect(page.locator('.ytb-note-dot-reaction')).toHaveCount(1);
 		await expect(page.locator('.ytb-note-dot-locked')).toHaveCount(1);
 
+		const panel = page.locator('#ytb-note-panel');
 		const state = () => video.evaluate((v: HTMLVideoElement) => ({ currentTime: v.currentTime, paused: v.paused }));
+		const parkAt = (t: number) =>
+			video.evaluate((v: HTMLVideoElement, at) => {
+				v.pause();
+				v.currentTime = at;
+			}, t);
 
-		// Paused Reaction click: seeks to goHereTarget(8) = 7 and stays paused.
-		expect((await state()).paused).toBe(true);
+		// Reaction dot: opens the read-only Reaction panel — the large emoji with
+		// its author and the corner timestamp, but no Reply composer or delete. The
+		// click seeks nowhere and leaves the video paused where it sat.
+		await parkAt(1);
 		await page.locator('.ytb-note-dot-reaction').click();
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-emoji')).toHaveText('\u{1F525}');
+		await expect(panel.locator('.ytb-panel-time')).toHaveText('@0:08');
+		await expect(panel.locator('.ytb-panel-reply-input')).toHaveCount(0);
+		await expect(panel.locator('.ytb-panel-delete')).toHaveCount(0);
 		let s = await state();
-		expect(s.currentTime).toBeGreaterThanOrEqual(6.7);
-		expect(s.currentTime).toBeLessThan(7.3);
+		expect(s.currentTime).toBeCloseTo(1, 1);
+		expect(s.paused).toBe(true);
+		await page.keyboard.press('Escape');
+		await expect(panel).toHaveCount(0);
+
+		// Locked Spoiler dot: opens the masked panel — a muted "Spoiler" body (no
+		// real body text) with the corner timestamp, and no Replies, composer, or
+		// delete. Again no seek, no play.
+		await parkAt(1);
+		await page.locator('.ytb-note-dot-locked').click();
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-spoiler')).toHaveText('Spoiler');
+		await expect(panel.locator('.ytb-panel-body')).toHaveCount(0);
+		await expect(panel.locator('.ytb-panel-time')).toHaveText('@0:16');
+		await expect(panel.locator('.ytb-panel-reply-input')).toHaveCount(0);
+		await expect(panel.locator('.ytb-panel-delete')).toHaveCount(0);
+		s = await state();
+		expect(s.currentTime).toBeCloseTo(1, 1);
+		expect(s.paused).toBe(true);
+		await page.keyboard.press('Escape');
+		await expect(panel).toHaveCount(0);
+
+		// Text Note dot: opens the conversation panel with the corner timestamp,
+		// still without seeking.
+		await parkAt(1);
+		await page.locator('.ytb-note-dot-text').click();
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-body')).toContainText('hello');
+		await expect(panel.locator('.ytb-panel-time')).toHaveText('@0:04');
+		s = await state();
+		expect(s.currentTime).toBeCloseTo(1, 1);
 		expect(s.paused).toBe(true);
 
-		// Playing Reaction click: same seek, and playback keeps running.
-		await video.evaluate((v: HTMLVideoElement) => {
-			v.currentTime = 0;
-			return v.play();
-		});
-		expect((await state()).paused).toBe(false);
-		await page.locator('.ytb-note-dot-reaction').click();
-		s = await state();
-		expect(s.currentTime).toBeGreaterThanOrEqual(6.7);
-		expect(s.currentTime).toBeLessThan(8.5);
-		expect(s.paused).toBe(false);
+		// Go here is labelled without the "@time" suffix (the moment lives in its
+		// aria-label instead).
+		const goHere = panel.locator('.ytb-panel-gohere');
+		await expect(goHere).toHaveText('Go here');
+		await expect(goHere).toHaveAttribute('aria-label', /before 0:04/);
 
-		// Locked Spoiler click is still Go here: seeks to goHereTarget(16) = 15
-		// AND resumes playback from paused.
-		await video.evaluate((v: HTMLVideoElement) => v.pause());
-		await page.locator('.ytb-note-dot-locked').click();
+		// Go here is the only seek: it jumps to ~1s before the Note (goHereTarget(4)
+		// = 3) and resumes play; the play event then closes the panel.
+		await goHere.click();
 		await expect.poll(async () => (await state()).paused).toBe(false);
 		s = await state();
-		expect(s.currentTime).toBeGreaterThanOrEqual(14.7);
-		expect(s.currentTime).toBeLessThan(16);
+		expect(s.currentTime).toBeGreaterThanOrEqual(2.7);
+		expect(s.currentTime).toBeLessThan(4);
+		await expect(panel).toHaveCount(0);
 
-		// Text Note click still opens the conversation panel without seeking.
-		await video.evaluate((v: HTMLVideoElement) => v.pause());
-		const before = (await state()).currentTime;
+		// Go here is omitted when the paused playhead already sits within 2s of the
+		// moment: parked at t=4 (the text Note's own timestamp) there is nowhere to go.
+		await parkAt(4);
 		await page.locator('.ytb-note-dot-text').click();
-		await expect(page.locator('#ytb-note-panel')).toBeVisible();
-		s = await state();
-		expect(s.currentTime).toBeCloseTo(before, 1);
-		expect(s.paused).toBe(true);
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-gohere')).toHaveCount(0);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -733,7 +768,7 @@ test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native,
 	}
 });
 
-test('clicking a locked-Spoiler hover preview performs Go here, exactly like its dot', async () => {
+test('clicking a Reaction or locked-Spoiler hover preview opens its Expanded Note, exactly like its dot', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -752,30 +787,45 @@ test('clicking a locked-Spoiler hover preview performs Go here, exactly like its
 			const v = document.querySelector('video');
 			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
 		});
-
-		const lockedDot = page.locator('.ytb-note-dot-locked');
-		await nudgeUntil(page, () => expect(lockedDot).toHaveCount(1, { timeout: 700 }));
-		const preview = page.locator('.ytb-note-dot-locked .ytb-note-preview');
-
-		// Hovering the dot reveals its preview, which masks the body as "Spoiler"
-		// and (the fix) is now itself clickable.
-		await lockedDot.hover();
-		await expect(preview).toHaveText(/Spoiler/);
-		await expect.poll(() => preview.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('auto');
-
-		// Clicking anywhere on the preview — not the tiny dot — performs Go here:
-		// seek to goHereTarget(16) = 15 and resume playback, identical to the dot.
 		await video.evaluate((v: HTMLVideoElement) => {
 			v.pause();
 			v.currentTime = 2;
 		});
-		await preview.click();
-		await expect.poll(async () => video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
-		const t = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
-		expect(t).toBeGreaterThanOrEqual(14.7);
-		expect(t).toBeLessThan(16);
-		// Still masked and never expanded into the conversation panel while locked.
-		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+
+		const panel = page.locator('#ytb-note-panel');
+		const state = () => video.evaluate((v: HTMLVideoElement) => ({ currentTime: v.currentTime, paused: v.paused }));
+
+		// The locked-Spoiler preview masks the body as "Spoiler" and is itself
+		// clickable; clicking anywhere on it — not the tiny dot — opens the masked
+		// Expanded Note, without seeking or changing playback.
+		const lockedDot = page.locator('.ytb-note-dot-locked');
+		await nudgeUntil(page, () => expect(lockedDot).toHaveCount(1, { timeout: 700 }));
+		const lockedPreview = page.locator('.ytb-note-dot-locked .ytb-note-preview');
+		await lockedDot.hover();
+		await expect(lockedPreview).toHaveText(/Spoiler/);
+		await expect.poll(() => lockedPreview.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('auto');
+		await lockedPreview.click();
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-spoiler')).toHaveText('Spoiler');
+		await expect(panel.locator('.ytb-panel-body')).toHaveCount(0);
+		let s = await state();
+		expect(s.currentTime).toBeCloseTo(2, 1);
+		expect(s.paused).toBe(true);
+		await page.keyboard.press('Escape');
+		await expect(panel).toHaveCount(0);
+
+		// The Reaction preview is now clickable too; clicking it opens the read-only
+		// Reaction panel, again without seeking or changing playback.
+		const reactionDot = page.locator('.ytb-note-dot-reaction');
+		const reactionPreview = page.locator('.ytb-note-dot-reaction .ytb-note-preview');
+		await reactionDot.hover();
+		await expect.poll(() => reactionPreview.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('auto');
+		await reactionPreview.click();
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-emoji')).toHaveText('\u{1F525}');
+		s = await state();
+		expect(s.currentTime).toBeCloseTo(2, 1);
+		expect(s.paused).toBe(true);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

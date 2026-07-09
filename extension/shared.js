@@ -106,6 +106,11 @@ const YTB = {
 	// "natural crossing" delta in notes.js.
 	SPREAD_WINDOW_SECONDS: 2,
 
+	// The Expanded Note omits "Go here" when the paused playhead already sits
+	// within this many seconds of the Note's moment (nearNoteMoment) — there is
+	// nowhere meaningful to go. Independent of SPREAD_WINDOW_SECONDS.
+	GO_HERE_NEAR_SECONDS: 2,
+
 	// --- storage (chrome.storage.local) ---
 	// Stored keys: name, code, clientId, sharing, homeSectionHidden, the Settings
 	// keys (theme, spoilerDefault, notificationPosition, notesHidden,
@@ -634,33 +639,15 @@ const YTB = {
 	},
 
 	/**
-	 * What activating (click/Enter/Space) a Video Timeline dot does — a pure
-	 * decision so notes.js stays a thin executor and the routing is testable:
-	 * - a locked Spoiler (spoiler + playhead before its moment) is 'go-here':
-	 *   seek to `target` AND resume playback, so the Note reveals through its
-	 *   natural crossing;
-	 * - a Reaction (emoji) is 'seek': the same `target`, but a bare,
-	 *   state-preserving seek — playing stays playing, paused stays paused
-	 *   (the executor must not call play()/pause());
-	 * - a text Note (including an unlocked Spoiler) is 'open': the
-	 *   conversation panel, no seek.
-	 * @param {{kind?: string, spoiler?: boolean, timestamp: number}} note
-	 * @param {number} playhead the viewer's playback position in seconds
-	 *   (pass Infinity when there is no player — nothing can be locked)
-	 * @returns {{action: 'go-here'|'seek'|'open', target?: number}}
+	 * What activating (click/Enter/Space) a Note Dot or Note Preview does — now
+	 * one decision for every kind: OPEN its Expanded Note. Timeline activation
+	 * never seeks or changes playback (Go here inside the panel is the only seek),
+	 * so this stays a pure seam the executor consults, keeping that invariant in
+	 * one tested place. The panel it opens is shaped by notePanelVariant.
+	 * @param {{kind?: string, spoiler?: boolean, timestamp?: number}} _note
+	 * @returns {{action: 'open'}}
 	 */
-	dotActivation(note, playhead) {
-		const locked = Boolean(note.spoiler) && Number(playhead) < Number(note.timestamp);
-		if (locked)
-			return {
-				action: 'go-here',
-				target: YTB.goHereTarget(Number(note.timestamp)),
-			};
-		if (note.kind === 'emoji')
-			return {
-				action: 'seek',
-				target: YTB.goHereTarget(Number(note.timestamp)),
-			};
+	dotActivation(_note) {
 		return { action: 'open' };
 	},
 
@@ -677,6 +664,40 @@ const YTB = {
 	panelPlayAction({ panelOpen, withinGrace }) {
 		if (!panelOpen) return 'ignore';
 		return withinGrace ? 'hold' : 'dismiss';
+	},
+
+	/**
+	 * Which Expanded Note variant a Note opens into at panel-open, given the
+	 * viewer's playhead — the pure routing behind the panel's three shapes:
+	 * - 'spoiler': a locked Spoiler (spoiler + playhead before its moment) — body
+	 *   masked, with conversation/composer/delete withheld until it unlocks;
+	 * - 'reaction': an emoji Reaction — read-only emoji with its author;
+	 * - 'text': a plain text Note or an UNLOCKED Spoiler — the full conversation.
+	 * @param {{kind?: string, spoiler?: boolean, timestamp?: number}} note
+	 * @param {number} playhead the viewer's position in seconds (pass Infinity
+	 *   when there is no player — nothing can be locked)
+	 * @returns {'text'|'reaction'|'spoiler'}
+	 */
+	notePanelVariant(note, playhead) {
+		if (Boolean(note.spoiler) && Number(playhead) < Number(note.timestamp)) return 'spoiler';
+		if (note.kind === 'emoji') return 'reaction';
+		return 'text';
+	},
+
+	/**
+	 * Whether the viewer's (paused, panel-open) playhead already sits within
+	 * GO_HERE_NEAR_SECONDS of a Note's moment — |playhead - timestamp| <= 2. When
+	 * true the Expanded Note omits Go here entirely (every variant): there is
+	 * nowhere meaningful to go. A missing/non-finite playhead (no player) is never
+	 * near, so Go here shows.
+	 * @param {number} timestamp the Note's video timestamp in seconds
+	 * @param {number} playhead the viewer's playback position in seconds
+	 * @returns {boolean}
+	 */
+	nearNoteMoment(timestamp, playhead) {
+		const head = Number(playhead);
+		if (!Number.isFinite(head)) return false;
+		return Math.abs(head - Number(timestamp)) <= YTB.GO_HERE_NEAR_SECONDS;
 	},
 
 	/**

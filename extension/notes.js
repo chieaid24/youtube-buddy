@@ -6,14 +6,15 @@
 //     pointer/keyboard target;
 //   - hover/focus Note Previews (two-line body, author beneath, Reply count,
 //     corner timestamp) reachable across a transparent hover bridge;
-//   - the Expanded Note: a pinned conversation panel with Replies, a Reply
-//     composer (paper-plane send), a "Go here" seek-and-play control, and the
-//     author-only delete confirmation;
-//   - click-to-seek on locked Spoiler dots (Go here without opening — the Note
-//     reveals through its natural crossing, never early);
-//   - click-to-seek on Reaction dots: a bare, state-preserving seek to just
-//     before the Reaction (playing stays playing, paused stays paused — this
-//     is NOT Go here, which resumes playback);
+//   - the Expanded Note: a pinned panel opened by clicking ANY Note Dot or Note
+//     Preview (text, Reaction, or locked Spoiler) — activation never seeks. It
+//     has three variants: a text Note's full conversation (Replies, a Reply
+//     composer with paper-plane send, the author-only delete), a Reaction's
+//     read-only emoji + author, and a locked Spoiler's masked "Spoiler" body
+//     (no conversation, composer, or delete until it unlocks). Every variant
+//     pins the Note's video timestamp in its top-right corner and offers the
+//     one "Go here" seek-and-play control — omitted when the paused playhead is
+//     already within ~2s of the moment;
 //   - Playback Notifications: note cards (~4s, clickable) and animated
 //     Reaction bursts (~2s, non-interactive) on every NATURAL forward
 //     crossing — rewind-and-replay triggers again, direct seeks stay silent.
@@ -284,9 +285,8 @@
 				const preview = dot.appendChild(document.createElement('div'));
 				preview.className = PREVIEW_CLASS;
 				// Never let the player interpret a dot press as a seek. Clicking the
-				// dot OR its Note Preview activates it — open the conversation, or
-				// seek for Reactions/locked Spoilers (activation re-checks kind and
-				// Spoiler lock).
+				// dot OR its Note Preview opens that Note's Expanded Note (the click
+				// itself never seeks — Go here inside the panel is the only seek).
 				for (const type of ['mousedown', 'touchstart', 'pointerdown']) {
 					dot.addEventListener(type, (e) => e.stopPropagation());
 				}
@@ -326,38 +326,23 @@
 			dot.setAttribute(
 				'aria-label',
 				locked
-					? `Spoiler note at ${at}. Jump to just before it`
+					? `Spoiler note at ${at}. Open note`
 					: isReaction
-						? `Reaction ${note.body} by ${who} at ${at}. Seek to just before it`
+						? `Reaction ${note.body} by ${who} at ${at}. Open note`
 						: `Note by ${who} at ${at}. Open conversation`,
 			);
 			buildPreview(dot.querySelector('.' + PREVIEW_CLASS), note, who, locked, count);
 		}
 	}
 
-	// A text Note opens on click/Enter/Space; a Reaction seeks to just before
-	// its moment while PRESERVING the play/pause state (a bare seek — not Go
-	// here, which resumes playback); a locked Spoiler performs Go here — it
-	// seeks to just before its moment and plays, so the Note reveals through
-	// the natural crossing. Its preview masks the body ("Spoiler") and it is
-	// still never expanded while locked. The routing itself is the pure
-	// YTB.dotActivation; this stays the thin executor.
+	// Activating ANY Note Dot or Note Preview — text, Reaction, or locked
+	// Spoiler — opens that Note's Expanded Note; the click itself never seeks or
+	// changes playback (Go here inside the panel is the only seek). The routing
+	// is the pure YTB.dotActivation ("always open"); this stays the thin executor.
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
 		if (!note) return;
-		const video = document.querySelector('video');
-		const { action, target } = YTB.dotActivation(note, video ? Number(video.currentTime) : Infinity);
-		if (action === 'go-here') {
-			goHere(note);
-			return;
-		}
-		if (action === 'seek') {
-			// Bare, state-preserving seek: playing stays playing, paused stays
-			// paused — never call play()/pause() here.
-			if (video) video.currentTime = target;
-			return;
-		}
-		openPanel(note);
+		if (YTB.dotActivation(note).action === 'open') openPanel(note);
 	}
 
 	/**
@@ -513,60 +498,91 @@
 		const config = await YTB.getConfig();
 		if (!YTB.isContextActive() || openNote !== note) return; // stopped/replaced while awaiting config
 
-		const panel = buildPanel(note, config);
+		// The playhead is stable now (opening paused it): it fixes both the panel
+		// variant (a Spoiler's lock state) and whether Go here is near the moment.
+		const playhead = video ? Number(video.currentTime) : Infinity;
+		const variant = YTB.notePanelVariant(note, playhead);
+		const panel = buildPanel(note, config, playhead, variant);
 		host.appendChild(panel);
 		positionPanel(panel);
 		panel.focus();
 		dotFor(note.id)?.classList.add(DOT_OPEN_CLASS);
 
-		startConversationPoll(panel);
+		// Only a text Note has a conversation to poll; read-only variants (Reaction,
+		// locked Spoiler) just refresh their posted-time label.
+		if (variant === 'text') startConversationPoll(panel);
 		labelTimer = setInterval(() => refreshTimeLabels(panel), LABEL_REFRESH_MS);
 	}
 
-	function buildPanel(note, config) {
+	/**
+	 * Build the Expanded Note for `note` in the shape `variant` demands (chosen by
+	 * YTB.notePanelVariant from the panel-open `playhead`):
+	 * - 'text': the full conversation (Replies, composer, author-only delete);
+	 * - 'reaction': read-only — the large emoji with its author beneath;
+	 * - 'spoiler': read-only — a masked "Spoiler" body, conversation withheld.
+	 * Every variant pins the corner timestamp and offers Go here unless the
+	 * paused playhead already sits near the moment.
+	 */
+	function buildPanel(note, config, playhead, variant) {
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const panel = document.createElement('section');
 		panel.id = PANEL_ID;
 		panel.setAttribute('role', 'dialog');
-		panel.setAttribute('aria-label', `Note by ${who}`);
+		panel.setAttribute(
+			'aria-label',
+			variant === 'reaction' ? `Reaction by ${who}` : variant === 'spoiler' ? `Spoiler note by ${who}` : `Note by ${who}`,
+		);
 		panel.tabIndex = -1;
 
-		// The Note text is the hero; the author renders small beneath it (own
-		// authorship stays a neutral "You" via the stylesheet's muted default).
-		const body = document.createElement('p');
-		body.className = 'ytb-panel-body';
-		body.textContent = note.body;
+		// The Note's video timestamp, pinned in the top-right corner (matching the
+		// Note Preview's corner timestamp), on every variant.
+		const time = document.createElement('div');
+		time.className = 'ytb-panel-time';
+		time.textContent = '@' + YTB.formatTime(note.timestamp);
+		panel.append(time);
 
-		const byline = document.createElement('div');
-		byline.className = 'ytb-panel-byline';
-		const author = document.createElement('span');
-		author.className = 'ytb-panel-author';
-		author.textContent = who;
-		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
-		const posted = document.createElement('span');
-		posted.className = 'ytb-rel ytb-panel-posted';
-		posted.dataset.ytbCreatedAt = String(note.createdAt || Date.now());
-		posted.dataset.ytbPrefix = 'Posted ';
-		posted.textContent = 'Posted ' + YTB.relativeTime(Number(posted.dataset.ytbCreatedAt));
-		byline.append(author, posted);
+		// Body area: the emoji + author for a Reaction, the masked placeholder for
+		// a locked Spoiler, otherwise the text Note itself. The author renders in
+		// the byline for text/Spoiler (beneath the emoji for a Reaction), staying a
+		// neutral "You" for own authorship via the stylesheet's muted default.
+		if (variant === 'reaction') {
+			const emoji = document.createElement('div');
+			emoji.className = 'ytb-panel-emoji';
+			emoji.textContent = note.body;
+			const emojiAuthor = document.createElement('div');
+			emojiAuthor.className = 'ytb-panel-emoji-author';
+			emojiAuthor.textContent = who;
+			if (note.clientId !== myClientId) emojiAuthor.style.color = YTB.buddyColor(note.clientId);
+			panel.append(emoji, emojiAuthor, buildByline(note, who, false));
+		} else if (variant === 'spoiler') {
+			const body = document.createElement('p');
+			body.className = 'ytb-panel-spoiler';
+			body.textContent = 'Spoiler';
+			panel.append(body, buildByline(note, who, true));
+		} else {
+			const body = document.createElement('p');
+			body.className = 'ytb-panel-body';
+			body.textContent = note.body;
+			panel.append(body, buildByline(note, who, true));
+		}
 
-		// Note actions: Go here (always — it is local playback control), and the
-		// author-only deemphasized delete with its in-panel confirmation.
+		// Note actions: Go here (omitted when already near the moment — nowhere to
+		// go), plus the author-only deemphasized delete on a text Note only. The
+		// row is appended only when it holds a control.
 		const actions = document.createElement('div');
 		actions.className = 'ytb-panel-actions';
-		const atLabel = YTB.formatTime(note.timestamp);
-		const goHereButton = document.createElement('button');
-		goHereButton.type = 'button';
-		goHereButton.className = 'ytb-panel-gohere';
-		goHereButton.setAttribute('aria-label', `Go here: play from just before ${atLabel}`);
-		const goHereText = document.createElement('span');
-		goHereText.textContent = 'Go here';
-		const goHereTime = document.createElement('span');
-		goHereTime.className = 'ytb-panel-gohere-time';
-		goHereTime.textContent = '@' + atLabel;
-		goHereButton.append(YTBTheme.icon('play'), goHereText, goHereTime);
-		goHereButton.addEventListener('click', () => goHere(note));
-		actions.append(goHereButton);
+		if (!YTB.nearNoteMoment(note.timestamp, playhead)) actions.append(buildGoHere(note));
+		let confirm = null;
+		if (variant === 'text' && note.clientId === myClientId) {
+			confirm = buildDeleteConfirm(panel, note, actions); // appends the "Delete" trigger into actions
+		}
+		if (actions.childElementCount > 0) panel.append(actions);
+
+		// Read-only variants stop here: no conversation, composer, delete, or poll.
+		if (variant !== 'text') {
+			wirePanelContainment(panel);
+			return panel;
+		}
 
 		const replies = document.createElement('div');
 		replies.className = 'ytb-panel-replies';
@@ -579,13 +595,63 @@
 		error.className = 'ytb-panel-error';
 		error.setAttribute('role', 'status');
 
-		panel.append(body, byline, actions, replies, replyArea, error);
+		panel.append(replies, replyArea, error);
+		if (confirm) panel.append(confirm);
 
-		if (note.clientId === myClientId) {
-			panel.append(buildDeleteConfirm(panel, note, actions));
+		wirePanelContainment(panel);
+
+		// Seed instantly from the last Room read, then poll for freshness.
+		renderReplies(panel, repliesFor(note.id));
+		updateReplyArea(panel, note, config.sharing, replyCount(note.id));
+		refreshConversation(panel);
+		return panel;
+	}
+
+	/**
+	 * The Note's byline: the posted-time (always), with the author before it
+	 * unless `showAuthor` is false — a Reaction already names its author beneath
+	 * the emoji, so its byline carries the posted time alone.
+	 */
+	function buildByline(note, who, showAuthor) {
+		const byline = document.createElement('div');
+		byline.className = 'ytb-panel-byline';
+		if (showAuthor) {
+			const author = document.createElement('span');
+			author.className = 'ytb-panel-author';
+			author.textContent = who;
+			if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
+			byline.append(author);
 		}
+		const posted = document.createElement('span');
+		posted.className = 'ytb-rel ytb-panel-posted';
+		posted.dataset.ytbCreatedAt = String(note.createdAt || Date.now());
+		posted.dataset.ytbPrefix = 'Posted ';
+		posted.textContent = 'Posted ' + YTB.relativeTime(Number(posted.dataset.ytbCreatedAt));
+		byline.append(posted);
+		return byline;
+	}
 
-		// Keep panel interactions inside the panel (no player seeks/toggles).
+	/**
+	 * Go here: the panel's one seek control. Labelled just "Go here" (no visible
+	 * "@time" suffix — the aria-label still speaks the moment); clicking seeks to
+	 * ~1s before the Note and resumes playback.
+	 */
+	function buildGoHere(note) {
+		const atLabel = YTB.formatTime(note.timestamp);
+		const goHereButton = document.createElement('button');
+		goHereButton.type = 'button';
+		goHereButton.className = 'ytb-panel-gohere';
+		goHereButton.setAttribute('aria-label', `Go here: play from just before ${atLabel}`);
+		const goHereText = document.createElement('span');
+		goHereText.textContent = 'Go here';
+		goHereButton.append(YTBTheme.icon('play'), goHereText);
+		goHereButton.addEventListener('click', () => goHere(note));
+		return goHereButton;
+	}
+
+	/** Keep panel interactions inside the panel (no player seeks/toggles), and
+	 * let Escape dismiss it without reaching YouTube's hotkeys. */
+	function wirePanelContainment(panel) {
 		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'click', 'dblclick']) {
 			panel.addEventListener(type, (e) => e.stopPropagation());
 		}
@@ -595,12 +661,6 @@
 				dismissPanel({ refocusDot: true });
 			}
 		});
-
-		// Seed instantly from the last Room read, then poll for freshness.
-		renderReplies(panel, repliesFor(note.id));
-		updateReplyArea(panel, note, config.sharing, replyCount(note.id));
-		refreshConversation(panel);
-		return panel;
 	}
 
 	/**
@@ -1328,14 +1388,16 @@
       .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
         pointer-events: auto;
       }
-      /* Text notes AND locked Spoilers accept a click anywhere on the preview
-         (it bubbles to the dot's handler — open for text, Go here for a locked
-         Spoiler via YTB.dotActivation). Reactions stay transparent and
-         dot-only, so they are deliberately excluded here. */
+      /* Every preview kind accepts a click anywhere on it (it bubbles to the
+         dot's handler, which opens the Expanded Note). The Reaction preview
+         stays transparent but is clickable too, so clicking the card opens its
+         read-only panel exactly like clicking the tiny dot. */
       .${DOT_TEXT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_TEXT_CLASS}:focus-visible .${PREVIEW_CLASS},
       .${DOT_LOCKED_CLASS}:hover .${PREVIEW_CLASS},
-      .${DOT_LOCKED_CLASS}:focus-visible .${PREVIEW_CLASS} {
+      .${DOT_LOCKED_CLASS}:focus-visible .${PREVIEW_CLASS},
+      .${DOT_REACTION_CLASS}:hover .${PREVIEW_CLASS},
+      .${DOT_REACTION_CLASS}:focus-visible .${PREVIEW_CLASS} {
         pointer-events: auto;
         cursor: pointer;
       }
@@ -1419,7 +1481,23 @@
       @keyframes ytb-pop-in {
         from { opacity: 0; transform: scale(0.96) translateY(4px); }
       }
-      .ytb-panel-body { margin: 0; font-size: 15px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+      /* The Note's video timestamp, pinned top-right (matching the Note Preview's
+         corner timestamp); every panel variant reserves room for it. */
+      .ytb-panel-time {
+        position: absolute;
+        top: 12px;
+        right: 14px;
+        color: var(--ytb-ink-faint);
+        font-size: 11px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .ytb-panel-body { margin: 0; padding-right: 42px; font-size: 15px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+      /* Locked Spoiler variant: the masked body, muted and italic like its preview. */
+      .ytb-panel-spoiler { margin: 0; padding-right: 42px; font-size: 15px; line-height: 1.4; font-weight: 600; font-style: italic; color: var(--ytb-ink-muted); }
+      /* Reaction variant: the large emoji with its author directly beneath, mirroring the Note Preview. */
+      .ytb-panel-emoji { font-size: 32px; line-height: 1.15; padding-right: 42px; }
+      .ytb-panel-emoji-author { margin-top: 2px; font-size: 12px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-byline {
         display: flex;
         align-items: baseline;
@@ -1456,7 +1534,6 @@
       .ytb-panel-gohere:active { transform: scale(0.97); }
       .ytb-panel-gohere:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       .ytb-panel-gohere svg { width: 12px; height: 12px; }
-      .ytb-panel-gohere-time { font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.72; }
       .ytb-panel-delete {
         padding: 6px 8px;
         border: 0;
