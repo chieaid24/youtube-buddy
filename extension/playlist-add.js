@@ -6,8 +6,9 @@
 //   1. Watch page: a "Recommend to Buddies" pill appended to the actions row
 //      that holds Like/Share/Save — a self-owned sibling, apricot and visually
 //      distinct from YouTube's Save. On a video the viewer recommended it
-//      shows a "Recommended" toggle state; clicking that un-recommends (the
-//      author-only point delete that removes the Recommendation for everyone).
+//      shows an "Unrecommend" toggle state — the action it offers, not the
+//      state it reports; clicking it un-recommends (the author-only point
+//      delete that removes the Recommendation for everyone).
 //   2. Any thumbnail: a "Recommend to Buddies" row appended to the tile's
 //      three-dots menu, next to YouTube's own Save-to-playlist items.
 //
@@ -32,7 +33,7 @@
 	let currentVideoId = null;
 	// From ytb:room-data: videoId -> the recommending member's clientId
 	// (addedBy). Powers the pill's three states: absent = idle ("Recommend to
-	// Buddies"), mine = "Recommended" (click to un-recommend), a Buddy's =
+	// Buddies"), mine = "Unrecommend" (click to un-recommend), a Buddy's =
 	// "Recommended to you".
 	let recommenderByVideoId = new Map();
 	let myClientId = null;
@@ -99,7 +100,7 @@
 				} else if (state === 'recommended') {
 					// Un-recommend (ADR-0007): the author-only point delete that
 					// removes this Recommendation for EVERYONE (and emits no event).
-					setButtonState(button, 'busy', 'Removing...');
+					setButtonState(button, 'busy', 'Unrecommending...');
 					const clientId = await YTB.ensureClientId();
 					if (!YTB.isContextActive()) return;
 					const result = await YTB.deletePlaylistItem({ clientId, videoId });
@@ -108,7 +109,7 @@
 						recommenderByVideoId.delete(videoId);
 						syncWatchButton(button);
 					} else {
-						flashButton(button, "Couldn't remove");
+						flashButton(button, "Couldn't unrecommend");
 					}
 				}
 			});
@@ -121,7 +122,7 @@
 		idle: 'Recommend to Buddies',
 		busy: 'Recommending...',
 		added: 'Recommended to you', // a Buddy's Recommendation — nothing to toggle
-		recommended: 'Recommended', // mine — click to un-recommend
+		recommended: 'Unrecommend', // mine — the action offered, click to un-recommend
 	};
 
 	function setButtonState(button, state, label) {

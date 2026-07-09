@@ -113,7 +113,7 @@ One video a member has recommended to the whole Room, replacing the old communal
 _Avoid_: playlist item, playlist entry, shared playlist, queue, saved video
 
 **Recommend Control**:
-The control a member uses to add a Recommendation, in two placements that share one behavior and one vocabulary: the watch-page pill and the feed thumbnail's three-dots menu row, both reading "Recommend to Buddies" when idle. The pill's other states: "Recommended to you" on a video a Buddy recommended (nothing to toggle) and "Recommended" on the member's own (click to **un-recommend**). Adding recommends the video to the whole Room (see Recommendation). Recommend Control writes are NOT gated by Sharing.
+The control a member uses to add a Recommendation, in two placements that share one behavior and one vocabulary: the watch-page pill and the feed thumbnail's three-dots menu row, both reading "Recommend to Buddies" when idle. The pill's other states: "Recommended to you" on a video a Buddy recommended (nothing to toggle) and "Unrecommend" on the member's own — an action, not a state report (click to **un-recommend**). Adding recommends the video to the whole Room (see Recommendation). Recommend Control writes are NOT gated by Sharing.
 _Avoid_: add-to-playlist button, Buddy Room button, "+ Buddy Room", "Add to Buddy Room" (legacy copy), save button
 
 **Recommended for you**:
