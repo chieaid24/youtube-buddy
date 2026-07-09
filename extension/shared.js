@@ -1040,13 +1040,13 @@ const YTB = {
 	 *   - Notes/Replies whose `mentions` include the viewer (a Reply that is
 	 *     both "to my Note" and "mentions me" appears exactly once);
 	 *   - recommend System Messages from Playlist `added` Events, shown to EVERY
-	 *     member (ADR-0007 amendment): recipients as "X recommended \"Title\"" and
-	 *     the recommender as their own "You recommended \"Title\" to the Room" —
+	 *     member (ADR-0007 amendment): recipients as "X recommended Title" and
+	 *     the recommender as their own "You recommended Title to the Room" —
 	 *     `own` marks which; non-`added` events are ignored so a stale
 	 *     un-recommend never surfaces. Each carries `removed`: true when the
 	 *     Event's videoId is no longer in the Room's live Recommendation list,
 	 *     so the renderer strikes the line through (un-recommends emit no event);
-	 *   - Watch Notices ("X watched \"Title\"") shown ONLY to the recommender:
+	 *   - Watch Notices ("X started watching Title") shown ONLY to the recommender:
 	 *     one per (Buddy, video) whenever a Buddy has a Progress Record for a
 	 *     video the viewer recommended (`addedBy` == viewer), timestamped by that
 	 *     record's `updatedAt`. Best-effort — cannot tell watched-before from
