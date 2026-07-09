@@ -1056,7 +1056,7 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 	}
 });
 
-test('a Room Feed reply row navigates to the Note, seeks, and opens its Expanded Note on arrival', async () => {
+test('a Room Feed reply row opens its Expanded Note on arrival — only the body links, and it survives load churn', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -1091,20 +1091,40 @@ test('a Room Feed reply row navigates to the Note, seeks, and opens its Expanded
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
 
-		// The reply row is a link pointing at the Note, seek (t=) baked into the URL.
-		const link = page.locator('#ytb-home-section a.ytb-hs-item-link');
-		await nudgeUntil(page, () => expect(link).toHaveCount(1, { timeout: 700 }));
-		await expect(link).toContainText('replied to your note');
-		await expect(link).toHaveAttribute('href', '/watch?v=parent-video&t=4');
+		// Only the quoted body is the link (CONTEXT.md Room Feed link rule): the
+		// row itself is not an anchor, and the author/action text is plain.
+		const row = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'replied to your note' });
+		await nudgeUntil(page, () => expect(row).toHaveCount(1, { timeout: 700 }));
+		await expect(row.locator('a')).toHaveCount(1); // exactly one link — the body
+		const link = row.locator('a.ytb-hs-text-link');
+		await expect(link).toHaveText('"love this"'); // the quoted reply body only
+		await expect(link).toHaveAttribute('href', '/watch?v=parent-video&t=4'); // seek baked in
 
-		// Clicking records the open-target, then navigates to the video (a full
-		// reload here; an SPA nav on real YouTube — the handshake survives both).
+		// Clicking the body records the open-target, then navigates to the video (a
+		// full reload here; an SPA nav on real YouTube — the handshake survives both).
 		await link.click();
 		await page.waitForURL(/\/watch\?v=parent-video&t=4$/);
 
 		// On arrival the parent Note's Expanded Note opens once its Room read lands.
-		await expect(page.locator('#ytb-note-panel')).toBeVisible();
-		await expect(page.locator('#ytb-note-panel .ytb-panel-body')).toContainText('my moment');
+		const panel = page.locator('#ytb-note-panel');
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-body')).toContainText('my moment');
+
+		// Load churn must NOT dismiss it. Reproduce the two culprits: a duplicate
+		// navigation-finish for the SAME url (YouTube re-emits these as the watch
+		// page settles) and the player's autoplay `play` (no user gesture) starting
+		// after the panel opened. Both leave the panel open, and the play is
+		// re-paused so the viewer can read the Note.
+		await page.evaluate(() => {
+			const url = location.href;
+			const videoId = new URL(url).searchParams.get('v');
+			document.dispatchEvent(new CustomEvent('ytb:navigate', { detail: { url, videoId } }));
+			document.querySelector('video')?.play();
+		});
+		await page.waitForTimeout(300);
+		await expect(panel).toBeVisible();
+		await expect(panel.locator('.ytb-panel-body')).toContainText('my moment');
+		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

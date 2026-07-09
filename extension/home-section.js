@@ -8,8 +8,11 @@
 // Room" to the recommender; struck through once un-recommended), and Watch
 // Notices ("X watched ...", shown to the recommender when a Buddy watches
 // their pick), grouped under day dividers, newest at the bottom,
-// auto-scrolled. On System Messages and Watch Notices only the quoted video
-// title is a link (to the video's watch page).
+// auto-scrolled. Feed link rule (CONTEXT.md): on a reply/mention row only the
+// quoted body links — to the video at the Note's timestamp, opening its
+// Expanded Note on arrival; on System Messages and Watch Notices only the
+// quoted video title links (to the video's watch page). Everything else in a
+// row — author, action, context, timestamp — is plain text.
 // Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
 // `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
 // horizontal thumbnail row with a live "Watched by ..." attribution and a
@@ -181,22 +184,12 @@
 		const record = item.reply || item.note;
 		// The Note this row points at: the parent Note for a Reply or a
 		// Reply-Mention, the Note itself for a Note-Mention. Absent (parent not in
-		// this Room read) leaves the row non-clickable.
+		// this Room read) leaves the quoted body non-clickable.
 		const target = item.note;
 		const canOpen = Boolean(target && target.videoId && target.id && Number.isFinite(Number(target.timestamp)));
 
-		const row = document.createElement(canOpen ? 'a' : 'div');
-		row.className = canOpen ? 'ytb-hs-item ytb-hs-item-link' : 'ytb-hs-item';
-		if (canOpen) {
-			const seconds = Math.max(0, Math.floor(Number(target.timestamp)));
-			row.href = '/watch?v=' + encodeURIComponent(target.videoId) + '&t=' + seconds;
-			// Record the open-target, then let the anchor navigate (SPA on YouTube,
-			// full reload in tests) — notes.js opens the Expanded Note on arrival's
-			// first Room read. No preventDefault: the anchor IS the navigation.
-			row.addEventListener('click', () => {
-				YTB.setPendingNoteOpen({ videoId: target.videoId, noteId: target.id });
-			});
-		}
+		const row = document.createElement('div');
+		row.className = 'ytb-hs-item';
 
 		const author = document.createElement('span');
 		author.className = 'ytb-hs-author';
@@ -207,9 +200,22 @@
 		action.className = 'ytb-hs-action';
 		action.textContent = item.type === 'reply' ? ' replied to your note ' : ' mentioned you ';
 
-		const body = document.createElement('span');
-		body.className = 'ytb-hs-text';
+		// Only the quoted body is the link (CONTEXT.md Room Feed link rule): the
+		// author, action, context, and timestamp stay plain text, so clicking
+		// anywhere but the body does nothing. The anchor navigates to the video at
+		// the Note's timestamp (SPA on YouTube, full reload in tests) and records
+		// the open-target so notes.js opens the Expanded Note on arrival's first
+		// Room read. No preventDefault: the anchor IS the navigation.
+		const body = document.createElement(canOpen ? 'a' : 'span');
+		body.className = canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text';
 		body.textContent = '"' + record.body + '"';
+		if (canOpen) {
+			const seconds = Math.max(0, Math.floor(Number(target.timestamp)));
+			body.href = '/watch?v=' + encodeURIComponent(target.videoId) + '&t=' + seconds;
+			body.addEventListener('click', () => {
+				YTB.setPendingNoteOpen({ videoId: target.videoId, noteId: target.id });
+			});
+		}
 
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
@@ -599,21 +605,23 @@
       }
       #${SECTION_ID} .ytb-hs-day:first-child { margin-top: 0; }
       #${SECTION_ID} .ytb-hs-item { margin: 3px 0; overflow-wrap: anywhere; }
-      #${SECTION_ID} a.ytb-hs-item-link {
-        display: block;
-        margin: 3px -6px;
-        padding: 3px 6px;
-        border-radius: 8px;
+      /* Only the quoted body is the link; hover/focus affordances live on it. */
+      #${SECTION_ID} a.ytb-hs-text-link {
         color: inherit;
         text-decoration: none;
+        border-radius: 6px;
         cursor: pointer;
         transition: background 120ms ease;
       }
-      #${SECTION_ID} a.ytb-hs-item-link:hover { background: rgba(246, 169, 107, 0.16); }
-      #${SECTION_ID} a.ytb-hs-item-link:focus-visible {
+      #${SECTION_ID} a.ytb-hs-text-link:hover {
+        background: rgba(246, 169, 107, 0.16);
+        text-decoration: underline;
+      }
+      #${SECTION_ID} a.ytb-hs-text-link:focus-visible {
         outline: none;
         background: rgba(246, 169, 107, 0.16);
         box-shadow: 0 0 0 2px rgba(246, 169, 107, 0.55);
+        text-decoration: underline;
       }
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
       #${SECTION_ID} .ytb-hs-action { color: var(--ytbhs-ink-muted); }

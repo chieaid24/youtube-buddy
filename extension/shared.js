@@ -171,6 +171,14 @@ const YTB = {
 	// abandoned click, a deleted Note) from popping a panel on a later visit.
 	PENDING_NOTE_OPEN_TTL_MS: 30_000,
 
+	// How long after a Room-Feed-initiated Expanded Note open notes.js treats a
+	// video `play` as load-time churn (the watch page's autoplay kicking in as it
+	// settles) rather than the viewer's deliberate resume: during this window the
+	// panel is kept open and the video re-paused; afterwards a play dismisses it
+	// as usual. Long enough to outlast autoplay-on-arrival, short enough not to
+	// swallow a real later resume. See YTB.panelPlayAction.
+	PANEL_LOAD_GRACE_MS: 4_000,
+
 	/**
 	 * Record the Note a Room Feed row points at, for notes.js to open after the
 	 * navigation to `videoId`. A single slot: a newer click replaces an older
@@ -654,6 +662,21 @@ const YTB = {
 				target: YTB.goHereTarget(Number(note.timestamp)),
 			};
 		return { action: 'open' };
+	},
+
+	/**
+	 * What a video `play` event does to an open Expanded Note — a pure decision so
+	 * notes.js stays a thin executor and the load-churn contract is testable. A
+	 * play inside the grace window that follows a Room Feed row opening the panel
+	 * (the watch page's autoplay starting as it settles, or a duplicate player
+	 * spin-up) is 'hold': re-pause and keep the panel open. Any later play is the
+	 * viewer's deliberate resume — 'dismiss'. With no panel open it's 'ignore'.
+	 * @param {{panelOpen: boolean, withinGrace: boolean}} state
+	 * @returns {'ignore'|'hold'|'dismiss'}
+	 */
+	panelPlayAction({ panelOpen, withinGrace }) {
+		if (!panelOpen) return 'ignore';
+		return withinGrace ? 'hold' : 'dismiss';
 	},
 
 	/**

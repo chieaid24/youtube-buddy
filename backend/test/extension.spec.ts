@@ -290,6 +290,17 @@ describe('note presentation helpers', () => {
 		// Exclusive lower bound: sitting exactly on a timestamp doesn't re-fire.
 		expect(window.YTB.crossedNotes(notes, 10, 11)).toEqual([]);
 	});
+
+	it('routes a video play: load-churn grace holds the panel, later plays dismiss it', () => {
+		// No panel open: a play is nothing to do with the Expanded Note.
+		expect(window.YTB.panelPlayAction({ panelOpen: false, withinGrace: true })).toBe('ignore');
+		expect(window.YTB.panelPlayAction({ panelOpen: false, withinGrace: false })).toBe('ignore');
+		// Panel open + inside the grace after a Room Feed open: autoplay settling in
+		// must re-pause and keep it open, never dismiss.
+		expect(window.YTB.panelPlayAction({ panelOpen: true, withinGrace: true })).toBe('hold');
+		// Panel open + past the grace: a deliberate resume dismisses it as before.
+		expect(window.YTB.panelPlayAction({ panelOpen: true, withinGrace: false })).toBe('dismiss');
+	});
 });
 
 describe('shared playlist client API', () => {
@@ -1001,6 +1012,8 @@ declare global {
 			getHomeSectionHidden(): Promise<boolean>;
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
 			PENDING_NOTE_OPEN_TTL_MS: number;
+			PANEL_LOAD_GRACE_MS: number;
+			panelPlayAction(state: { panelOpen: boolean; withinGrace: boolean }): 'ignore' | 'hold' | 'dismiss';
 			setPendingNoteOpen(target: { videoId: string; noteId: string }): Promise<boolean>;
 			getPendingNoteOpen(): Promise<{ videoId: string; noteId: string; at: number } | null>;
 			clearPendingNoteOpen(): Promise<boolean>;
