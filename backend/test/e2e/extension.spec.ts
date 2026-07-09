@@ -1080,6 +1080,7 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(recipient.locator('a')).toHaveCount(1);
 		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveText('"Buddy Pick"');
 		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-live');
+		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('title', 'Watch "Buddy Pick"');
 
 		// The recommender now sees their own line, title-linked the same way.
 		const own = rows.filter({ hasText: 'You recommended "My Pick" to the Room' });
@@ -1099,6 +1100,7 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		const watch = rows.filter({ hasText: 'Sam watched "My Pick"' });
 		await expect(watch).toHaveCount(1);
 		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
+		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('title', 'Watch "My Pick"');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -1149,6 +1151,9 @@ test('a Room Feed reply row opens its Expanded Note on arrival — only the body
 		const link = row.locator('a.ytb-hs-text-link');
 		await expect(link).toHaveText('"love this"'); // the quoted reply body only
 		await expect(link).toHaveAttribute('href', '/watch?v=parent-video&t=4'); // seek baked in
+		// The tooltip names where the link lands. This Note captured no title, so
+		// the tooltip names only the moment.
+		await expect(link).toHaveAttribute('title', 'Open this note at 0:04');
 
 		// Clicking the body records the open-target, then navigates to the video (a
 		// full reload here; an SPA nav on real YouTube — the handshake survives both).
@@ -1251,11 +1256,17 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 		await nudgeUntil(page, () => expect(replyRow).toHaveCount(1, { timeout: 700 }));
 		await expect(replyRow.locator('.ytb-hs-context')).toHaveText('on "Rick Astley - Never Gonna Give You Up"');
 		await expect(replyRow.locator('.ytb-hs-context a')).toHaveCount(0);
+		// The body link's tooltip names that same video and the Note's moment.
+		await expect(replyRow.locator('a.ytb-hs-text-link')).toHaveAttribute(
+			'title',
+			'Open this note on "Rick Astley - Never Gonna Give You Up" at 0:04',
+		);
 
 		// A Note with no captured title names no video — never a placeholder.
 		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'mentioned you' });
 		await expect(mentionRow).toHaveCount(1);
 		await expect(mentionRow.locator('.ytb-hs-context')).toHaveCount(0);
+		await expect(mentionRow.locator('a.ytb-hs-text-link')).toHaveAttribute('title', 'Open this note at 0:09');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

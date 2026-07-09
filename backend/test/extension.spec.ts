@@ -484,6 +484,36 @@ describe('videoContext', () => {
 	});
 });
 
+// Tooltips for the Room Feed's two link kinds. Both name the destination the
+// row's visible text leaves implicit.
+describe('noteLinkTooltip', () => {
+	it("names the Note's video and moment", () => {
+		expect(window.YTB.noteLinkTooltip({ videoTitle: 'Blade Runner', timestamp: 412 })).toBe('Open this note on "Blade Runner" at 6:52');
+	});
+
+	it('drops the title clause when the Note captured none', () => {
+		expect(window.YTB.noteLinkTooltip({ timestamp: 412 })).toBe('Open this note at 6:52');
+		expect(window.YTB.noteLinkTooltip({ videoTitle: '   ', timestamp: 0 })).toBe('Open this note at 0:00');
+	});
+
+	it('formats past an hour and floors a fractional timestamp', () => {
+		expect(window.YTB.noteLinkTooltip({ videoTitle: 'Long', timestamp: 3723.9 })).toBe('Open this note on "Long" at 1:02:03');
+	});
+});
+
+describe('titleLinkTooltip', () => {
+	it('quotes the title', () => {
+		expect(window.YTB.titleLinkTooltip('Blade Runner')).toBe('Watch "Blade Runner"');
+		expect(window.YTB.titleLinkTooltip('  Padded  ')).toBe('Watch "Padded"');
+	});
+
+	it('falls back when the row has no title', () => {
+		expect(window.YTB.titleLinkTooltip('')).toBe('Watch this video');
+		expect(window.YTB.titleLinkTooltip('   ')).toBe('Watch this video');
+		expect(window.YTB.titleLinkTooltip(null)).toBe('Watch this video');
+	});
+});
+
 describe('room home section helpers', () => {
 	const me = 'me111111';
 	const roomRead = {
@@ -1060,6 +1090,8 @@ declare global {
 			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
 			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
 			videoContext(note: { videoTitle?: string } | null): string;
+			noteLinkTooltip(note: { videoTitle?: string; timestamp: number }): string;
+			titleLinkTooltip(title: string | null): string;
 			watchedByLabel(progress: object[], videoId: string, myClientId: string, roster?: Array<{ clientId: string; name?: string }>): string;
 			buildFeed(
 				records: object,
