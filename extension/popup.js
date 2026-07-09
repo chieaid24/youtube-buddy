@@ -42,7 +42,7 @@ const el = {
 	settingsOpen: document.getElementById('settings-open'),
 	settingsBack: document.getElementById('settings-back'),
 	themeSeg: document.getElementById('theme-seg'),
-	zonePicker: document.getElementById('zone-picker'),
+	edgePicker: document.getElementById('edge-picker'),
 	setNotes: document.getElementById('set-notes'),
 	setProgress: document.getElementById('set-progress'),
 	setSpoiler: document.getElementById('set-spoiler'),
@@ -114,7 +114,7 @@ async function init() {
 		...(await YTB.getSettings()),
 		homeSectionHidden: await YTB.getHomeSectionHidden(),
 	};
-	buildZonePicker();
+	buildEdgePicker();
 	renderSettingsControls();
 
 	wireHandlers();
@@ -523,37 +523,23 @@ function saveSettings(partial) {
 	if (Object.keys(rest).length > 0) YTB.setSettings(rest);
 }
 
-// The 3x3 Notification Position grid minus the dead-center cell, in grid order.
-function buildZonePicker() {
-	el.zonePicker.textContent = '';
-	const gridOrder = [
-		'top-left',
-		'top-center',
-		'top-right',
-		'middle-left',
-		null,
-		'middle-right',
-		'bottom-left',
-		'bottom-center',
-		'bottom-right',
-	];
-	for (const zone of gridOrder) {
-		if (!zone) {
-			// The dead-center cell: not a choice, just grid geometry.
-			el.zonePicker.appendChild(document.createElement('span'));
-			continue;
-		}
+// The four Notification Position edges, in reading order so tab order matches
+// the plus layout the CSS paints on the monitor.
+const EDGE_PICKER_ORDER = ['top', 'left', 'right', 'bottom'];
+
+function buildEdgePicker() {
+	el.edgePicker.textContent = '';
+	for (const edge of EDGE_PICKER_ORDER) {
 		const cell = document.createElement('button');
 		cell.type = 'button';
-		cell.className = 'zone-cell';
-		cell.dataset.zone = zone;
+		cell.className = 'edge-cell';
+		cell.dataset.edge = edge;
 		cell.setAttribute('role', 'radio');
 		cell.setAttribute('aria-checked', 'false');
-		const label = 'Notifications at ' + zone.replace('-', ' ');
-		cell.title = zone.replace('-', ' ');
-		cell.setAttribute('aria-label', label);
-		cell.addEventListener('click', () => saveSettings({ notificationPosition: zone }));
-		el.zonePicker.appendChild(cell);
+		cell.title = edge;
+		cell.setAttribute('aria-label', 'Notifications at ' + edge);
+		cell.addEventListener('click', () => saveSettings({ notificationPosition: edge }));
+		el.edgePicker.appendChild(cell);
 	}
 }
 
@@ -570,8 +556,8 @@ function renderSettingsControls() {
 	for (const button of el.themeSeg.querySelectorAll('[data-theme-choice]')) {
 		button.setAttribute('aria-checked', String(button.dataset.themeChoice === currentSettings.theme));
 	}
-	for (const cell of el.zonePicker.querySelectorAll('.zone-cell')) {
-		cell.setAttribute('aria-checked', String(cell.dataset.zone === currentSettings.notificationPosition));
+	for (const cell of el.edgePicker.querySelectorAll('.edge-cell')) {
+		cell.setAttribute('aria-checked', String(cell.dataset.edge === currentSettings.notificationPosition));
 	}
 	setSwitch(el.setNotes, !currentSettings.notesHidden);
 	setSwitch(el.setProgress, !currentSettings.buddyProgressHidden);
