@@ -885,8 +885,8 @@ test('a hovered Reaction preview is capped so its top clears the storyboard thum
 		await expect
 			.poll(() =>
 				page.evaluate(() => {
-					const pv = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview').getBoundingClientRect();
-					const tip = document.querySelector('.ytp-tooltip').getBoundingClientRect();
+					const pv = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview')!.getBoundingClientRect();
+					const tip = document.querySelector('.ytp-tooltip')!.getBoundingClientRect();
 					return Math.round(pv.top - tip.bottom); // >= 0: preview top sits below the thumbnail
 				}),
 			)
@@ -895,13 +895,13 @@ test('a hovered Reaction preview is capped so its top clears the storyboard thum
 		// The emoji itself stays fully inside the capped preview (only empty top
 		// padding is trimmed), and its timestamp chip is dropped for room.
 		const state = await page.evaluate(() => {
-			const preview = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview');
+			const preview = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview')!;
 			const pv = preview.getBoundingClientRect();
-			const em = document.querySelector('.ytb-note-dot-reaction .ytb-preview-emoji').getBoundingClientRect();
+			const em = document.querySelector('.ytb-note-dot-reaction .ytb-preview-emoji')!.getBoundingClientRect();
 			return {
 				emojiInside: em.height > 0 && em.top >= pv.top - 0.5 && em.bottom <= pv.bottom + 0.5,
 				clamped: preview.classList.contains('ytb-preview-clamped'),
-				chipHidden: getComputedStyle(document.querySelector('.ytb-note-dot-reaction .ytb-preview-time')).display === 'none',
+				chipHidden: getComputedStyle(document.querySelector('.ytb-note-dot-reaction .ytb-preview-time')!).display === 'none',
 			};
 		});
 		expect(state).toEqual({ emojiInside: true, clamped: true, chipHidden: true });

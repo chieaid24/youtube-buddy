@@ -6,7 +6,7 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"check": "tsc --noEmit -p tsconfig.json && prettier --config .prettierrc --check 'src/**' 'test/**' '../extension/**'",
+		"check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p test/e2e/tsconfig.json && prettier --config .prettierrc --check 'src/**' 'test/**' '../extension/**'",
 		"test": "vitest",
 		"test:e2e": "playwright test",
 		"test:e2e:live": "YTB_LIVE_YOUTUBE=1 playwright test --grep @live",
@@ -16,6 +16,7 @@
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.18.0",
 		"@playwright/test": "^1.61.1",
+		"@types/chrome": "^0.2.2",
 		"@types/node": "^25.9.2",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.0.8",

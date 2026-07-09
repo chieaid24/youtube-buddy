@@ -18,7 +18,10 @@ type Button = {
 describe('Room Code helpers', () => {
 	beforeAll(async () => {
 		Object.assign(globalThis, { window: globalThis });
-		await import('../../extension/room-code.js');
+		// room-code.js is a classic script (no import/export); load it only for its
+		// side effect of populating window.YTBRoomCode. `as string` keeps the literal
+		// for the bundler while opting the specifier out of module typechecking.
+		await import('../../extension/room-code.js' as string);
 	});
 
 	beforeEach(() => vi.useRealTimers());
