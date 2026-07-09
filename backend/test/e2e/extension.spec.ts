@@ -1112,6 +1112,87 @@ test('a Room Feed reply row navigates to the Note, seeks, and opens its Expanded
 	}
 });
 
+test('a posted Note captures the video title, and Feed rows name the video — plain text, only when captured', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		// The viewer's titled Note, replied to by a Buddy; plus a Buddy's Note that
+		// mentions the viewer and carries NO title (posted before Notes captured
+		// one). The Feed must name the first video and stay silent about the second.
+		await stubRoomBackend(
+			context,
+			{
+				notes: [
+					{
+						id: 'note-1',
+						clientId: 'viewer-e2e',
+						name: 'Viewer',
+						videoId: 'parent-video',
+						videoTitle: 'Rick Astley - Never Gonna Give You Up',
+						timestamp: 4,
+						kind: 'text',
+						body: 'my moment',
+						spoiler: false,
+						createdAt: 1,
+					},
+					{
+						id: 'note-2',
+						clientId: 'buddy-1',
+						name: 'Sam',
+						videoId: 'other-video',
+						timestamp: 9,
+						kind: 'text',
+						body: 'hey @Viewer',
+						spoiler: false,
+						mentions: ['viewer-e2e'],
+						createdAt: 3,
+					},
+				],
+				replies: [{ id: 'reply-1', noteId: 'note-1', clientId: 'buddy-1', name: 'Sam', body: 'love this', createdAt: 2 }],
+			},
+			calls,
+		);
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) => {
+			const body = new URL(route.request().url()).pathname === '/watch' ? playbackFixture(mediaSrc) : homeFixture;
+			return route.fulfill({ status: 200, contentType: 'text/html', body });
+		});
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true })); // posting a Note requires Sharing
+
+		// Posting: the composer freezes the watch page's title into the Note. The
+		// fixture has no metadata heading, so this also exercises the tab-title
+		// fallback in YTB.watchTitle.
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await page.locator('#ytb-note-button').click();
+		await page.locator('#ytb-note-composer textarea').fill('great moment');
+		await page.keyboard.press('Enter');
+		await expect(page.locator('#ytb-note-composer')).toHaveCount(0);
+		const notePost = calls.find((call) => call.startsWith('POST') && call.includes('/notes'));
+		expect(notePost).toContain('"videoTitle":"YouTube playback fixture"');
+
+		// Reading: the reply row names the video the conversation is on, as plain
+		// deemphasized text that is NOT a link of its own.
+		await page.goto('https://www.youtube.com/');
+		const replyRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'replied to your note' });
+		await nudgeUntil(page, () => expect(replyRow).toHaveCount(1, { timeout: 700 }));
+		await expect(replyRow.locator('.ytb-hs-context')).toHaveText('on "Rick Astley - Never Gonna Give You Up"');
+		await expect(replyRow.locator('.ytb-hs-context a')).toHaveCount(0);
+
+		// A Note with no captured title names no video — never a placeholder.
+		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'mentioned you' });
+		await expect(mentionRow).toHaveCount(1);
+		await expect(mentionRow.locator('.ytb-hs-context')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 // A home page carrying both live tile generations and a mimic of YouTube's
 // shared popup plumbing, mirroring real markup (verified against production
 // YouTube): every kebab click re-renders the ONE reused tp-yt-iron-dropdown in

@@ -66,12 +66,6 @@
 	// Watch page: the "Recommend to Buddies" pill in the actions row.
 	// ---------------------------------------------------------------------------
 
-	function watchTitle() {
-		const heading = document.querySelector('ytd-watch-metadata h1');
-		const text = heading && heading.textContent ? heading.textContent.trim() : '';
-		return text || document.title.replace(/ - YouTube$/, '').trim();
-	}
-
 	function ensureWatchButton() {
 		if (!YTB.isContextActive()) return;
 		if (!currentVideoId || !hasRoomCode) {
@@ -95,7 +89,7 @@
 				const videoId = currentVideoId;
 				if (state === 'idle') {
 					setButtonState(button, 'busy');
-					const result = await addToPlaylist(videoId, watchTitle());
+					const result = await addToPlaylist(videoId, YTB.watchTitle(document));
 					if (!button.isConnected) return;
 					if (result.ok) {
 						syncWatchButton(button);
@@ -178,7 +172,8 @@
 	// fresh capture replaces any row left from a previous tile.
 	// ---------------------------------------------------------------------------
 
-	const TILE_SELECTOR = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model';
+	const TILE_SELECTOR =
+		'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model';
 
 	function videoIdFromHref(href) {
 		if (!href) return null;

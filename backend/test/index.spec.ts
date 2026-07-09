@@ -707,7 +707,9 @@ function deletePlaylist(code: string, clientId: string, videoId: string) {
 	return SELF.fetch(`https://example.com/playlist?code=${code}&clientId=${clientId}&videoId=${videoId}`, { method: 'DELETE' });
 }
 
-async function listEvents(code: string): Promise<Array<{ type: string; videoId: string; title: string; actorClientId: string; at: number }>> {
+async function listEvents(
+	code: string,
+): Promise<Array<{ type: string; videoId: string; title: string; actorClientId: string; at: number }>> {
 	const listing = await env.PROGRESS.list({ prefix: `${code}:event:` });
 	const events = await Promise.all(listing.keys.map(async ({ name }) => JSON.parse((await env.PROGRESS.get(name))!)));
 	return events;
@@ -812,8 +814,12 @@ describe('DELETE /playlist?code=', () => {
 	});
 
 	it('rejects a missing videoId or clientId with 400', async () => {
-		expect((await SELF.fetch('https://example.com/playlist?code=playlist-remove-invalid&clientId=x', { method: 'DELETE' })).status).toBe(400);
-		expect((await SELF.fetch('https://example.com/playlist?code=playlist-remove-invalid&videoId=v', { method: 'DELETE' })).status).toBe(400);
+		expect((await SELF.fetch('https://example.com/playlist?code=playlist-remove-invalid&clientId=x', { method: 'DELETE' })).status).toBe(
+			400,
+		);
+		expect((await SELF.fetch('https://example.com/playlist?code=playlist-remove-invalid&videoId=v', { method: 'DELETE' })).status).toBe(
+			400,
+		);
 	});
 
 	it('rejects a locked-out 6th member removing items from a full Room', async () => {
@@ -949,6 +955,57 @@ describe('Mentions', () => {
 		const replyRes = await postReply(code, replyBody(note.id, { mentions }));
 		expect(replyRes.status).toBe(400);
 		expect(((await replyRes.json()) as { category: string }).category).toBe('validation');
+	});
+});
+
+describe('Note videoTitle', () => {
+	it('round-trips a trimmed videoTitle through POST /notes, GET /, and GET /conversation', async () => {
+		const code = 'title-roundtrip';
+		const res = await postNote(code, noteBody({ videoTitle: '  Never Gonna Give You Up  ' }));
+		expect(res.status).toBe(200);
+		const { note } = (await res.json()) as { note: { id: string; videoTitle: string } };
+		expect(note.videoTitle).toBe('Never Gonna Give You Up');
+
+		const room = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as { notes: { videoTitle?: string }[] };
+		expect(room.notes[0].videoTitle).toBe('Never Gonna Give You Up');
+
+		const conversation = (await (await getConversation(code, note.id)).json()) as { note: { videoTitle?: string } };
+		expect(conversation.note.videoTitle).toBe('Never Gonna Give You Up');
+	});
+
+	it('accepts a title of exactly 200 characters', async () => {
+		const code = 'title-boundary';
+		const res = await postNote(code, noteBody({ videoTitle: 'x'.repeat(200) }));
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { note: { videoTitle: string } }).note.videoTitle).toBe('x'.repeat(200));
+	});
+
+	// A Note must never be lost over its optional context fragment: a bad title
+	// is dropped, not rejected. Absent then means "this row cannot name its
+	// video", and the Room Feed shows no fragment rather than a placeholder.
+	it.each<[string, unknown]>([
+		['absent', undefined],
+		['empty', ''],
+		['whitespace only', '   '],
+		['a non-string', 42],
+		['over 200 characters', 'x'.repeat(201)],
+	])('stores no videoTitle when it is %s, and never rejects the Note', async (name, videoTitle) => {
+		const code = `title-drop-${name.replace(/\s/g, '-')}`;
+		const res = await postNote(code, noteBody({ videoTitle }));
+		expect(res.status).toBe(200);
+		const { note } = (await res.json()) as { note: object };
+		expect('videoTitle' in note).toBe(false);
+
+		const conversation = (await (await getConversation(code, (note as { id: string }).id)).json()) as { note: object };
+		expect('videoTitle' in conversation.note).toBe(false);
+	});
+
+	it('captures the title at post time, so a later Note on the same video may differ', async () => {
+		const code = 'title-frozen';
+		const titleOf = async (videoTitle: string) =>
+			((await (await postNote(code, noteBody({ videoTitle }))).json()) as { note: { videoTitle?: string } }).note.videoTitle;
+		expect(await titleOf('Original Title')).toBe('Original Title');
+		expect(await titleOf('Renamed Title')).toBe('Renamed Title');
 	});
 });
 

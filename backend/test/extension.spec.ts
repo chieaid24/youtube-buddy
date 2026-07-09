@@ -2,28 +2,31 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 let storage: Record<string, unknown>;
 
-describe('extension member API', () => {
-	beforeAll(async () => {
-		storage = {};
-		Object.assign(globalThis, {
-			window: globalThis,
-			chrome: {
-				storage: {
-					local: {
-						get: vi.fn(async (key: string | string[]) =>
-							(Array.isArray(key) ? key : [key]).reduce<Record<string, unknown>>((result, item) => {
-								result[item] = storage[item];
-								return result;
-							}, {}),
-						),
-						set: vi.fn(async (values: Record<string, unknown>) => Object.assign(storage, values)),
-					},
+// Every describe in this file reads `window.YTB`, so the extension globals are
+// installed once per FILE rather than inside one describe's beforeAll — that way
+// a filtered run (`npx vitest run -t "..."`) of any single test still has them.
+beforeAll(async () => {
+	storage = {};
+	Object.assign(globalThis, {
+		window: globalThis,
+		chrome: {
+			storage: {
+				local: {
+					get: vi.fn(async (key: string | string[]) =>
+						(Array.isArray(key) ? key : [key]).reduce<Record<string, unknown>>((result, item) => {
+							result[item] = storage[item];
+							return result;
+						}, {}),
+					),
+					set: vi.fn(async (values: Record<string, unknown>) => Object.assign(storage, values)),
 				},
 			},
-		});
-		await import('../../extension/shared.js');
+		},
 	});
+	await import('../../extension/shared.js');
+});
 
+describe('extension member API', () => {
 	it('allocates unique colors, persists them by Room, and isolates Rooms', async () => {
 		storage = {};
 		const values = [0, 0, 0, 0];
@@ -365,6 +368,61 @@ describe('shared playlist client API', () => {
 
 		await window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x', mentions: [] });
 		expect('mentions' in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
+	});
+
+	it('sends a Note videoTitle only when the page offered one', async () => {
+		storage = { code: 'silly-otters' };
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+		vi.stubGlobal('fetch', fetchMock);
+		const note = { clientId: 'a', videoId: 'v', timestamp: 1, kind: 'text', body: 'x' };
+
+		await window.YTB.postNote({ ...note, videoTitle: 'Never Gonna Give You Up' });
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).videoTitle).toBe('Never Gonna Give You Up');
+
+		await window.YTB.postNote({ ...note, videoTitle: '' });
+		expect('videoTitle' in JSON.parse(fetchMock.mock.calls[1][1].body)).toBe(false);
+
+		await window.YTB.postNote(note);
+		expect('videoTitle' in JSON.parse(fetchMock.mock.calls[2][1].body)).toBe(false);
+	});
+});
+
+// The one place that reads the watch page's title, shared by the Note Composer
+// and both Recommendation entry points. `doc` is injected, so the selector and
+// its fallback are testable without a DOM.
+describe('watchTitle', () => {
+	const fakeDoc = (heading: string | null, title: string) => ({
+		querySelector: (selector: string) => (selector === 'ytd-watch-metadata h1' && heading !== null ? { textContent: heading } : null),
+		title,
+	});
+
+	it('prefers the metadata heading, trimmed', () => {
+		expect(window.YTB.watchTitle(fakeDoc('  Real Title \n', 'Real Title - YouTube'))).toBe('Real Title');
+	});
+
+	it('falls back to the tab title without the YouTube suffix', () => {
+		expect(window.YTB.watchTitle(fakeDoc(null, 'Fallback Title - YouTube'))).toBe('Fallback Title');
+		expect(window.YTB.watchTitle(fakeDoc('   ', 'Fallback Title - YouTube'))).toBe('Fallback Title');
+	});
+
+	it('returns an empty string when the page offers no title at all', () => {
+		expect(window.YTB.watchTitle(fakeDoc(null, ''))).toBe('');
+	});
+});
+
+// The Room Feed's "on \"Title\"" fragment. A Note with no captured title names
+// no video — never a placeholder like "a video".
+describe('videoContext', () => {
+	it("quotes the Note's captured title", () => {
+		expect(window.YTB.videoContext({ videoTitle: 'Never Gonna Give You Up' })).toBe('on "Never Gonna Give You Up"');
+		expect(window.YTB.videoContext({ videoTitle: '  Padded  ' })).toBe('on "Padded"');
+	});
+
+	it('yields nothing without a usable title', () => {
+		expect(window.YTB.videoContext(null)).toBe('');
+		expect(window.YTB.videoContext({})).toBe('');
+		expect(window.YTB.videoContext({ videoTitle: '' })).toBe('');
+		expect(window.YTB.videoContext({ videoTitle: '   ' })).toBe('');
 	});
 });
 
@@ -918,6 +976,8 @@ declare global {
 			roomRoster(records: object): Array<{ clientId: string; name: string }>;
 			filterRoster(roster: Array<{ clientId: string; name: string }>, query: string): Array<{ clientId: string; name: string }>;
 			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
+			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
+			videoContext(note: { videoTitle?: string } | null): string;
 			watchedByLabel(progress: object[], videoId: string, myClientId: string, roster?: Array<{ clientId: string; name?: string }>): string;
 			buildFeed(
 				records: object,

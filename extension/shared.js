@@ -385,9 +385,11 @@ const YTB = {
 	 * Resolves to `{ ok: true, note }` carrying the COMPLETE server-authoritative
 	 * record (insert it into the active Video Timeline immediately), or
 	 * `{ ok: false, category }`. Sharing gates all writes client-side.
+	 * `videoTitle` is the video's title captured at post time (see watchTitle);
+	 * omitted when the page had none, and never a reason for the post to fail.
 	 * @returns {Promise<{ok: true, note: object}|{ok: false, category: string}>}
 	 */
-	async postNote({ clientId, name, videoId, timestamp, kind, body, spoiler, mentions }) {
+	async postNote({ clientId, name, videoId, videoTitle, timestamp, kind, body, spoiler, mentions }) {
 		const { code, sharing } = await YTB.getConfig();
 		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
 		return YTB._postJson('/notes?code=' + encodeURIComponent(code), {
@@ -398,6 +400,7 @@ const YTB = {
 			kind,
 			body,
 			spoiler,
+			...(typeof videoTitle === 'string' && videoTitle !== '' ? { videoTitle } : {}),
 			// Mentions are stored Client IDs picked from the roster (ADR-0006).
 			// Omitted entirely when empty, keeping the pre-mentions wire format.
 			...(Array.isArray(mentions) && mentions.length > 0 ? { mentions } : {}),
@@ -791,6 +794,36 @@ const YTB = {
 	mentionName(roster, clientId) {
 		const member = (roster || []).find((m) => m.clientId === clientId);
 		return YTB.buddyName(clientId, member && member.name, roster);
+	},
+
+	/**
+	 * The current watch page's video title, read at write time by everything that
+	 * freezes a title into a record: the Note Composer (a Note's `videoTitle`) and
+	 * both Recommendation entry points (a Playlist Item's `title`). The `doc` is
+	 * passed in rather than closed over so this file stays DOM-free — it also
+	 * loads in the popup, which has no player — and so the selector fallback stays
+	 * testable. Prefers the metadata heading; falls back to the tab title.
+	 * @param {Document} doc
+	 * @returns {string} '' when the page offers no title
+	 */
+	watchTitle(doc) {
+		const heading = doc.querySelector('ytd-watch-metadata h1');
+		const text = heading && heading.textContent ? heading.textContent.trim() : '';
+		return text || doc.title.replace(/ - YouTube$/, '').trim();
+	},
+
+	/**
+	 * The Room Feed's context fragment for the Note a reply/mention row points at:
+	 * `on "Title"`, or '' when the Note carries no title (posted before Notes
+	 * captured one, or from a page that offered none). Deliberately NO placeholder
+	 * — a row that cannot name its video simply doesn't. Plain text: unlike a
+	 * System Message's quoted title, this fragment is never a link.
+	 * @param {?{videoTitle?: string}} note
+	 * @returns {string}
+	 */
+	videoContext(note) {
+		const title = note && typeof note.videoTitle === 'string' ? note.videoTitle.trim() : '';
+		return title === '' ? '' : 'on "' + title + '"';
 	},
 
 	/**

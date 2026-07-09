@@ -215,7 +215,18 @@
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
 
-		row.append(author, action, body, when);
+		row.append(author, action, body);
+		// Which video the conversation is on — plain deemphasized text, never a
+		// link of its own. Notes posted before Notes captured a title have none,
+		// and then the row just doesn't name the video (no placeholder).
+		const context = YTB.videoContext(target);
+		if (context) {
+			const span = document.createElement('span');
+			span.className = 'ytb-hs-context';
+			span.textContent = ' ' + context;
+			row.append(span);
+		}
+		row.append(when);
 		return row;
 	}
 
@@ -606,6 +617,7 @@
       }
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
       #${SECTION_ID} .ytb-hs-action { color: var(--ytbhs-ink-muted); }
+      #${SECTION_ID} .ytb-hs-context { color: var(--ytbhs-ink-muted); }
       #${SECTION_ID} .ytb-hs-when { margin-left: 6px; font-size: 10px; color: var(--ytbhs-ink-muted); white-space: nowrap; }
       #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytbhs-ink-muted); }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link {
