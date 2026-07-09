@@ -25,12 +25,17 @@
 // back to home. Also gated by the Room Home Toggle (home-toggle.js): while
 // the per-install homeSectionHidden preference is on, the section is absent
 // from the page entirely. The preference is read once on load and updated
-// live via `ytb:home-section-visibility`. Pure consumer per ADR-0001:
+// live via `ytb:home-section-visibility`. The header's close control is a
+// third writer of that same preference (alongside the guide toggle and the
+// popup's Settings view), so closing the section here is the identical state
+// — absent, not collapsed — and the guide row is what restores it; the write
+// reaches the guide row and the popup over chrome.storage.onChanged, the same
+// channel the popup's control already uses. Pure consumer per ADR-0001:
 // content.js emits
 // ytb:navigate/ytb:mutation, renderer.js polls the Room and rebroadcasts every
 // read as `ytb:room-data` — this file makes no reads of its own (the only
-// writes are Create/Join and their presence assert; a Dismiss only touches
-// chrome.storage.local).
+// writes are Create/Join and their presence assert; a Dismiss or a close only
+// touches chrome.storage.local).
 //
 // Styling consumes theme.js's shared --ytb-* tokens (ADR-0009): this is a normal
 // on-page token surface with no private palette of its own, so it inherits the
@@ -48,6 +53,7 @@
 	let onHome = false;
 	let myClientId = null;
 	let pendingPair = false; // one Create/Join request at a time
+	let pendingHide = false; // one header-close write at a time
 	// Room Home Toggle state: null until the stored preference has been read,
 	// so the section never flashes in before a hide preference is known.
 	let hiddenPref = null;
@@ -119,6 +125,7 @@
 			code.textContent = window.YTBRoomCode ? YTBRoomCode.pretty(roomCode) : roomCode;
 			head.append(code);
 		}
+		head.append(buildCloseButton());
 
 		const body = document.createElement('div');
 		body.className = 'ytb-hs-body';
@@ -138,6 +145,29 @@
 		// Chat order: keep the newest Feed items in view on every render.
 		const scroll = section.querySelector('.ytb-hs-feed-scroll');
 		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+	}
+
+	// The header's close control: a third entry point to the same per-install
+	// homeSectionHidden preference the Room Home Toggle and the popup's Settings
+	// view drive, so hiding from here is the identical state (section absent,
+	// not collapsed) and the guide row is what brings it back. Removal is
+	// optimistic; chrome.storage.onChanged then syncs the guide row and popup.
+	function buildCloseButton() {
+		const close = document.createElement('button');
+		close.type = 'button';
+		close.className = 'ytb-hs-close';
+		close.append(YTBTheme.icon('close'));
+		close.title = 'Hide the Buddy Room section (turn it back on from the guide)';
+		close.setAttribute('aria-label', 'Hide the Buddy Room section');
+		close.addEventListener('click', async () => {
+			if (pendingHide || hiddenPref !== false) return;
+			pendingHide = true;
+			hiddenPref = true;
+			applyVisibility();
+			await YTB.setHomeSectionHidden(true);
+			pendingHide = false;
+		});
+		return close;
 	}
 
 	// --- Room Feed (left column) ---
@@ -564,8 +594,32 @@
         border-radius: 50%;
         background: var(--ytb-accent-500);
       }
-      #${SECTION_ID} .ytb-hs-title { margin: 0; font-size: 15px; font-weight: 800; color: var(--ytb-ink); }
-      #${SECTION_ID} .ytb-hs-code { margin-left: auto; font-size: 13px; font-weight: 800; color: var(--ytb-accent-800); }
+      /* The title takes the slack so the Room Code and the close control sit
+         together at the right edge, with or without a Room Code present. */
+      #${SECTION_ID} .ytb-hs-title { flex: 1 1 auto; margin: 0; font-size: 15px; font-weight: 800; color: var(--ytb-ink); }
+      #${SECTION_ID} .ytb-hs-code { font-size: 13px; font-weight: 800; color: var(--ytb-accent-800); }
+      #${SECTION_ID} .ytb-hs-close {
+        flex: none;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ytb-ink-faint);
+        cursor: pointer;
+        transition:
+          color var(--ytb-dur-quick) var(--ytb-ease-out),
+          background var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${SECTION_ID} .ytb-hs-close:hover,
+      #${SECTION_ID} .ytb-hs-close:focus-visible { background: var(--ytb-accent-050); color: var(--ytb-ink); outline: none; }
+      #${SECTION_ID} .ytb-hs-close:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-close svg { width: 14px; height: 14px; }
       #${SECTION_ID} .ytb-hs-body { display: flex; gap: 12px; align-items: stretch; }
       #${SECTION_ID} .ytb-hs-feed { flex: 1 1 46%; min-width: 0; }
       #${SECTION_ID} .ytb-hs-playlist { flex: 1 1 54%; min-width: 0; }
@@ -691,7 +745,7 @@
       #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 12px; color: var(--ytb-danger-text); }
       @media (prefers-reduced-motion: reduce) {
-        #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove { transition: none; }
+        #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close { transition: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
