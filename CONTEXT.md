@@ -136,6 +136,14 @@ _Avoid_: tag, ping, at-name (as the stored form)
 The @-mention autocomplete popover shown beneath the Note Composer or a Reply field — a fuzzy-searchable roster of current Room members. Picking one inserts "@<Display Name>" in the text and records the target's Client ID in the mentions list (see Mention, ADR-0006); it resolves identity by Client ID, never by name text.
 _Avoid_: mention popup, tag menu, autocomplete (alone)
 
+**Unseen**:
+A Note or Reply addressed to you that you have not yet Acknowledged — exactly the set the Room Feed surfaces: a Reply to a Note you authored, or a Note or Reply that Mentions you. Never your own writes. A Reaction carries no Mentions and takes no Replies, so a Reaction is never Unseen; a locked Spoiler can be. Unseen state is anchored to the Video Timeline: a Note Dot is Unseen while the Note itself is an Unseen Mention **or** while any Reply beneath it is Unseen, and it then pulses (see Note Dot). It is private, per install, and Room-scoped — stored in `chrome.storage.local` keyed by Note/Reply id and pruned against each Room read, structurally identical to a Dismiss — so it never reaches the backend and never follows you to another browser (ADR-0010). It drives the Video Timeline only; the Room Feed has no read/unread state.
+_Avoid_: unread, notification, badge, inbox
+
+**Acknowledge**:
+The viewer registering an Unseen Note or Reply, which stops its Note Dot pulsing for good. Three equivalent triggers, all on the Note Dot: hovering it (which opens its Note Preview), opening its Expanded Note, or ordinary forward playback crossing its timestamp (which fires its Playback Notification). Acknowledging a Note Dot clears **every** Unseen item anchored to it at once — the Mention and all Unseen Replies beneath it — even where the trigger revealed no body (a Note Preview shows a Reply count, not Reply text; a locked Spoiler stays masked). The pulse's job is to catch the eye, not to prove the message was read. Clicking a Room Feed row does not Acknowledge: that click exists to take you to the Note.
+_Avoid_: read, mark as read, dismiss (a Dismiss hides a Recommendation)
+
 **System Message**:
 A small, deemphasized Room Feed line for a recommendation: recipients see "Bob recommended Title", and the recommender sees their own "You recommended Title to the Room". The title links to the video. An un-recommend still produces no new Feed line and no Event; instead, the existing line renders **struck through**, derived client-side by noticing the Event's videoId is no longer in the Room's live Recommendation list. The title comes from the Playlist Event itself, so the message survives (struck) after the video is un-recommended. Rendered visually quieter than personal Feed items.
 _Avoid_: notification, alert, toast

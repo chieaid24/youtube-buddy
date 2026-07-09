@@ -216,8 +216,15 @@ Never animate layout properties (width/height/top/left) for choreography — use
   ~180ms) then settles. Reduced-motion: instant.
 - **Sharing toggle:** the state pill glides color + the dot cross-fades; no bounce.
 - **Waiting state:** the peach status dot **breathes** (opacity/scale pulse, ~1.6s
-  loop, `--ease-out` in and out). This is the only looping animation. Paused under
-  reduced-motion.
+  loop, `--ease-out` in and out). Paused under reduced-motion.
+- **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
+  (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ease-out`),
+  until the Mention or Reply is Acknowledged. The 10px dot itself never moves, resizes, or
+  recolors — the timeline is dense and a neighbouring dot may sit only 11px away. Under
+  reduced-motion the halo becomes a static 2px accent ring, no animation.
+
+These two are the **only** looping animations, and they deliberately share the ~1.6s
+breathing rhythm: both mean "something is waiting on you".
 
 Springs are **mild** (overshoot < ~6%). This intentionally relaxes impeccable's
 strict no-bounce guidance for personality; keep it restrained so it reads warm, not toy-like.
