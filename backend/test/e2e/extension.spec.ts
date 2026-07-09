@@ -953,7 +953,7 @@ const watchActionsFixture = `<!doctype html>
   </body>
 </html>`;
 
-test('watch pill shows Recommended on an own Recommendation and un-recommends for everyone', async () => {
+test('watch pill offers Unrecommend on an own Recommendation and un-recommends for everyone', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -972,10 +972,10 @@ test('watch pill shows Recommended on an own Recommendation and un-recommends fo
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
 
-		// The pill lands as "Recommend to Buddies" and flips to the "Recommended"
+		// The pill lands as "Recommend to Buddies" and flips to the "Unrecommend"
 		// toggle state once the Room read shows this viewer recommended the video.
 		const pill = page.locator('#ytb-playlist-add-button');
-		await nudgeUntil(page, () => expect(pill).toHaveText('Recommended', { timeout: 700 }));
+		await nudgeUntil(page, () => expect(pill).toHaveText('Unrecommend', { timeout: 700 }));
 
 		// Clicking un-recommends: one DELETE /playlist attributed to the viewer,
 		// after which the pill offers to recommend again.

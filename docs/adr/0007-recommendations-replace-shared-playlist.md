@@ -27,7 +27,7 @@ We chose **(b)**, with a client-local dismiss layer.
 
 - **Two distinct removal acts:**
   1. **Un-recommend (author only).** The recommender deletes their own Room item via the
-     watch-page "+ Buddy Room" pill toggle (which shows a "Recommended" state on videos
+     watch-page "+ Buddy Room" pill toggle (which shows an "Unrecommend" action on videos
      they recommended). This removes it for _everyone_ and emits **no** Room Feed
      notification.
   2. **Dismiss (recipient, local).** A recipient hides a recommendation from just their
