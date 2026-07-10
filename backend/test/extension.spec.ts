@@ -712,7 +712,7 @@ describe('room home section helpers', () => {
 		}
 	});
 
-	it('derives removed vs live System Messages from the Room current Recommendation list', () => {
+	it('strikes System Messages per Event: superseded or un-recommended lines are removed', () => {
 		const at = new Date(2026, 6, 4, 12).getTime();
 		const events = [
 			{ id: 'e1', type: 'added', videoId: 'v1', title: 'Still Here', actorClientId: 'bob22222', at },
@@ -726,8 +726,8 @@ describe('room home section helpers', () => {
 		expect(items).toHaveLength(2);
 		const live = items.find((i) => i.event.videoId === 'v1')!;
 		const gone = items.find((i) => i.event.videoId === 'v2')!;
-		expect(live.removed).toBe(false);
-		expect(gone.removed).toBe(true);
+		expect(live.removed).toBe(false); // a live recommendation is never struck
+		expect(gone.removed).toBe(true); // an un-recommended videoId's sole Event is struck
 		// The struck line keeps its real title, captured on the event.
 		expect(gone.event.title).toBe('Taken Back');
 		// The recipient derives the same strike from the same read.
@@ -736,15 +736,56 @@ describe('room home section helpers', () => {
 			.find((i) => i.type === 'system' && i.event.videoId === 'v2')!;
 		expect(bobsGone.removed).toBe(true);
 
-		// Re-recommending v2 (a fresh event + the videoId live again) un-strikes
-		// every line for that video, old and new.
+		// Re-recommending v2 (a fresh event + the videoId live again) revives
+		// ONLY the newest line. The older Event was superseded and stays struck —
+		// removal is per EVENT, so recommend -> un-recommend -> re-recommend
+		// intentionally shows two lines: the first dead, the second live.
 		const reEvents = [...events, { id: 'e3', type: 'added', videoId: 'v2', title: 'Taken Back', actorClientId: me, at: at + 5000 }];
 		const rePlaylist = [...playlist, { videoId: 'v2', title: 'Taken Back', addedBy: me, addedByName: 'Aidan', addedAt: at + 5000 }];
 		const after = buildFeed({ events: reEvents, playlist: rePlaylist }, me)
 			.flatMap((g) => g.items)
 			.filter((i) => i.type === 'system' && i.event.videoId === 'v2');
-		expect(after).toHaveLength(2);
-		expect(after.every((i) => i.removed === false)).toBe(true);
+		expect(after.map((i) => [i.event.id, i.removed])).toEqual([
+			['e2', true], // superseded by e3 — dead even though v2 is live again
+			['e3', false], // the newest Event for v2 is the one live line
+		]);
+		// The recommender's own lines follow the identical per-Event rule.
+		expect(after.map((i) => i.own)).toEqual([true, true]);
+	});
+
+	it('systemLine: a struck System Message renders no anchor and explains itself to assistive tech', () => {
+		const roster: RosterEntry[] = [{ clientId: 'bob22222', name: 'Bob' }];
+		const event = { id: 'e1', videoId: 'v1', title: 'Otters 101', actorClientId: 'bob22222' };
+
+		// Live: the title is the row's only link, tooltip intact, no struck extras.
+		const live = window.YTB.systemLine({ type: 'system', own: false, removed: false, event }, roster);
+		expect(live.struck).toBe(false);
+		expect(live.prefix).toBe('Bob recommended ');
+		expect(live.label).toBe('Otters 101');
+		expect(live.suffix).toBe('');
+		expect(live.linkVideoId).toBe('v1');
+		expect(live.linkTooltip).toBe('Watch "Otters 101"');
+		expect(live.rowTooltip).toBeNull();
+		expect(live.srSuffix).toBeNull();
+
+		// Struck: NO anchor — a null linkVideoId routes the title onto the
+		// plain-text fallback (muted, unlinked, untooltipped) — and the row
+		// carries the tooltip + visually-hidden suffix a line-through cannot
+		// convey to a screen reader.
+		const struck = window.YTB.systemLine({ type: 'system', own: false, removed: true, event }, roster);
+		expect(struck.struck).toBe(true);
+		expect(struck.label).toBe('Otters 101'); // the stored title survives, as plain text
+		expect(struck.linkVideoId).toBeNull();
+		expect(struck.linkTooltip).toBeNull();
+		expect(struck.rowTooltip).toBe('No longer recommended');
+		expect(struck.srSuffix).toBe(' (no longer recommended)');
+
+		// The identical rule on the viewer's own "You recommended ..." line.
+		const own = window.YTB.systemLine({ type: 'system', own: true, removed: true, event }, roster);
+		expect(own.prefix).toBe('You recommended ');
+		expect(own.suffix).toBe(' to the Room');
+		expect(own.linkVideoId).toBeNull();
+		expect(own.rowTooltip).toBe('No longer recommended');
 	});
 
 	it('Watch Notices: the recommender sees a Buddy watch their pick; others do not', () => {

@@ -5,14 +5,15 @@
 // down). Left: the Room Feed — a chronological, chat-like feed of Replies to
 // the viewer's Notes, @-mentions of the viewer, deemphasized recommend System
 // Messages ("X recommended ..." to recipients, "You recommended ... to the
-// Room" to the recommender; struck through once un-recommended), and Watch
-// Notices ("X started watching ...", shown to the recommender when a Buddy
-// watches their pick), grouped under day dividers, newest at the bottom,
-// auto-scrolled. Feed link rule (CONTEXT.md): on a reply/mention row only the
-// quoted body links — to the video at the Note's timestamp, opening its
-// Expanded Note on arrival; on System Messages and Watch Notices only the
-// video title links (to the video's watch page). Everything else in a
-// row — author, action, context, timestamp — is plain text.
+// Room" to the recommender; struck through per Event once superseded or
+// un-recommended — ADR-0007), and Watch Notices ("X started watching ...",
+// shown to the recommender when a Buddy watches their pick), grouped under day
+// dividers, newest at the bottom, auto-scrolled. Feed link rule (CONTEXT.md):
+// on a reply/mention row only the quoted body links — to the video at the
+// Note's timestamp, opening its Expanded Note on arrival; on System Messages
+// and Watch Notices only the video title links (to the video's watch page).
+// Everything else in a row — author, action, context, timestamp — is plain
+// text, and a struck System Message is the sole exception: no link at all.
 // Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
 // `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
 // horizontal thumbnail row with a live "Watched by ..." attribution and a
@@ -272,7 +273,9 @@
 
 	// The video title as a System Message / Watch Notice row's ONLY link
 	// (CONTEXT.md Room Feed link rule) — the rest of the line stays plain
-	// deemphasized text. Falls back to plain text without a videoId.
+	// deemphasized text. Falls back to plain text without a videoId; a struck
+	// System Message rides that fallback on purpose (systemLine hands it a null
+	// videoId), so a dead recommendation renders no anchor at all.
 	function buildTitleLink(videoId, title) {
 		const label = title || 'a video';
 		if (!videoId) return document.createTextNode(label);
@@ -286,18 +289,27 @@
 
 	// A recommendation System Message (ADR-0007 amendment): recipients see
 	// 'Bob recommended Title', the recommender their own 'You recommended Title
-	// to the Room'. Only the title links to the video; the stored event title
-	// survives an un-recommend, so it stays correct even after the live Playlist
-	// Item is gone — buildFeed then flags the item `removed` and the whole line
-	// renders struck through (no removal event exists).
+	// to the Room'. The whole sentence comes from the pure systemLine plan
+	// (shared.js): on a live line only the title links to the video; a struck
+	// line — buildFeed flagged the item `removed`, a per-Event state — renders
+	// no anchor at all, its title plain muted text, plus a row tooltip and a
+	// visually-hidden suffix since a line-through says nothing to a screen
+	// reader. The stored event title survives an un-recommend, so the sentence
+	// stays correct even after the live Playlist Item is gone.
 	function buildSystemRow(item, roster) {
-		const event = item.event;
+		const line = YTB.systemLine(item, roster);
 		const row = document.createElement('div');
-		row.className = 'ytb-hs-item ytb-hs-system' + (item.removed ? ' ytb-hs-struck' : '');
+		row.className = 'ytb-hs-item ytb-hs-system' + (line.struck ? ' ytb-hs-struck' : '');
+		if (line.rowTooltip) row.title = line.rowTooltip;
 		const text = document.createElement('span');
-		const title = buildTitleLink(event.videoId, event.title);
-		if (item.own) text.append('You recommended ', title, ' to the Room');
-		else text.append(YTB.mentionName(roster, event.actorClientId) + ' recommended ', title);
+		text.append(line.prefix, buildTitleLink(line.linkVideoId, line.label));
+		if (line.suffix) text.append(line.suffix);
+		if (line.srSuffix) {
+			const sr = document.createElement('span');
+			sr.className = 'ytb-hs-sr';
+			sr.textContent = line.srSuffix;
+			text.append(sr);
+		}
 		const when = document.createElement('time');
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
@@ -678,10 +690,23 @@
       }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover,
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; }
-      /* An un-recommended System Message: strike the sentence (the title link
-         inherits the ancestor's line-through per CSS decoration propagation),
-         leaving the timestamp legible. */
+      /* A struck System Message (superseded or un-recommended; per-Event —
+         ADR-0007): strike the whole sentence, leaving the timestamp legible.
+         The title inside is plain text (no anchor is rendered on a struck
+         line), so it simply inherits the line's muted color — no accent, no
+         bold, no hover underline, no pointer. */
       #${SECTION_ID} .ytb-hs-struck > span { text-decoration: line-through; }
+      /* Visually hidden, read by assistive tech: a struck row's
+         "(no longer recommended)" suffix — a line-through alone conveys
+         nothing to a screen reader. */
+      #${SECTION_ID} .ytb-hs-sr {
+        position: absolute;
+        width: 1px; height: 1px;
+        margin: -1px; padding: 0; border: 0;
+        clip-path: inset(50%);
+        overflow: hidden;
+        white-space: nowrap;
+      }
       #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 12px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pl-row {
         display: flex; gap: 10px;

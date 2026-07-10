@@ -81,6 +81,38 @@ decision are unchanged:
   recommended \"Title\" to the Room"), sourced from the same `added` Event. The
   Recommended-for-you grid still hides own items.
 - An un-recommend no longer leaves the recipient's Feed line looking live: the client
-  derives removal (the Event's videoId is absent from the Room's current Recommendation
-  list) and renders the existing System Message struck through. No `removed` event is
-  introduced.
+  derives removal (originally: the Event's videoId is absent from the Room's current
+  Recommendation list — corrected by the 2026-07-09 amendment below to a per-Event rule,
+  since videoId absence alone silently un-strikes a dead line once the video is
+  re-recommended) and renders the existing System Message struck through. No `removed`
+  event is introduced.
+
+## Amendment (2026-07-09)
+
+Strike-through is a **per-Event** state, not a per-video one. Under the 2026-07-08 rule,
+recommend -> un-recommend -> re-recommend of one video put the videoId back in the live
+Recommendation list, which silently un-struck the older, dead System Message — both
+lines then read as live. An `added` Playlist Event is now struck when either holds:
+
+1. a **newer** `added` Event exists for the same videoId (it was superseded), or
+2. its videoId is absent from the Room's live Recommendation list (it is currently
+   un-recommended).
+
+Clause 1 rests on the backend's **no-op re-add invariant**: recommending a videoId that
+is already live returns the existing item and emits no Event, so a second `added` Event
+for one videoId can only come into existence after that videoId was deleted from the
+list — every `added` Event for a video except the newest is therefore necessarily dead,
+and the newest is dead exactly when clause 2 says so. Event eviction cannot break this:
+the newest-50 cap evicts oldest-first and each Event's TTL starts at its own creation,
+so a surviving Event can lose older siblings (harmless — fewer lines) but never its
+newer one. Storage is unchanged: no `removed` event type, no `removedAt` field, no new
+API surface, and un-recommends still emit no Event. Intended consequence: after
+recommend -> un-recommend -> re-recommend the Feed shows two System Messages for that
+video, the older struck, the newer live.
+
+A struck line also stops pretending to be clickable: it renders **no anchor at all** —
+the title is plain text in the line's own muted color (no accent, no bold weight, no
+hover underline, no pointer cursor, no link tooltip), the sole exception to the Room
+Feed's link rule. Because a line-through conveys nothing to a screen reader, a struck
+row instead carries a "No longer recommended" tooltip and a visually-hidden
+"(no longer recommended)" suffix inside the sentence.
