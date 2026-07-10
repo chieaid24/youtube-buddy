@@ -3,10 +3,6 @@ import path from 'node:path';
 
 const extensionPath = path.resolve(__dirname, '../../../extension');
 
-// The scrubber tooltip merges both live markup variants: the current ("delhi")
-// player carries the hover timecode in .ytp-tooltip-progress-bar-pill and
-// leaves .ytp-tooltip-text empty; the legacy player carries it in
-// .ytp-tooltip-text. The fixture fills both so one hover asserts both hide.
 const fixture = `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>YouTube fixture</title></head>
@@ -16,15 +12,6 @@ const fixture = `<!doctype html>
       <div class="ytp-chrome-bottom">
         <div class="ytp-progress-bar"></div>
         <div class="ytp-left-controls"></div>
-      </div>
-      <div class="ytp-tooltip ytp-bottom ytp-tooltip-progress-bar-style ytp-preview">
-        <div class="ytp-tooltip-bg"></div>
-        <div class="ytp-tooltip-text-wrapper">
-          <span class="ytp-tooltip-text">1:23</span>
-          <div class="ytp-tooltip-progress-bar-pill">
-            <div class="ytp-tooltip-progress-bar-pill-time-stamp">1:23</div>
-          </div>
-        </div>
       </div>
     </main>
     <a href="/watch?v=fixture-next"><img alt="Fixture thumbnail"></a>
@@ -187,27 +174,56 @@ test('loads the unpacked extension and runs every content script', async () => {
 	}
 });
 
-test('hovering a Note dot hides the native scrubber timecode, keeping the thumbnail', async () => {
+// A watch fixture whose progress bar has real layout, so dot geometry (exact
+// timestamp fractions, the float above the bar's top edge) is assertable in
+// pixels.
+const sizedBarFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube sized-bar fixture</title></head>
+  <body>
+    <main id="movie_player" class="html5-video-player" style="position: relative; width: 400px; height: 300px; background: #000">
+      <video style="width: 400px; height: 300px"></video>
+      <div class="ytp-chrome-bottom" style="position: absolute; left: 0; right: 0; bottom: 0; height: 40px">
+        <div class="ytp-progress-bar" style="position: relative; width: 400px; height: 6px; background: #444"></div>
+        <div class="ytp-left-controls"></div>
+      </div>
+    </main>
+  </body>
+</html>`;
+
+test('Note Dots float above the bar at their true timestamps and swallow hover from the player', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
 	try {
-		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: fixture }));
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: sizedBarFixture }),
+		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
 
-		// Render one Note dot. The content scripts run in an isolated world, so a
-		// main-world `Object.defineProperty(video, 'duration', ...)` is invisible
-		// to them — give the fixture <video> a real media source instead (native
-		// element state is shared across worlds) and wait for its metadata.
-		// CustomEvent detail crosses worlds via structured clone in Chromium, so
-		// dispatching the Room read the way renderer.js rebroadcasts one works.
+		// Render two Note dots half a second apart. The content scripts run in an
+		// isolated world, so a main-world `Object.defineProperty(video, 'duration',
+		// ...)` is invisible to them — give the fixture <video> a real 40s media
+		// source instead (native element state is shared across worlds) and wait
+		// for its metadata. Count the hover events the page world sees on the bar
+		// (the events YouTube's storyboard/time-pill logic runs on) in a dataset
+		// slot both worlds can read. CustomEvent detail crosses worlds via
+		// structured clone in Chromium, so dispatching the Room read the way
+		// renderer.js rebroadcasts one works.
 		await page.evaluate(async (wavDataUri) => {
 			const video = document.querySelector('video') as HTMLVideoElement;
 			const loaded = new Promise((resolve) => video.addEventListener('loadedmetadata', resolve, { once: true }));
 			video.src = wavDataUri;
 			await loaded;
+			const bar = document.querySelector('.ytp-progress-bar') as HTMLElement;
+			bar.dataset.hovers = '0';
+			for (const type of ['mousemove', 'mouseover']) {
+				bar.addEventListener(type, () => {
+					bar.dataset.hovers = String(Number(bar.dataset.hovers) + 1);
+				});
+			}
 			document.dispatchEvent(
 				new CustomEvent('ytb:room-data', {
 					detail: {
@@ -219,37 +235,61 @@ test('hovering a Note dot hides the native scrubber timecode, keeping the thumbn
 								clientId: 'buddy-1',
 								name: 'Sam',
 								videoId: 'fixture-video',
-								timestamp: 2,
+								timestamp: 20,
 								kind: 'text',
 								body: 'great moment',
 								createdAt: 1,
+							},
+							{
+								id: 'note-2',
+								clientId: 'buddy-2',
+								name: 'Kim',
+								videoId: 'fixture-video',
+								timestamp: 20.5,
+								kind: 'text',
+								body: 'same moment',
+								createdAt: 2,
 							},
 						],
 						replies: [],
 					},
 				}),
 			);
-		}, silentWavDataUri(4));
-		const dot = page.locator('.ytb-note-dot');
-		await expect(dot).toHaveCount(1);
+		}, silentWavDataUri(40));
+		const dots = page.locator('.ytb-note-dot');
+		await expect(dots).toHaveCount(2);
 
-		const visibilityOf = (selector: string) =>
-			page.evaluate((sel) => getComputedStyle(document.querySelector(sel) as Element).visibility, selector);
+		// Each dot's center sits at its exact timestamp / duration fraction of the
+		// bar — 0.5s apart (5px here) the two overlap instead of being pushed
+		// apart — and every dot's box floats entirely above the bar's top edge.
+		const geometry = await page.evaluate(() => {
+			const barRect = (document.querySelector('.ytp-progress-bar') as HTMLElement).getBoundingClientRect();
+			return [...document.querySelectorAll('.ytb-note-dot')].map((dot) => {
+				const rect = dot.getBoundingClientRect();
+				return {
+					id: (dot as HTMLElement).dataset.ytbNoteId,
+					fraction: (rect.left + rect.width / 2 - barRect.left) / barRect.width,
+					clearsBar: rect.bottom <= barRect.top,
+					width: rect.width,
+				};
+			});
+		});
+		const at = (id: string) => geometry.find((dot) => dot.id === id)!;
+		expect(at('note-1').fraction).toBeCloseTo(20 / 40, 2);
+		expect(at('note-2').fraction).toBeCloseTo(20.5 / 40, 2);
+		expect(Math.abs(at('note-2').fraction - at('note-1').fraction) * 400).toBeLessThan(at('note-1').width);
+		for (const dot of geometry) expect(dot.clearsBar).toBe(true);
 
-		// Native timecode carriers (delhi pill + legacy text) start visible.
-		expect(await visibilityOf('.ytp-tooltip-progress-bar-pill')).toBe('visible');
-		expect(await visibilityOf('.ytp-tooltip-text')).toBe('visible');
+		// Hovering a dot leaks nothing into the bar beneath it: the page world
+		// sees no mousemove/mouseover, so YouTube would pop no storyboard
+		// thumbnail and no time pill behind the Note Preview.
+		await dots.first().hover();
+		const hovers = () => page.evaluate(() => Number((document.querySelector('.ytp-progress-bar') as HTMLElement).dataset.hovers));
+		expect(await hovers()).toBe(0);
 
-		// Hovering the dot suppresses the timecode but never the storyboard.
-		await dot.hover();
-		await expect.poll(() => visibilityOf('.ytp-tooltip-progress-bar-pill')).toBe('hidden');
-		expect(await visibilityOf('.ytp-tooltip-text')).toBe('hidden');
-		expect(await visibilityOf('.ytp-tooltip-bg')).toBe('visible');
-
-		// Leaving the dot restores the native timecode.
-		await page.mouse.move(10, 10);
-		await expect.poll(() => visibilityOf('.ytp-tooltip-progress-bar-pill')).toBe('visible');
-		expect(await visibilityOf('.ytp-tooltip-text')).toBe('visible');
+		// Hovering the bar itself a few pixels away still reaches it.
+		await page.locator('.ytp-progress-bar').hover({ position: { x: 40, y: 3 } });
+		expect(await hovers()).toBeGreaterThan(0);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -856,9 +896,9 @@ test('clicking a Reaction or locked-Spoiler hover preview opens its Expanded Not
 
 // A playable fixture that also carries YouTube's storyboard thumbnail
 // (.ytp-tooltip) at a fixed spot above the scrubber, positioned to overlap
-// where a Reaction hover preview renders — so the storyboard-clearing cap can
-// be asserted deterministically (the real player positions the same element
-// live; verified there too).
+// where a Reaction hover preview renders — proving the preview no longer
+// clips or drops its corner timestamp for the storyboard (a hovered dot
+// swallows its hover events, so the real player never even shows one).
 function storyboardFixture(mediaSrc: string) {
 	return `<!doctype html>
 <html lang="en">
@@ -878,7 +918,7 @@ function storyboardFixture(mediaSrc: string) {
 </html>`;
 }
 
-test('a hovered Reaction preview is capped so its top clears the storyboard thumbnail', async () => {
+test('a hovered Reaction preview renders at natural height with its corner timestamp, storyboard or not', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -901,31 +941,23 @@ test('a hovered Reaction preview is capped so its top clears the storyboard thum
 		await nudgeUntil(page, () => expect(reactionDot).toHaveCount(1, { timeout: 700 }));
 		await reactionDot.hover();
 
-		// The cap pulls the Reaction preview's top down to or below the storyboard
-		// thumbnail's bottom edge (it starts above it, clipped, without the cap).
-		await expect
-			.poll(() =>
-				page.evaluate(() => {
-					const pv = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview')!.getBoundingClientRect();
-					const tip = document.querySelector('.ytp-tooltip')!.getBoundingClientRect();
-					return Math.round(pv.top - tip.bottom); // >= 0: preview top sits below the thumbnail
-				}),
-			)
-			.toBeGreaterThanOrEqual(0);
+		const preview = page.locator('.ytb-note-dot-reaction .ytb-note-preview');
+		await expect.poll(() => preview.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 
-		// The emoji itself stays fully inside the capped preview (only empty top
-		// padding is trimmed), and its timestamp chip is dropped for room.
+		// Natural height: no live cap, the emoji fully inside the preview's box,
+		// and the corner timestamp chip intact — even with the storyboard element
+		// overlapping where the preview renders.
 		const state = await page.evaluate(() => {
-			const preview = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview')!;
-			const pv = preview.getBoundingClientRect();
+			const el = document.querySelector('.ytb-note-dot-reaction .ytb-note-preview') as HTMLElement;
+			const pv = el.getBoundingClientRect();
 			const em = document.querySelector('.ytb-note-dot-reaction .ytb-preview-emoji')!.getBoundingClientRect();
 			return {
+				uncapped: el.style.maxHeight === '' && getComputedStyle(el).maxHeight === 'none',
 				emojiInside: em.height > 0 && em.top >= pv.top - 0.5 && em.bottom <= pv.bottom + 0.5,
-				clamped: preview.classList.contains('ytb-preview-clamped'),
-				chipHidden: getComputedStyle(document.querySelector('.ytb-note-dot-reaction .ytb-preview-time')!).display === 'none',
+				chipShown: getComputedStyle(document.querySelector('.ytb-note-dot-reaction .ytb-preview-time')!).display !== 'none',
 			};
 		});
-		expect(state).toEqual({ emojiInside: true, clamped: true, chipHidden: true });
+		expect(state).toEqual({ uncapped: true, emojiInside: true, chipShown: true });
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -1631,7 +1663,14 @@ test('@live loads on YouTube without content-script errors', async () => {
 		await expect(page.locator('#ytb-note-button')).toBeAttached({ timeout: 20_000 });
 		const extensions = await context.newPage();
 		await expect((await extensionItem(extensions)).locator('#errors-button')).toHaveCount(0);
-		const lifecycleErrors = errors.filter((error) => !error.includes('Failed to load resource'));
+		// Live YouTube's own console noise, none of it ours: resource-load
+		// failures, its ad-conversion pings rejected by CORS, and script blocks
+		// inside its sandboxed ad frames.
+		const isYouTubeNoise = (error: string) =>
+			error.includes('Failed to load resource') ||
+			(error.includes('blocked by CORS policy') && /doubleclick\.net|googleads/.test(error)) ||
+			error.includes("Blocked script execution in 'about:blank'");
+		const lifecycleErrors = errors.filter((error) => !isYouTubeNoise(error));
 		expect(lifecycleErrors, lifecycleErrors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();

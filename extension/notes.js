@@ -1,9 +1,11 @@
 // extension/notes.js
 //
 // ALL Note & Reaction presentation on the watch page:
-//   - Video Timeline dots (text Notes, Reactions, locked Spoilers), spread
-//     apart when timestamps fall within 2 seconds so each keeps its own
-//     pointer/keyboard target;
+//   - Video Timeline dots (text Notes, Reactions, locked Spoilers) floating
+//     just above the progress bar, each at its exact timestamp fraction —
+//     co-timed dots simply overlap, and every dot swallows the pointer events
+//     it receives so YouTube never pops its storyboard thumbnail or time pill
+//     behind a Note Preview;
 //   - hover/focus Note Previews (two-line body, author beneath, Reply count,
 //     corner timestamp) reachable across a transparent hover bridge;
 //   - the Expanded Note: a pinned panel opened by clicking ANY Note Dot or Note
@@ -49,16 +51,13 @@
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
 	const STYLE_ID = 'ytb-notes-style';
-	// Toggled on #movie_player while a Note dot/preview is hovered so YouTube's
-	// native scrubber tooltip hides ONLY its time readout (thumbnail stays).
-	const SCRUB_HIDE_CLASS = 'ytb-hide-scrub-time';
 
 	const CONVERSATION_POLL_MS = 5000; // focused Expanded Note freshness
 	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
 	const NOTE_CARD_MS = 4000; // text-note Playback Notification lifetime
 	const REACTION_BURST_MS = 2000; // Reaction float-and-fade lifetime
 	// Steps larger than this between timeupdates are seeks, not playback.
-	const NATURAL_DELTA_SECONDS = YTB.SPREAD_WINDOW_SECONDS;
+	const NATURAL_DELTA_SECONDS = 2;
 
 	// --- state ---
 	let myClientId = null;
@@ -238,8 +237,7 @@
 
 		const duration = video ? Number(video.duration) : NaN;
 		const playhead = video ? Number(video.currentTime) : 0;
-		const desired = new Map(); // id -> { note, locked }
-		const naturals = []; // for spreadFractions
+		const desired = new Map(); // id -> { note, locked, fraction }
 		// Notes off: desired stays empty, so the reconciliation below strips
 		// every existing dot (and re-grows them all when turned back on).
 		if (!notesHidden && Number.isFinite(duration) && duration > 0) {
@@ -251,20 +249,12 @@
 					// Spoiler state follows the viewer's playhead and can relock when
 					// the video is revisited from an earlier point.
 					locked: Boolean(note.spoiler) && playhead < timestamp,
-				});
-				naturals.push({
-					id: note.id,
-					timestamp,
+					// The dot's exact moment on the bar. Never displaced: co-timed
+					// dots overlap (truth of position beats legibility).
 					fraction: Math.max(0, Math.min(1, timestamp / duration)),
 				});
 			}
 		}
-
-		// Dots within 2s would overlap: spread them apart (display position only —
-		// labels and the Expanded Note keep the true timestamp).
-		const barWidth = bar.getBoundingClientRect().width;
-		const minGap = barWidth > 0 ? Math.max(0.008, 11 / barWidth) : 0.012;
-		const fractions = YTB.spreadFractions(naturals, minGap);
 
 		const existing = new Map();
 		for (const dot of bar.querySelectorAll(':scope > .' + DOT_CLASS)) {
@@ -275,7 +265,7 @@
 		if (desired.size === 0) return;
 		if (getComputedStyle(bar).position === 'static') bar.style.position = 'relative';
 
-		for (const [id, { note, locked }] of desired) {
+		for (const [id, { note, locked, fraction }] of desired) {
 			let dot = existing.get(id);
 			if (!dot) {
 				dot = document.createElement('button');
@@ -287,7 +277,10 @@
 				// Never let the player interpret a dot press as a seek. Clicking the
 				// dot OR its Note Preview opens that Note's Expanded Note (the click
 				// itself never seeks — Go here inside the panel is the only seek).
-				for (const type of ['mousedown', 'touchstart', 'pointerdown']) {
+				// The hover family is swallowed too, so a hovered dot never leaks
+				// into the bar beneath it: YouTube pops no storyboard thumbnail and
+				// no time pill behind a Note Preview.
+				for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
 					dot.addEventListener(type, (e) => e.stopPropagation());
 				}
 				dot.addEventListener('click', (e) => {
@@ -295,19 +288,9 @@
 					e.preventDefault();
 					onDotActivate(dot);
 				});
-				// While the dot (and its preview, a descendant) is hovered, suppress
-				// YouTube's native scrubber time so our corner timestamp stands alone.
-				dot.addEventListener('mouseenter', () => {
-					player()?.classList.add(SCRUB_HIDE_CLASS);
-					clampReactionPreview(dot);
-				});
-				dot.addEventListener('mouseleave', () => {
-					player()?.classList.remove(SCRUB_HIDE_CLASS);
-					releaseReactionPreview(dot);
-				});
 				bar.appendChild(dot);
 			}
-			dot.style.left = ((fractions.get(id) || 0) * 100).toFixed(3) + '%';
+			dot.style.left = (fraction * 100).toFixed(3) + '%';
 			dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
 			// The open Note's own hover preview is redundant next to its panel.
 			dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
@@ -367,60 +350,11 @@
 		return null;
 	}
 
-	/**
-	 * Keep a hovered Reaction preview clear of YouTube's storyboard thumbnail.
-	 * The thumbnail (`.ytp-tooltip`) floats above the scrubber with a far higher
-	 * z-index than the transparent Reaction preview, so a tall preview's top is
-	 * painted over. Cap the preview's height (bottom-anchored, so it grows down
-	 * from the thumbnail) to just below the thumbnail's bottom edge — measured
-	 * live, so it adapts to every player size. Only Reaction previews clip like
-	 * this; text and locked-Spoiler cards win on their own stacking, and a
-	 * keyboard-focused dot shows no storyboard at all (cap released then).
-	 */
-	function clampReactionPreview(dot) {
-		const preview = dot.querySelector('.' + PREVIEW_CLASS);
-		if (!preview || !preview.classList.contains('ytb-preview-reaction')) return;
-		// YouTube reveals its storyboard a frame or two AFTER the hover starts, so
-		// poll a short budget until it is up (then stop — its vertical position is
-		// stable for the rest of the hover). The loop also ends the moment the
-		// hover does, so a keyboard-focused dot (no storyboard) leaves no cap.
-		let frames = 0;
-		const tick = () => {
-			if (!preview.isConnected || !dot.matches(':hover')) return;
-			const tip = document.querySelector('.ytp-tooltip');
-			const tipRect = tip && tip.offsetParent !== null ? tip.getBoundingClientRect() : null;
-			if (tipRect && tipRect.height > 0) {
-				const bottom = preview.getBoundingClientRect().bottom; // bottom-anchored: stable
-				const naturalTop = bottom - preview.scrollHeight; // full height, ignores any cap
-				// Cap only when the storyboard's bottom edge would cover the top; clip
-				// the empty top padding first (emoji + author sit at the bottom), never
-				// below a floor that would swallow the emoji itself.
-				const clamp = tipRect.bottom > naturalTop;
-				preview.style.maxHeight = clamp ? Math.max(34, Math.round(bottom - tipRect.bottom - 4)) + 'px' : '';
-				// The compact card has no room for the corner timestamp without it
-				// sitting over the emoji; drop it while clamped (kept when a
-				// keyboard-focused dot shows the full-height preview, storyboard-free).
-				preview.classList.toggle('ytb-preview-clamped', clamp);
-				return;
-			}
-			if (frames++ < 40) requestAnimationFrame(tick);
-		};
-		requestAnimationFrame(tick);
-	}
-
-	function releaseReactionPreview(dot) {
-		const preview = dot.querySelector('.' + PREVIEW_CLASS);
-		if (preview) {
-			preview.style.maxHeight = '';
-			preview.classList.remove('ytb-preview-clamped');
-		}
-	}
-
 	function buildPreview(preview, note, who, locked, count) {
 		preview.replaceChildren();
 		preview.classList.toggle('ytb-preview-reaction', note.kind === 'emoji' && !locked);
-		// The Note's video timestamp, pinned in the top-right corner — replaces the
-		// YouTube scrubber time suppressed while a dot/preview is hovered.
+		// The Note's video timestamp, pinned in the top-right corner (a hovered
+		// dot swallows the hover, so YouTube shows no time pill of its own).
 		const time = document.createElement('div');
 		time.className = 'ytb-preview-time';
 		time.textContent = '@' + YTB.formatTime(note.timestamp);
@@ -1315,16 +1249,20 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
+      /* A flat, single-color circle floating just clear of the bar's top edge
+         (a child of the bar, so it inherits the control chrome's autohide fade
+         and stays bar-aligned through resizes and fullscreen for free). No
+         border, outline, ring, or shadow — a pale dot over a bright frame is
+         the accepted trade. */
       .${DOT_CLASS} {
         position: absolute;
-        top: 50%;
-        width: 10px;
-        height: 10px;
-        margin: -5px 0 0 -5px;
+        bottom: calc(100% + 3px);
+        width: 6px;
+        height: 6px;
+        margin-left: -3px;
         padding: 0;
-        border: 1px solid rgba(0, 0, 0, 0.7);
+        border: 0;
         border-radius: 50%;
-        box-sizing: border-box;
         background: #fff;
         z-index: 41;
         cursor: default;
@@ -1401,10 +1339,8 @@
         pointer-events: auto;
         cursor: pointer;
       }
-      /* Reactions keep the transparent over-video treatment (not a card). Its
-         height is capped live (clampReactionPreview) to clear YouTube's
-         storyboard thumbnail; overflow:hidden makes that cap trim the empty top
-         padding rather than let the emoji spill back under the thumbnail. */
+      /* Reactions keep the transparent over-video treatment (not a card),
+         always at natural height. */
       .${PREVIEW_CLASS}.ytb-preview-reaction {
         border: 0;
         background: transparent;
@@ -1416,7 +1352,6 @@
         justify-content: flex-end;
         padding-top: 18px;
         min-width: 52px;
-        overflow: hidden;
         text-align: center;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
@@ -1432,8 +1367,6 @@
         font-variant-numeric: tabular-nums;
       }
       .ytb-preview-reaction .ytb-preview-time { color: #eee; }
-      /* Storyboard-clamped Reaction card: no room for the corner timestamp. */
-      .ytb-preview-reaction.ytb-preview-clamped .ytb-preview-time { display: none; }
       /* Content is the hero; the author sits small beneath it (own authorship
          stays the muted neutral "You"; Buddies get their Buddy Color inline). */
       .ytb-preview-body {
@@ -1450,17 +1383,6 @@
       .ytb-preview-spoiler { padding-right: 34px; color: var(--ytb-ink-muted); font-style: italic; font-weight: 600; }
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
-      /* Suppress ONLY YouTube's native scrubber time while a dot/preview is
-         hovered; its storyboard thumbnail (.ytp-tooltip-bg) is left intact.
-         The current ("delhi") player carries the timecode in a dark rounded
-         pill (.ytp-tooltip-progress-bar-pill) and leaves .ytp-tooltip-text
-         empty — hide the WHOLE pill (hiding only its inner time-stamp would
-         leave an empty floating chip). .ytp-tooltip-text still carries the
-         timecode on the legacy tooltip markup, so both stay covered. */
-      .${SCRUB_HIDE_CLASS} .ytp-tooltip-text,
-      .${SCRUB_HIDE_CLASS} .ytp-tooltip-progress-bar-pill {
-        visibility: hidden !important;
-      }
 
       /* --- the Expanded Note: opaque warm surface (cream / espresso) --- */
       #${PANEL_ID} {
