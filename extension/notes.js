@@ -68,6 +68,10 @@
 	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
 	const NOTE_CARD_MS = 4000; // text-note Playback Notification lifetime
 	const REACTION_BURST_MS = 2000; // Reaction float-and-fade lifetime
+	// Concurrent crossings enter one-per-beat on this stagger, in timestamp order,
+	// instead of all at once — a staggered entrance, not serialization (each
+	// notification's own lifetime still starts at its own entrance).
+	const ENTRANCE_STAGGER_MS = 100;
 	// Steps larger than this between timeupdates are seeks, not playback.
 	const NATURAL_DELTA_SECONDS = 2;
 
@@ -79,7 +83,10 @@
 	let roster = []; // full Room roster (incl. me), for Room-unique Buddy labels
 	let currentVideoId = null;
 	let lastPlaybackTime = null; // previous timeupdate, for natural crossings
-	let burstCount = 0; // fans concurrent Reaction bursts apart
+	// Crossed Notes wait here and drain one-per-beat (ENTRANCE_STAGGER_MS); the
+	// timer is non-null exactly while a drain is in flight.
+	let alertQueue = [];
+	let alertDrainTimer = null;
 	// Unseen state (ADR-0010). `seenSet` mirrors the Room's persisted seen list
 	// (loaded + pruned on each Room read); `unseenDotIds` is the derived set of
 	// Note ids whose dots pulse, kept synchronous so renderDots (which runs on
@@ -96,16 +103,17 @@
 	let labelTimer = null;
 	let pendingReply = false;
 	let pendingDelete = false;
-	// A Room Feed reply/mention row (home-section.js) recorded a Note to open on
-	// arrival; consumed on the first Room read for its video. Loaded once (covers
-	// a full reload) and mirrored live from storage (covers SPA nav, where this
-	// script stays alive) — see below.
-	let pendingNoteOpen = null;
+	// A Room Feed reply/mention row (home-section.js) recorded the video to pause
+	// on arrival (ADR-0010); consumed on the first Room read for that video, which
+	// pauses the player only if an Unseen dot is on it. Loaded once (covers a full
+	// reload) and mirrored live from storage (covers SPA nav, where this script
+	// stays alive) — see below.
+	let pendingArrival = null;
 	// Timestamp until which a `play` is treated as watch-page load churn (autoplay
-	// settling in after a Room Feed row opened this Note) instead of a deliberate
-	// resume: within it the panel is kept open and the video re-paused. Armed only
-	// by a pending open; a real navigation clears it. See YTB.panelPlayAction.
-	let pendingOpenGuardUntil = 0;
+	// settling in after a Room Feed row paused us on arrival) instead of a
+	// deliberate resume: within it the arrival pause is re-asserted. Armed only by
+	// the arrival pause; a real navigation clears it. See YTB.playAction.
+	let arrivalGraceUntil = 0;
 
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
@@ -119,12 +127,12 @@
 		renderDots();
 	});
 
-	// Read any target a Room Feed row left before this script (re)loaded, then
-	// consume it once its Room read lands. On SPA nav this script never reloads,
-	// so the onChanged mirror below picks up the write instead.
-	YTB.getPendingNoteOpen().then((target) => {
-		pendingNoteOpen = target;
-		tryOpenPending();
+	// Read any arrival a Room Feed row left before this script (re)loaded; the
+	// decision (pause iff an Unseen dot is on this video) runs once its Room read
+	// lands. On SPA nav this script never reloads, so the onChanged mirror below
+	// picks up the write instead.
+	YTB.getPendingArrival().then((arrival) => {
+		pendingArrival = arrival;
 	});
 
 	chrome.storage.onChanged.addListener((changes, area) => {
@@ -133,7 +141,7 @@
 			notesHidden = changes.notesHidden.newValue === true;
 			if (notesHidden) {
 				dismissPanel(); // dismissal semantics: lease-aware resume
-				document.getElementById(ALERTS_ID)?.replaceChildren();
+				resetAlerts(); // clear on-screen + queued, cancel the drain
 			}
 			renderDots(); // reconciles to zero dots when hidden, back when shown
 		}
@@ -144,10 +152,11 @@
 			const host = player();
 			if (wrap && host) applyAlertsPosition(wrap, host); // live re-anchor
 		}
-		if ('pendingNoteOpen' in changes) {
-			const next = changes.pendingNoteOpen.newValue;
-			pendingNoteOpen = next && next.videoId && next.noteId ? next : null;
-			tryOpenPending();
+		if ('pendingArrival' in changes) {
+			const next = changes.pendingArrival.newValue;
+			pendingArrival = next && next.videoId ? next : null;
+			// The decision waits for this video's Room read (below); here we only
+			// mirror the write so it survives the SPA navigation about to happen.
 		}
 	});
 
@@ -183,7 +192,6 @@
 		repliesByNoteId = nextReplies;
 		syncSeenState(detail); // async: dots may render below before the pulse set lands
 		renderDots();
-		tryOpenPending(); // a Room Feed row may have asked to open a Note here
 	});
 
 	// ---------------------------------------------------------------------------
@@ -217,6 +225,7 @@
 		if (!code || !myClientId) {
 			seenSet = new Set();
 			unseenDotIds = new Set();
+			tryPendingArrival(); // no Room: consume the handshake without pausing
 			return;
 		}
 		let kept;
@@ -233,6 +242,7 @@
 		recomputeUnseen();
 		if (openNote) acknowledgeDot(openNote.id);
 		renderDots();
+		tryPendingArrival(); // arrival pause depends on the Unseen set just computed
 	}
 
 	/**
@@ -252,38 +262,48 @@
 		renderDots();
 	}
 
-	/**
-	 * If a Room Feed row queued a Note to open and this video now carries it, open
-	 * the Expanded Note and clear the slot. Leaves the slot for a later Room read
-	 * when the Note has not loaded yet (a mismatched video, or a poll that predates
-	 * it); an expired or vanished target is dropped so it never pops on a later
-	 * visit.
-	 */
-	function tryOpenPending() {
-		const target = pendingNoteOpen;
-		if (!target) return;
-		if (Date.now() - (Number(target.at) || 0) > YTB.PENDING_NOTE_OPEN_TTL_MS) {
-			clearPendingOpen();
-			return;
+	/** Does the current video carry at least one Unseen (pulsing) Note Dot? The
+	 * arrival pause is conditional on exactly this (ADR-0010): unseenDotIds is
+	 * Room-wide, so scope it to the notes on this video before deciding. */
+	function hasUnseenDotOnCurrentVideo() {
+		for (const note of notesForCurrentVideo()) {
+			if (unseenDotIds.has(note.id)) return true;
 		}
-		if (target.videoId !== currentVideoId) return; // still en route to the video
-		if (notesHidden) {
-			clearPendingOpen(); // Notes are off: honor the toggle, drop the request
-			return;
-		}
-		const note = (notesByVideoId.get(currentVideoId) || []).find((candidate) => candidate.id === target.noteId);
-		if (!note) return; // not in this read yet — retry on the next one (until TTL)
-		clearPendingOpen();
-		// Arm the load-churn grace BEFORE opening: the watch page is still settling
-		// on arrival, and its autoplay `play` must re-pause and keep this panel open
-		// rather than dismiss it (the whole point of the Feed handshake).
-		pendingOpenGuardUntil = Date.now() + YTB.PANEL_LOAD_GRACE_MS;
-		openPanel(note);
+		return false;
 	}
 
-	function clearPendingOpen() {
-		pendingNoteOpen = null;
-		YTB.clearPendingNoteOpen();
+	/**
+	 * A Room Feed row navigated us here asking to pause on arrival IF there is
+	 * something Unseen to look at (ADR-0010). Runs after each Room read's Unseen
+	 * recompute. On the target video this is our arrival: consume the one-shot
+	 * handshake now (whether or not we pause, so it never fires on a later visit),
+	 * then pause — holding through autoplay's settling `play` — only when Notes are
+	 * visible AND a dot on this video is Unseen. Otherwise nothing happens: never
+	 * seize the player with nothing pulsing, never override Notes Visibility. A
+	 * stale (expired) or other-video handshake is left/dropped until it expires.
+	 */
+	function tryPendingArrival() {
+		const arrival = pendingArrival;
+		if (!arrival) return;
+		if (Date.now() - (Number(arrival.at) || 0) > YTB.PENDING_ARRIVAL_TTL_MS) {
+			clearPendingArrival();
+			return;
+		}
+		if (arrival.videoId !== currentVideoId) return; // still en route, or for another video
+		clearPendingArrival();
+		if (notesHidden || !hasUnseenDotOnCurrentVideo()) return;
+		const video = document.querySelector('video');
+		if (!video) return;
+		// Pause at the viewer's own place and hold through the watch page's autoplay
+		// settling (reusing the load-churn grace); the Unseen dot(s) pulse, and the
+		// viewer chooses which to open.
+		arrivalGraceUntil = Date.now() + YTB.PANEL_LOAD_GRACE_MS;
+		if (!video.paused) video.pause();
+	}
+
+	function clearPendingArrival() {
+		pendingArrival = null;
+		YTB.clearPendingArrival();
 	}
 
 	// composer.js posted a Note/Reaction: insert the complete server record into
@@ -580,6 +600,72 @@
 	}
 
 	/**
+	 * The rectangle the Expanded Note should grow out of. A Note Preview is only on
+	 * screen while its dot is hovered, so a hovered dot grows the panel from the
+	 * preview card; keyboard activation (:focus-visible, no hover) — and any dot
+	 * whose preview is already suppressed, or a programmatic open with no dot yet —
+	 * grows it from the dot itself. Returns null when there is no dot to grow from.
+	 */
+	function panelGrowthSource(note) {
+		const dot = dotFor(note.id);
+		if (!dot) return null;
+		const preview = dot.querySelector('.' + PREVIEW_CLASS);
+		const fromPreview = preview && dot.matches(':hover') && !dot.classList.contains(DOT_OPEN_CLASS);
+		return (fromPreview ? preview : dot).getBoundingClientRect();
+	}
+
+	function cssDurationMs(value, fallback) {
+		const v = String(value).trim();
+		if (v.endsWith('ms')) return parseFloat(v) || fallback;
+		if (v.endsWith('s')) return parseFloat(v) * 1000 || fallback;
+		return fallback;
+	}
+
+	/**
+	 * Grow the freshly positioned Expanded Note out of `sourceRect` with a FLIP:
+	 * the panel already sits at its final rect, so invert it onto the source rect
+	 * (the Note Preview it replaced, or the dot) and play back to identity. The Web
+	 * Animations API auto-clears the transform when it finishes, leaving no inline
+	 * residue for a later positionPanel re-clamp. Durations and easings come from
+	 * the --ytb-* motion tokens; prefers-reduced-motion collapses to an opacity-only
+	 * fade (no transform), and a missing source falls back to a small scale-up.
+	 */
+	function flipPanelOpen(panel, sourceRect) {
+		if (!panel.isConnected || typeof panel.animate !== 'function') return;
+		const tokens = getComputedStyle(document.documentElement);
+		const duration = cssDurationMs(tokens.getPropertyValue('--ytb-dur-base'), 200);
+		const spring = tokens.getPropertyValue('--ytb-ease-spring').trim() || 'ease-out';
+
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing: 'linear' });
+			return;
+		}
+		const final = panel.getBoundingClientRect();
+		if (final.width < 1 || final.height < 1) return;
+		if (!sourceRect || sourceRect.width < 1 || sourceRect.height < 1) {
+			panel.animate(
+				[
+					{ opacity: 0, transform: 'scale(0.96) translateY(4px)' },
+					{ opacity: 1, transform: 'none' },
+				],
+				{ duration, easing: spring },
+			);
+			return;
+		}
+		const dx = sourceRect.left - final.left;
+		const dy = sourceRect.top - final.top;
+		const sx = sourceRect.width / final.width;
+		const sy = sourceRect.height / final.height;
+		panel.animate(
+			[
+				{ transformOrigin: 'top left', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: 0 },
+				{ transformOrigin: 'top left', transform: 'none', opacity: 1 },
+			],
+			{ duration, easing: spring },
+		);
+	}
+
+	/**
 	 * Open (or replace) the Expanded Note for `note`. Never seeks: it pauses at
 	 * the viewer's current position. Only the FIRST open of a chain acquires the
 	 * pause lease; replacing one panel with another keeps the video paused and
@@ -588,6 +674,9 @@
 	async function openPanel(note) {
 		const host = player();
 		if (!host || !note) return;
+		// Where the Expanded Note grows FROM — captured before anything hides it:
+		// the hovered Note Preview if one is on screen, else the bare dot.
+		const sourceRect = panelGrowthSource(note);
 		acknowledgeDot(note.id); // opening the Expanded Note Acknowledges its dot (ADR-0010)
 		const video = document.querySelector('video');
 		if (!document.getElementById(PANEL_ID)) {
@@ -612,10 +701,11 @@
 		positionPanel(panel);
 		panel.focus();
 		const anchorDot = dotFor(note.id);
-		anchorDot?.classList.add(DOT_OPEN_CLASS);
+		anchorDot?.classList.add(DOT_OPEN_CLASS); // hides its preview on the first FLIP frame
 		// Pin the anchor's Cluster fanned for as long as the panel is open, so the
 		// dot does not slide out from under it.
 		anchorDot?.closest('.' + CLUSTER_CLASS)?.classList.add(CLUSTER_PINNED_CLASS);
+		flipPanelOpen(panel, sourceRect); // grow the panel out of that source rect
 
 		// Only a text Note has a conversation to poll; read-only variants (Reaction,
 		// locked Spoiler) just refresh their posted-time label.
@@ -1179,23 +1269,20 @@
 		}
 	});
 
-	// Manually resuming playback closes the panel (without re-pausing) — EXCEPT a
-	// play during the load-churn grace after a Room Feed row opened the panel,
-	// where autoplay kicking in as the watch page settles must not dismiss it.
+	// A play during the arrival grace is autoplay settling in as the watch page
+	// loads (a Room Feed row paused us here) — re-assert the pause so the Unseen
+	// dot(s) stay in view. Otherwise a play is the viewer's deliberate resume:
+	// with an Expanded Note open it dismisses the panel (without re-pausing).
 	document.addEventListener(
 		'play',
 		(event) => {
 			if (!(event.target instanceof HTMLVideoElement)) return;
-			const action = YTB.panelPlayAction({
+			const action = YTB.playAction({
+				withinGrace: Date.now() < arrivalGraceUntil,
 				panelOpen: Boolean(document.getElementById(PANEL_ID)),
-				withinGrace: Date.now() < pendingOpenGuardUntil,
 			});
 			if (action === 'ignore') return;
 			if (action === 'hold') {
-				// Re-assert the pause so the viewer can read the Note. Take the lease
-				// if OPENING didn't (the video wasn't playing yet), so an outside-click
-				// dismissal still resumes the playback the viewer was sent to.
-				pauseLease = true;
 				event.target.pause();
 				return;
 			}
@@ -1229,21 +1316,31 @@
 	}
 
 	/**
-	 * Anchor the alerts stack at the viewer's Notification Position: one of the
-	 * four player edges (default bottom). Each edge centers the stack along
-	 * itself — top/bottom horizontally, left/right vertically. Inline styles own
-	 * the placement so a Settings change re-anchors an existing stack live; the
-	 * stylesheet only carries the static column look.
+	 * Anchor the alerts stack at the viewer's Notification Position AND lay its
+	 * children ALONG that edge: one of the four player edges (default bottom).
+	 * Top/bottom become a centered horizontal row that wraps to another line
+	 * (away from the edge) when it outgrows the player; left/right stay a vertical
+	 * column. Inline styles own placement and axis so a Settings change re-anchors
+	 * and re-flows an existing stack live; the stylesheet carries only the static
+	 * look (gap, z-index).
 	 */
 	function applyAlertsPosition(wrap, host) {
 		const edge = YTB.NOTIFICATION_EDGES.includes(notificationPosition) ? notificationPosition : 'bottom';
+		const horizontal = edge === 'top' || edge === 'bottom';
 		wrap.style.top = '';
 		wrap.style.bottom = '';
 		wrap.style.left = '';
 		wrap.style.right = '';
 		wrap.style.transform = '';
+		// Main axis runs along the edge; a row wraps (bottom wraps upward so new
+		// lines stay off the edge), a column never wraps (height cap deferred).
+		wrap.style.flexDirection = horizontal ? 'row' : 'column';
+		wrap.style.flexWrap = edge === 'bottom' ? 'wrap-reverse' : edge === 'top' ? 'wrap' : 'nowrap';
+		wrap.style.justifyContent = horizontal ? 'center' : 'flex-start';
+		// Cap a row to the player so it wraps instead of clipping; a column is free.
+		wrap.style.maxWidth = horizontal ? 'calc(100% - 32px)' : '';
 		wrap.style.alignItems = edge === 'left' ? 'flex-start' : edge === 'right' ? 'flex-end' : 'center';
-		if (edge === 'top' || edge === 'bottom') {
+		if (horizontal) {
 			wrap.style.left = '50%';
 			wrap.style.transform = 'translateX(-50%)';
 			if (edge === 'top') wrap.style.top = alertsTopPx(host) + 'px';
@@ -1323,8 +1420,7 @@
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const burst = document.createElement('div');
 		burst.className = 'ytb-alert-burst';
-		// Concurrent Reactions fan out horizontally instead of replacing.
-		burst.style.setProperty('--ytb-fan', `${((burstCount++ % 5) - 2) * 48}px`);
+		// Spacing is the flex row's job now; the burst only floats and fades.
 		const emoji = document.createElement('div');
 		emoji.className = 'ytb-alert-burst-emoji';
 		emoji.textContent = note.body;
@@ -1361,12 +1457,43 @@
 			return;
 		}
 		for (const note of YTB.crossedNotes(notesForCurrentVideo(), previousTime, currentTime)) {
-			if (note.kind === 'emoji') showReactionBurst(note);
-			else showNoteCard(note);
-			// The same natural crossing that fires the Playback Notification also
-			// Acknowledges the dot (ADR-0010) — a no-op unless it was Unseen.
+			// Queue the entrance (drained one-per-beat, in timestamp order) but
+			// Acknowledge NOW: the crossing itself is the ADR-0010 trigger, not the
+			// staggered reveal — a no-op unless the dot was Unseen.
+			alertQueue.push(note);
 			acknowledgeDot(note.id);
 		}
+		scheduleAlertDrain();
+	}
+
+	// Reveal one queued Note per ENTRANCE_STAGGER_MS beat, in the order queued
+	// (crossedNotes is timestamp-sorted). Earlier notifications stay on screen as
+	// later ones arrive — each lives its own lifetime from its own entrance.
+	function scheduleAlertDrain() {
+		if (alertDrainTimer !== null || alertQueue.length === 0) return;
+		drainNextAlert();
+	}
+
+	function drainNextAlert() {
+		const note = alertQueue.shift();
+		if (!note) {
+			alertDrainTimer = null;
+			return;
+		}
+		if (note.kind === 'emoji') showReactionBurst(note);
+		else showNoteCard(note);
+		alertDrainTimer = setTimeout(drainNextAlert, ENTRANCE_STAGGER_MS);
+	}
+
+	// Drop every on-screen and queued notification and cancel the drain — for a
+	// Notes-off toggle and a real video change (a duplicate navigate keeps them).
+	function resetAlerts() {
+		alertQueue = [];
+		if (alertDrainTimer !== null) {
+			clearTimeout(alertDrainTimer);
+			alertDrainTimer = null;
+		}
+		document.getElementById(ALERTS_ID)?.replaceChildren();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -1378,19 +1505,19 @@
 		// A duplicate navigation-finish for the SAME video — YouTube re-emits these
 		// as the watch page loads (content.js forwards every yt-navigate-finish).
 		// Treat it as a no-op: tearing the panel down here is what dismissed an
-		// Expanded Note a Room Feed row had just opened. Keep the panel, lease, and
-		// alerts; only reconcile dots.
+		// Expanded Note, and clearing the arrival grace here would let autoplay
+		// escape the arrival pause. Keep the panel, lease, grace, and alerts; only
+		// reconcile dots.
 		if (nextVideoId === currentVideoId) {
 			renderDots();
 			return;
 		}
 		currentVideoId = nextVideoId;
 		lastPlaybackTime = null;
-		burstCount = 0;
-		pendingOpenGuardUntil = 0;
+		arrivalGraceUntil = 0;
 		dismissPanel({ resume: false });
 		pauseLease = false;
-		document.getElementById(ALERTS_ID)?.replaceChildren();
+		resetAlerts(); // clear on-screen + queued, cancel the drain
 		renderDots();
 	});
 
@@ -1535,15 +1662,28 @@
         from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ytb-accent-500) 75%, transparent); }
         to   { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ytb-accent-500) 0%, transparent); }
       }
-      /* While a Note's panel is open, its own hover preview stays hidden. */
-      .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} { opacity: 0 !important; pointer-events: none !important; }
+      /* While a Note's panel is open, its own hover preview stays hidden — and
+         hidden INSTANTLY (no fade), so it vanishes on the first frame of the
+         Expanded Note that grows out of it rather than lingering beside it. */
+      .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} {
+        opacity: 0 !important;
+        transform: translateX(-50%) scale(0.6) !important;
+        transition: none !important;
+        pointer-events: none !important;
+      }
 
-      /* --- Note Preview: opaque warm card (apricot system) --- */
+      /* --- Note Preview: opaque warm card (apricot system) ---
+         The preview unfolds OUT OF the dot on hover: it scales up from the dot's
+         own point (transform-origin sits 15px below the card's bottom edge — the
+         18px bottom gap less the 3px dot half-height), so it grows from the dot
+         rather than fading in from its own centre. Pure CSS off the hover state;
+         reduced-motion collapses it to an opacity-only fade below. */
       .${PREVIEW_CLASS} {
         position: absolute;
         bottom: 18px;
         left: 50%;
-        transform: translateX(-50%);
+        transform-origin: 50% calc(100% + 15px);
+        transform: translateX(-50%) scale(0.6);
         width: max-content;
         max-width: 240px;
         padding: 9px 11px;
@@ -1556,7 +1696,7 @@
         text-align: left;
         opacity: 0;
         pointer-events: none;
-        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out), transform var(--ytb-dur-quick) var(--ytb-ease-spring);
         z-index: 60;
       }
       /* Transparent hover bridge: a dot-width column spanning the gap between the
@@ -1578,6 +1718,7 @@
       .${DOT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
         opacity: 1;
+        transform: translateX(-50%) scale(1);
       }
       .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
         pointer-events: auto;
@@ -1640,7 +1781,10 @@
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
 
-      /* --- the Expanded Note: opaque warm surface (cream / espresso) --- */
+      /* --- the Expanded Note: opaque warm surface (cream / espresso) ---
+         Its entrance is a JS FLIP (flipPanelOpen) that grows the panel out of the
+         Note Preview — or the dot — it replaced, so there is no standalone pop-in
+         keyframe here. (ytb-pop-in still animates Replies and the delete confirm.) */
       #${PANEL_ID} {
         position: absolute;
         z-index: 2100;
@@ -1653,7 +1797,6 @@
         box-shadow: var(--ytb-e-dialog);
         font: 13px/1.45 var(--ytb-font);
         text-align: left;
-        animation: ytb-pop-in var(--ytb-dur-base) var(--ytb-ease-spring);
       }
       #${PANEL_ID}:focus { outline: none; }
       @keyframes ytb-pop-in {
@@ -1821,20 +1964,20 @@
       .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
 
       /* --- Playback Notifications ---
-         Placement (edge anchoring + alignment) is inline via
-         applyAlertsPosition; only the static column look lives here. */
+         Placement AND main axis (row for top/bottom, column for left/right, plus
+         wrap and centering) are inline via applyAlertsPosition; only the static
+         look lives here. */
       #${ALERTS_ID} {
         position: absolute;
         z-index: 2050;
         display: flex;
-        flex-direction: column;
         gap: 8px;
         pointer-events: none;
       }
       .ytb-alert-card {
         pointer-events: auto;
         width: max-content;
-        max-width: 260px;
+        max-width: 200px;
         box-sizing: border-box;
         padding: 9px 12px;
         border: 1px solid var(--ytb-line);
@@ -1865,7 +2008,6 @@
       .ytb-alert-burst {
         pointer-events: none;
         text-align: center;
-        transform: translateX(var(--ytb-fan, 0));
         animation: ytb-burst ${REACTION_BURST_MS}ms ease-out forwards;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
@@ -1885,10 +2027,20 @@
       }
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
-        #${PANEL_ID}, .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
         /* The Cluster fan is a reachability affordance, not decoration, so it
            still applies — it just snaps instead of animating. */
         .${DOT_CLASS} { transition: none; }
+        /* The Note Preview's unfold-from-the-dot collapses to a plain opacity
+           fade: the centring translate stays constant (so nothing animates), but
+           the scale and its transition are dropped. The Expanded Note's FLIP is
+           skipped in JS on this same query, fading opacity only. */
+        .${PREVIEW_CLASS},
+        .${DOT_CLASS}:hover .${PREVIEW_CLASS},
+        .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
+          transform: translateX(-50%);
+          transition: opacity var(--ytb-dur-quick) linear;
+        }
         /* Unseen: a static 2px accent ring replaces the looping halo. */
         .${DOT_UNSEEN_CLASS} {
           animation: none;

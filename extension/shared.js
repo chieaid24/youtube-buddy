@@ -163,57 +163,56 @@ const YTB = {
 		return await YTB._storageSet({ homeSectionHidden: hidden === true });
 	},
 
-	// A clicked Room Feed reply/mention row lives on the home route; the Note it
-	// points at is rendered by notes.js on the watch route. The two surfaces
-	// hand off through this single storage slot: the row records the target, and
-	// notes.js consumes it on the first Room read after arrival to open the
-	// Expanded Note. Storage (not just an in-memory event) so the handshake
-	// survives BOTH an SPA navigation — where the content scripts stay alive per
-	// ADR-0001 — and a full page reload. The TTL keeps a stale target (an
-	// abandoned click, a deleted Note) from popping a panel on a later visit.
-	PENDING_NOTE_OPEN_TTL_MS: 30_000,
+	// A clicked Room Feed reply/mention row lives on the home route; the video it
+	// points at is rendered by notes.js on the watch route. The two surfaces hand
+	// off through this single storage slot: the row records the videoId, and
+	// notes.js consumes it on the first Room read after arrival — pausing the
+	// player only when an Unseen dot is on that video (ADR-0010). Storage (not just
+	// an in-memory event) so the handshake survives BOTH an SPA navigation — where
+	// the content scripts stay alive per ADR-0001 — and a full page reload. The TTL
+	// keeps a stale target (an abandoned click) from pausing a video days later.
+	PENDING_ARRIVAL_TTL_MS: 30_000,
 
-	// How long after a Room-Feed-initiated Expanded Note open notes.js treats a
-	// video `play` as load-time churn (the watch page's autoplay kicking in as it
-	// settles) rather than the viewer's deliberate resume: during this window the
-	// panel is kept open and the video re-paused; afterwards a play dismisses it
-	// as usual. Long enough to outlast autoplay-on-arrival, short enough not to
-	// swallow a real later resume. See YTB.panelPlayAction.
+	// How long after arriving from a Room Feed row notes.js treats a video `play`
+	// as load-time churn (the watch page's autoplay kicking in as it settles)
+	// rather than the viewer's deliberate resume: during this window the arrival
+	// pause is re-asserted; afterwards a play is the viewer's. Long enough to
+	// outlast autoplay-on-arrival, short enough not to swallow a real later resume.
+	// See YTB.playAction.
 	PANEL_LOAD_GRACE_MS: 4_000,
 
 	/**
-	 * Record the Note a Room Feed row points at, for notes.js to open after the
-	 * navigation to `videoId`. A single slot: a newer click replaces an older
+	 * Record the video a Room Feed row points at, for notes.js to consult after
+	 * the navigation to `videoId`. A single slot: a newer click replaces an older
 	 * unconsumed one.
-	 * @param {{videoId: string, noteId: string}} target
-	 * @returns {Promise<boolean>} false when the target is malformed or context is gone.
+	 * @param {string} videoId
+	 * @returns {Promise<boolean>} false when the videoId is missing or context is gone.
 	 */
-	async setPendingNoteOpen(target) {
-		const videoId = target && target.videoId ? String(target.videoId) : '';
-		const noteId = target && target.noteId ? String(target.noteId) : '';
-		if (!videoId || !noteId) return false;
-		return await YTB._storageSet({ pendingNoteOpen: { videoId, noteId, at: Date.now() } });
+	async setPendingArrival(videoId) {
+		const id = videoId ? String(videoId) : '';
+		if (!id) return false;
+		return await YTB._storageSet({ pendingArrival: { videoId: id, at: Date.now() } });
 	},
 
 	/**
-	 * Read the pending open-target, or null when absent, malformed, or past its
-	 * TTL. Never throws on a stale/garbage value.
-	 * @returns {Promise<{videoId: string, noteId: string, at: number}|null>}
+	 * Read the pending arrival, or null when absent, malformed, or past its TTL.
+	 * Never throws on a stale/garbage value.
+	 * @returns {Promise<{videoId: string, at: number}|null>}
 	 */
-	async getPendingNoteOpen() {
-		const { pendingNoteOpen } = await YTB._storageGet('pendingNoteOpen');
-		if (!pendingNoteOpen || !pendingNoteOpen.videoId || !pendingNoteOpen.noteId) return null;
-		if (Date.now() - (Number(pendingNoteOpen.at) || 0) > YTB.PENDING_NOTE_OPEN_TTL_MS) return null;
-		return pendingNoteOpen;
+	async getPendingArrival() {
+		const { pendingArrival } = await YTB._storageGet('pendingArrival');
+		if (!pendingArrival || !pendingArrival.videoId) return null;
+		if (Date.now() - (Number(pendingArrival.at) || 0) > YTB.PENDING_ARRIVAL_TTL_MS) return null;
+		return pendingArrival;
 	},
 
 	/**
-	 * Clear the pending open-target once notes.js has opened its Expanded Note
+	 * Clear the pending arrival once notes.js has consumed it on the target video
 	 * (or on expiry). Idempotent.
 	 * @returns {Promise<boolean>}
 	 */
-	async clearPendingNoteOpen() {
-		return await YTB._storageSet({ pendingNoteOpen: null });
+	async clearPendingArrival() {
+		return await YTB._storageSet({ pendingArrival: null });
 	},
 
 	// --- Settings (per install, chrome.storage.local — mirrors homeSectionHidden) ---
@@ -670,18 +669,19 @@ const YTB = {
 	},
 
 	/**
-	 * What a video `play` event does to an open Expanded Note — a pure decision so
-	 * notes.js stays a thin executor and the load-churn contract is testable. A
-	 * play inside the grace window that follows a Room Feed row opening the panel
-	 * (the watch page's autoplay starting as it settles, or a duplicate player
-	 * spin-up) is 'hold': re-pause and keep the panel open. Any later play is the
-	 * viewer's deliberate resume — 'dismiss'. With no panel open it's 'ignore'.
-	 * @param {{panelOpen: boolean, withinGrace: boolean}} state
-	 * @returns {'ignore'|'hold'|'dismiss'}
+	 * What a video `play` event does — a pure decision so notes.js stays a thin
+	 * executor and both contracts are testable. A play inside the arrival grace
+	 * (ADR-0010: the watch page's autoplay settling after a Room Feed row paused us
+	 * on a video with Unseen dots, or a duplicate player spin-up) is 'hold':
+	 * re-pause, whatever else is on screen. Otherwise a play with an Expanded Note
+	 * open is the viewer's deliberate resume — 'dismiss' the panel; with no panel
+	 * it's 'ignore'.
+	 * @param {{withinGrace: boolean, panelOpen: boolean}} state
+	 * @returns {'hold'|'dismiss'|'ignore'}
 	 */
-	panelPlayAction({ panelOpen, withinGrace }) {
-		if (!panelOpen) return 'ignore';
-		return withinGrace ? 'hold' : 'dismiss';
+	playAction({ withinGrace, panelOpen }) {
+		if (withinGrace) return 'hold';
+		return panelOpen ? 'dismiss' : 'ignore';
 	},
 
 	/**
@@ -943,24 +943,11 @@ const YTB = {
 	},
 
 	/**
-	 * Tooltip for a Room Feed row's quoted-body link. The visible text is the
-	 * Note's or Reply's body, so the link's destination — the Note's video, at the
-	 * Note's moment — is nowhere on the row; the tooltip names both:
-	 * `Open this note on "Title" at 6:52`. The `on "Title"` clause drops when the
-	 * Note carries no title, the same no-placeholder rule as videoContext.
-	 * @param {{videoTitle?: string, timestamp: number}} note
-	 * @returns {string}
-	 */
-	noteLinkTooltip(note) {
-		const context = YTB.videoContext(note);
-		const at = YTB.formatTime(note && note.timestamp);
-		return 'Open this note ' + (context === '' ? '' : context + ' ') + 'at ' + at;
-	},
-
-	/**
-	 * Tooltip for a System Message / Watch Notice's title link, which opens the
-	 * video's watch page: `Watch "Title"`. Falls back to `Watch this video` when
-	 * the row has no title, mirroring the link's own "a video" label.
+	 * Tooltip for any Room Feed link that opens a video's watch page — a System
+	 * Message / Watch Notice title link, or a Note/Reply row's quoted body (which
+	 * now navigates to the video at your own place, no seek; ADR-0010): `Watch
+	 * "Title"`. Falls back to `Watch this video` when the row has no title,
+	 * mirroring the link's own "a video" label.
 	 * @param {?string} title
 	 * @returns {string}
 	 */
