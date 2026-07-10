@@ -22,9 +22,16 @@
 //     crossing — rewind-and-replay triggers again, direct seeks stay silent.
 //     They render at the viewer's Notification Position (one of four player
 //     edges, default bottom; live via chrome.storage.onChanged).
+//   - Unseen pulses (ADR-0010): a Note Dot carrying an Unseen Mention or
+//     Reply pulses an apricot halo until Acknowledged — by hovering the dot,
+//     opening its Expanded Note, or a natural forward crossing. The derivation
+//     is pure (YTB.unseenNoteIds / YTB.acknowledgeTargets); the seen set is
+//     private, per install, Room-scoped chrome.storage.local (YTB.markSeen /
+//     YTB.pruneSeen) and never reaches the backend.
 //   - Notes Visibility ("Notes off"): while the notesHidden setting is on,
 //     this file renders NOTHING — no dots, previews, panels, or Playback
-//     Notifications (composer.js removes the + button) — updating live.
+//     Notifications (composer.js removes the + button) — and Acknowledges
+//     nothing — updating live.
 //
 // Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
 // by theme.js (the shared on-video apricot foundation); theme.js also isolates
@@ -47,6 +54,7 @@
 	const DOT_REACTION_CLASS = 'ytb-note-dot-reaction';
 	const DOT_LOCKED_CLASS = 'ytb-note-dot-locked';
 	const DOT_OPEN_CLASS = 'ytb-note-dot-open'; // suppresses the open Note's own preview
+	const DOT_UNSEEN_CLASS = 'ytb-note-dot-unseen'; // pulses the apricot halo (ADR-0010)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -68,6 +76,12 @@
 	let currentVideoId = null;
 	let lastPlaybackTime = null; // previous timeupdate, for natural crossings
 	let burstCount = 0; // fans concurrent Reaction bursts apart
+	// Unseen state (ADR-0010). `seenSet` mirrors the Room's persisted seen list
+	// (loaded + pruned on each Room read); `unseenDotIds` is the derived set of
+	// Note ids whose dots pulse, kept synchronous so renderDots (which runs on
+	// every timeupdate) never awaits storage.
+	let seenSet = new Set();
+	let unseenDotIds = new Set();
 
 	// Expanded Note state. `pauseLease` records whether OPENING (the first panel
 	// in a chain of replacements) paused a playing video: an outside dismissal
@@ -163,9 +177,76 @@
 			list.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
 		}
 		repliesByNoteId = nextReplies;
+		syncSeenState(detail); // async: dots may render below before the pulse set lands
 		renderDots();
 		tryOpenPending(); // a Room Feed row may have asked to open a Note here
 	});
+
+	// ---------------------------------------------------------------------------
+	// Unseen state (ADR-0010): the pulse set and the three Acknowledge triggers.
+	// ---------------------------------------------------------------------------
+
+	/** The Room read shape the pure Unseen helpers take, rebuilt from the maps so
+	 * local appends (ytb:note-posted, appendLocalReply, conversation polls) are
+	 * reflected without waiting for the next Room poll. */
+	function currentRecords() {
+		return {
+			notes: [...notesByVideoId.values()].flat(),
+			replies: [...repliesByNoteId.values()].flat(),
+		};
+	}
+
+	/** Recompute which dots pulse from the current maps + seen set. */
+	function recomputeUnseen() {
+		unseenDotIds = myClientId ? new Set(YTB.unseenNoteIds(currentRecords(), myClientId, seenSet)) : new Set();
+	}
+
+	/**
+	 * Reload (and prune) the Room's persisted seen set after a Room read, then
+	 * derive the pulse set. Pruning only follows a SUCCESSFUL read — a failed
+	 * GET broadcasts empty arrays, and pruning against those would wipe the set
+	 * and resurrect every Acknowledged pulse. An open Expanded Note Acknowledges
+	 * anything the read just added beneath it: its conversation is on screen.
+	 */
+	async function syncSeenState(detail) {
+		const code = activeRoomCode;
+		if (!code || !myClientId) {
+			seenSet = new Set();
+			unseenDotIds = new Set();
+			return;
+		}
+		let kept;
+		if (detail.ok) {
+			const live = [];
+			for (const note of detail.notes || []) if (note && note.id) live.push(note.id);
+			for (const reply of detail.replies || []) if (reply && reply.id) live.push(reply.id);
+			kept = await YTB.pruneSeen(code, live);
+		} else {
+			kept = await YTB.seenIds(code);
+		}
+		if (!YTB.isContextActive() || activeRoomCode !== code) return; // Room changed while awaiting
+		seenSet = new Set(kept);
+		recomputeUnseen();
+		if (openNote) acknowledgeDot(openNote.id);
+		renderDots();
+	}
+
+	/**
+	 * Acknowledge one Note Dot: clear EVERY Unseen item anchored to it at once —
+	 * the Mention and all Unseen Replies beneath it — and stop its pulse for
+	 * good. Idempotent and cheap on a dot with nothing Unseen (the common case:
+	 * every hover and crossing routes through here). While Notes Visibility is
+	 * off nothing renders and nothing is Acknowledged.
+	 */
+	function acknowledgeDot(noteId) {
+		if (notesHidden || !noteId || !unseenDotIds.has(noteId)) return;
+		const ids = YTB.acknowledgeTargets(currentRecords(), myClientId, noteId);
+		if (ids.length === 0) return;
+		for (const id of ids) seenSet.add(id);
+		unseenDotIds.delete(noteId);
+		YTB.markSeen(activeRoomCode, ids); // best-effort persist; the in-memory set already stopped the pulse
+		renderDots();
+	}
 
 	/**
 	 * If a Room Feed row queued a Note to open and this video now carries it, open
@@ -288,12 +369,23 @@
 					e.preventDefault();
 					onDotActivate(dot);
 				});
+				// Hovering an Unseen dot Acknowledges it (ADR-0010) — the Note Preview
+				// that hover opens is the eye-catch the pulse asked for; keyboard
+				// focus, which opens the same preview, Acknowledges identically.
+				// (mouseenter never bubbles, so it needs no swallowing above.)
+				dot.addEventListener('mouseenter', () => acknowledgeDot(dot.dataset.ytbNoteId));
+				dot.addEventListener('focus', () => acknowledgeDot(dot.dataset.ytbNoteId));
 				bar.appendChild(dot);
 			}
 			dot.style.left = (fraction * 100).toFixed(3) + '%';
 			dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
 			// The open Note's own hover preview is redundant next to its panel.
 			dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
+			// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
+			// construction: the halo is box-shadow only, so neighbouring dots —
+			// which sit at their true, possibly overlapping fractions — are never
+			// displaced.
+			dot.classList.toggle(DOT_UNSEEN_CLASS, unseenDotIds.has(id));
 
 			const count = replyCount(id);
 			const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count]);
@@ -418,6 +510,7 @@
 	async function openPanel(note) {
 		const host = player();
 		if (!host || !note) return;
+		acknowledgeDot(note.id); // opening the Expanded Note Acknowledges its dot (ADR-0010)
 		const video = document.querySelector('video');
 		if (!document.getElementById(PANEL_ID)) {
 			pauseLease = false;
@@ -862,6 +955,11 @@
 
 		if (result.ok) {
 			repliesByNoteId.set(note.id, result.replies);
+			// Replies surfacing while their conversation is OPEN are on screen —
+			// Acknowledge them now so closing the panel never starts a pulse for
+			// something the viewer just read.
+			recomputeUnseen();
+			acknowledgeDot(note.id);
 			renderReplies(panel, result.replies);
 			const { sharing } = await YTB.getConfig();
 			if (!YTB.isContextActive()) return;
@@ -1174,6 +1272,9 @@
 		for (const note of YTB.crossedNotes(notesForCurrentVideo(), previousTime, currentTime)) {
 			if (note.kind === 'emoji') showReactionBurst(note);
 			else showNoteCard(note);
+			// The same natural crossing that fires the Playback Notification also
+			// Acknowledges the dot (ADR-0010) — a no-op unless it was Unseen.
+			acknowledgeDot(note.id);
 		}
 	}
 
@@ -1272,13 +1373,36 @@
         outline: 2px solid var(--ytb-accent-500);
         outline-offset: 1px;
       }
-      /* Locked Spoilers stay visually obscured but are click-to-seek (Go here). */
-      .${DOT_LOCKED_CLASS} {
-        filter: grayscale(1);
-        opacity: 0.55;
-        cursor: pointer;
+      /* Locked Spoilers stay visually obscured. The obscuring is a veil overlay
+         rather than filter/opacity on the dot itself: a filter would gray out —
+         and element opacity would fade — the apricot Unseen halo and the hover
+         preview, both rendered on/inside this same element. (The preview child
+         carries its own z-index, so it paints above the veil.) */
+      .${DOT_LOCKED_CLASS} { cursor: pointer; }
+      .${DOT_LOCKED_CLASS}::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: rgba(58, 58, 58, 0.78);
+        transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
-      .${DOT_LOCKED_CLASS}:hover, .${DOT_LOCKED_CLASS}:focus-visible { opacity: 0.85; }
+      .${DOT_LOCKED_CLASS}:hover::before, .${DOT_LOCKED_CLASS}:focus-visible::before {
+        background: rgba(58, 58, 58, 0.45);
+      }
+
+      /* --- Unseen pulse (ADR-0010): an expanding apricot halo, box-shadow
+         only — the dot never moves, resizes, or recolors, and neighbouring
+         dots (at their true, possibly overlapping fractions) are never
+         displaced. Shares the popup Waiting dot's ~1.6s breathing rhythm
+         (DESIGN.md section 2). */
+      .${DOT_UNSEEN_CLASS} {
+        animation: ytb-unseen-pulse 1.6s var(--ytb-ease-out) infinite;
+      }
+      @keyframes ytb-unseen-pulse {
+        from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ytb-accent-500) 75%, transparent); }
+        to   { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ytb-accent-500) 0%, transparent); }
+      }
       /* While a Note's panel is open, its own hover preview stays hidden. */
       .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} { opacity: 0 !important; pointer-events: none !important; }
 
@@ -1630,6 +1754,11 @@
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
         #${PANEL_ID}, .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        /* Unseen: a static 2px accent ring replaces the looping halo. */
+        .${DOT_UNSEEN_CLASS} {
+          animation: none;
+          box-shadow: 0 0 0 2px var(--ytb-accent-500);
+        }
         .ytb-panel-send, .ytb-alert-card {
           transform: none;
           transition: opacity var(--ytb-dur-base) linear;

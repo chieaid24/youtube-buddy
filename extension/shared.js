@@ -110,7 +110,8 @@ const YTB = {
 	// --- storage (chrome.storage.local) ---
 	// Stored keys: name, code, clientId, sharing, homeSectionHidden, the Settings
 	// keys (theme, spoilerDefault, notificationPosition, notesHidden,
-	// buddyProgressHidden), and the Room-scoped buddyColors + dismissedVideos maps.
+	// buddyProgressHidden), and the Room-scoped buddyColors + dismissedVideos +
+	// seenItems maps.
 
 	/**
 	 * Read the full config, applying defaults for unset keys.
@@ -970,6 +971,127 @@ const YTB = {
 		return all[code];
 	},
 
+	// --- Unseen Mentions & Replies (ADR-0010) ---
+	// A Note or Reply addressed to the viewer is Unseen until Acknowledged; its
+	// Note Dot pulses on the Video Timeline. The derivation is pure (these two
+	// helpers); the seen set lives in chrome.storage.local below — private, per
+	// install, Room-scoped, structurally identical to a Dismiss. It never
+	// reaches the backend.
+
+	/**
+	 * The Note ids whose Video Timeline dots pulse: each anchors at least one
+	 * Unseen item for the viewer — the Note itself as an Unseen Mention
+	 * (noteAddressesMe), or an Unseen Reply beneath it (replyAddressesMe) —
+	 * exactly the records the Room Feed surfaces, minus the seen set. A
+	 * Reaction never pulses (no Mentions, no Replies — enforced here even
+	 * against a malformed record); a locked Spoiler can. A Reply whose parent
+	 * Note is absent from the read has no dot to anchor to and is ignored.
+	 * @param {{notes?: Array, replies?: Array}} records a Room read
+	 * @param {string} myClientId
+	 * @param {Iterable<string>} [seenIds] the Room's Acknowledged ids
+	 * @returns {Array<string>} Note ids to pulse
+	 */
+	unseenNoteIds(records, myClientId, seenIds) {
+		const seen = new Set(seenIds || []);
+		const notes = (records && records.notes) || [];
+		const replies = (records && records.replies) || [];
+		const noteById = new Map(notes.filter((note) => note && note.id).map((note) => [note.id, note]));
+		const out = new Set();
+		for (const note of notes) {
+			if (!note || note.kind === 'emoji' || seen.has(note.id)) continue;
+			if (YTB.noteAddressesMe(note, myClientId)) out.add(note.id);
+		}
+		for (const reply of replies) {
+			if (!reply || seen.has(reply.id)) continue;
+			const parent = noteById.get(reply.noteId);
+			if (!parent || parent.kind === 'emoji') continue;
+			if (YTB.replyAddressesMe(reply, parent, myClientId)) out.add(parent.id);
+		}
+		return [...out];
+	},
+
+	/**
+	 * The exact ids Acknowledging one Note Dot clears: every item addressed to
+	 * the viewer anchored to that dot — the Note itself when it Mentions them,
+	 * plus every Reply beneath it addressed to them. Independent of the seen
+	 * set (re-adding a seen id is a no-op), so Acknowledge stays idempotent.
+	 * Empty for a Reaction, an unknown id, or a dot with nothing addressed to
+	 * the viewer.
+	 * @param {{notes?: Array, replies?: Array}} records a Room read
+	 * @param {string} myClientId
+	 * @param {string} noteId the Acknowledged dot's Note id
+	 * @returns {Array<string>}
+	 */
+	acknowledgeTargets(records, myClientId, noteId) {
+		const notes = (records && records.notes) || [];
+		const note = notes.find((candidate) => candidate && candidate.id === noteId);
+		if (!note || note.kind === 'emoji') return [];
+		const ids = [];
+		if (YTB.noteAddressesMe(note, myClientId)) ids.push(note.id);
+		for (const reply of (records && records.replies) || []) {
+			if (reply && reply.id && reply.noteId === noteId && YTB.replyAddressesMe(reply, note, myClientId)) ids.push(reply.id);
+		}
+		return ids;
+	},
+
+	/**
+	 * The Note/Reply ids this viewer has Acknowledged in one Room.
+	 * @param {string} code Room Code (already normalized).
+	 * @returns {Promise<Array<string>>}
+	 */
+	async seenIds(code) {
+		if (!code) return [];
+		const stored = await YTB._storageGet('seenItems');
+		const all = (stored && stored.seenItems) || {};
+		return Array.isArray(all[code]) ? all[code] : [];
+	},
+
+	/**
+	 * Acknowledge: persist ids into the Room's seen set so the dot never
+	 * pulses again — across reloads, SPA navigations, and sessions. Idempotent,
+	 * local-only (no backend write); a no-op write is skipped entirely.
+	 * @param {string} code Room Code (already normalized).
+	 * @param {Iterable<string>} ids Note/Reply ids (from acknowledgeTargets).
+	 * @returns {Promise<Array<string>>} the Room's updated seen list.
+	 */
+	async markSeen(code, ids) {
+		const additions = [...(ids || [])].filter((id) => typeof id === 'string' && id !== '');
+		if (!code || additions.length === 0) return YTB.seenIds(code);
+		const stored = await YTB._storageGet('seenItems');
+		if (!YTB.isContextActive()) return [];
+		const all = (stored && stored.seenItems) || {};
+		const room = Array.isArray(all[code]) ? all[code] : [];
+		const merged = new Set(room);
+		for (const id of additions) merged.add(id);
+		if (merged.size === room.length) return room;
+		all[code] = [...merged];
+		await YTB._storageSet({ seenItems: all });
+		return all[code];
+	},
+
+	/**
+	 * Prune the Room's seen set against a (successful) Room read: ids no longer
+	 * live — aged out on the 14-day TTL, or deleted — are dropped so the set
+	 * cannot grow without bound. Never prune against a FAILED read: its empty
+	 * arrays would wipe the set and resurrect every Acknowledged pulse.
+	 * @param {string} code Room Code (already normalized).
+	 * @param {Iterable<string>} liveIds every Note + Reply id in the read.
+	 * @returns {Promise<Array<string>>} the Room's surviving seen list.
+	 */
+	async pruneSeen(code, liveIds) {
+		if (!code) return [];
+		const stored = await YTB._storageGet('seenItems');
+		if (!YTB.isContextActive()) return [];
+		const all = (stored && stored.seenItems) || {};
+		const room = Array.isArray(all[code]) ? all[code] : [];
+		const live = new Set(liveIds || []);
+		const kept = room.filter((id) => live.has(id));
+		if (kept.length === room.length) return room;
+		all[code] = kept;
+		await YTB._storageSet({ seenItems: all });
+		return kept;
+	},
+
 	/** Local calendar day of an epoch-ms instant, e.g. "2026-07-05". */
 	_dayKey(ms) {
 		const d = new Date(Number(ms) || 0);
@@ -993,6 +1115,35 @@ const YTB = {
 			month: 'short',
 			day: 'numeric',
 		});
+	},
+
+	/**
+	 * Whether a Note is addressed to the viewer: a FOREIGN Note whose `mentions`
+	 * include their Client ID (ADR-0006). This is the one "addressed to me" rule
+	 * for Notes — the Room Feed (buildFeed) and the Unseen derivation
+	 * (unseenNoteIds, ADR-0010) both consume it, so the two can never drift.
+	 * @param {?{clientId?: string, mentions?: Array<string>}} note
+	 * @param {string} myClientId
+	 * @returns {boolean}
+	 */
+	noteAddressesMe(note, myClientId) {
+		if (!note || note.clientId === myClientId) return false;
+		return Array.isArray(note.mentions) && note.mentions.includes(myClientId);
+	},
+
+	/**
+	 * Whether a Reply is addressed to the viewer: a FOREIGN Reply that either
+	 * sits under the viewer's own Note or Mentions them. The Room Feed and the
+	 * Unseen derivation share this rule too (see noteAddressesMe).
+	 * @param {?{clientId?: string, mentions?: Array<string>}} reply
+	 * @param {?{clientId?: string}} parentNote the Reply's parent Note, or null
+	 * @param {string} myClientId
+	 * @returns {boolean}
+	 */
+	replyAddressesMe(reply, parentNote, myClientId) {
+		if (!reply || reply.clientId === myClientId) return false;
+		if (parentNote && parentNote.clientId === myClientId) return true;
+		return Array.isArray(reply.mentions) && reply.mentions.includes(myClientId);
 	},
 
 	/**
@@ -1026,23 +1177,24 @@ const YTB = {
 		const playlist = (records && records.playlist) || [];
 		const progress = (records && records.progress) || [];
 		const noteById = new Map(notes.map((note) => [note.id, note]));
-		const mentionsMe = (record) => Array.isArray(record.mentions) && record.mentions.includes(myClientId);
 
 		const items = [];
 		for (const reply of replies) {
-			if (!reply || reply.clientId === myClientId) continue; // my own writes are not news to me
-			const parent = noteById.get(reply.noteId);
+			if (!reply) continue;
+			const parent = noteById.get(reply.noteId) || null;
+			// "Addressed to me" is the shared replyAddressesMe rule (own writes are
+			// never news to me); the Unseen derivation consumes the same predicate.
+			if (!YTB.replyAddressesMe(reply, parent, myClientId)) continue;
 			const toMyNote = Boolean(parent) && parent.clientId === myClientId;
-			if (!toMyNote && !mentionsMe(reply)) continue;
 			items.push({
 				type: toMyNote ? 'reply' : 'mention',
 				at: Number(reply.createdAt) || 0,
 				reply,
-				note: parent || null,
+				note: parent,
 			});
 		}
 		for (const note of notes) {
-			if (!note || note.clientId === myClientId || !mentionsMe(note)) continue;
+			if (!YTB.noteAddressesMe(note, myClientId)) continue;
 			items.push({ type: 'mention', at: Number(note.createdAt) || 0, note });
 		}
 		// Recommend System Messages: every member gets one per `added` event —
