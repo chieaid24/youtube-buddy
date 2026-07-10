@@ -509,6 +509,72 @@
 	}
 
 	/**
+	 * The rectangle the Expanded Note should grow out of. A Note Preview is only on
+	 * screen while its dot is hovered, so a hovered dot grows the panel from the
+	 * preview card; keyboard activation (:focus-visible, no hover) — and any dot
+	 * whose preview is already suppressed, or a programmatic open with no dot yet —
+	 * grows it from the dot itself. Returns null when there is no dot to grow from.
+	 */
+	function panelGrowthSource(note) {
+		const dot = dotFor(note.id);
+		if (!dot) return null;
+		const preview = dot.querySelector('.' + PREVIEW_CLASS);
+		const fromPreview = preview && dot.matches(':hover') && !dot.classList.contains(DOT_OPEN_CLASS);
+		return (fromPreview ? preview : dot).getBoundingClientRect();
+	}
+
+	function cssDurationMs(value, fallback) {
+		const v = String(value).trim();
+		if (v.endsWith('ms')) return parseFloat(v) || fallback;
+		if (v.endsWith('s')) return parseFloat(v) * 1000 || fallback;
+		return fallback;
+	}
+
+	/**
+	 * Grow the freshly positioned Expanded Note out of `sourceRect` with a FLIP:
+	 * the panel already sits at its final rect, so invert it onto the source rect
+	 * (the Note Preview it replaced, or the dot) and play back to identity. The Web
+	 * Animations API auto-clears the transform when it finishes, leaving no inline
+	 * residue for a later positionPanel re-clamp. Durations and easings come from
+	 * the --ytb-* motion tokens; prefers-reduced-motion collapses to an opacity-only
+	 * fade (no transform), and a missing source falls back to a small scale-up.
+	 */
+	function flipPanelOpen(panel, sourceRect) {
+		if (!panel.isConnected || typeof panel.animate !== 'function') return;
+		const tokens = getComputedStyle(document.documentElement);
+		const duration = cssDurationMs(tokens.getPropertyValue('--ytb-dur-base'), 200);
+		const spring = tokens.getPropertyValue('--ytb-ease-spring').trim() || 'ease-out';
+
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing: 'linear' });
+			return;
+		}
+		const final = panel.getBoundingClientRect();
+		if (final.width < 1 || final.height < 1) return;
+		if (!sourceRect || sourceRect.width < 1 || sourceRect.height < 1) {
+			panel.animate(
+				[
+					{ opacity: 0, transform: 'scale(0.96) translateY(4px)' },
+					{ opacity: 1, transform: 'none' },
+				],
+				{ duration, easing: spring },
+			);
+			return;
+		}
+		const dx = sourceRect.left - final.left;
+		const dy = sourceRect.top - final.top;
+		const sx = sourceRect.width / final.width;
+		const sy = sourceRect.height / final.height;
+		panel.animate(
+			[
+				{ transformOrigin: 'top left', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: 0 },
+				{ transformOrigin: 'top left', transform: 'none', opacity: 1 },
+			],
+			{ duration, easing: spring },
+		);
+	}
+
+	/**
 	 * Open (or replace) the Expanded Note for `note`. Never seeks: it pauses at
 	 * the viewer's current position. Only the FIRST open of a chain acquires the
 	 * pause lease; replacing one panel with another keeps the video paused and
@@ -517,6 +583,9 @@
 	async function openPanel(note) {
 		const host = player();
 		if (!host || !note) return;
+		// Where the Expanded Note grows FROM — captured before anything hides it:
+		// the hovered Note Preview if one is on screen, else the bare dot.
+		const sourceRect = panelGrowthSource(note);
 		acknowledgeDot(note.id); // opening the Expanded Note Acknowledges its dot (ADR-0010)
 		const video = document.querySelector('video');
 		if (!document.getElementById(PANEL_ID)) {
@@ -540,7 +609,8 @@
 		host.appendChild(panel);
 		positionPanel(panel);
 		panel.focus();
-		dotFor(note.id)?.classList.add(DOT_OPEN_CLASS);
+		dotFor(note.id)?.classList.add(DOT_OPEN_CLASS); // hides its preview on the first FLIP frame
+		flipPanelOpen(panel, sourceRect); // grow the panel out of that source rect
 
 		// Only a text Note has a conversation to poll; read-only variants (Reaction,
 		// locked Spoiler) just refresh their posted-time label.
@@ -1449,15 +1519,28 @@
         from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ytb-accent-500) 75%, transparent); }
         to   { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ytb-accent-500) 0%, transparent); }
       }
-      /* While a Note's panel is open, its own hover preview stays hidden. */
-      .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} { opacity: 0 !important; pointer-events: none !important; }
+      /* While a Note's panel is open, its own hover preview stays hidden — and
+         hidden INSTANTLY (no fade), so it vanishes on the first frame of the
+         Expanded Note that grows out of it rather than lingering beside it. */
+      .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} {
+        opacity: 0 !important;
+        transform: translateX(-50%) scale(0.6) !important;
+        transition: none !important;
+        pointer-events: none !important;
+      }
 
-      /* --- Note Preview: opaque warm card (apricot system) --- */
+      /* --- Note Preview: opaque warm card (apricot system) ---
+         The preview unfolds OUT OF the dot on hover: it scales up from the dot's
+         own point (transform-origin sits 15px below the card's bottom edge — the
+         18px bottom gap less the 3px dot half-height), so it grows from the dot
+         rather than fading in from its own centre. Pure CSS off the hover state;
+         reduced-motion collapses it to an opacity-only fade below. */
       .${PREVIEW_CLASS} {
         position: absolute;
         bottom: 18px;
         left: 50%;
-        transform: translateX(-50%);
+        transform-origin: 50% calc(100% + 15px);
+        transform: translateX(-50%) scale(0.6);
         width: max-content;
         max-width: 240px;
         padding: 9px 11px;
@@ -1470,7 +1553,7 @@
         text-align: left;
         opacity: 0;
         pointer-events: none;
-        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out), transform var(--ytb-dur-quick) var(--ytb-ease-spring);
         z-index: 60;
       }
       /* Transparent hover bridge: a dot-width column spanning the gap between the
@@ -1492,6 +1575,7 @@
       .${DOT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
         opacity: 1;
+        transform: translateX(-50%) scale(1);
       }
       .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
         pointer-events: auto;
@@ -1554,7 +1638,10 @@
       .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
 
-      /* --- the Expanded Note: opaque warm surface (cream / espresso) --- */
+      /* --- the Expanded Note: opaque warm surface (cream / espresso) ---
+         Its entrance is a JS FLIP (flipPanelOpen) that grows the panel out of the
+         Note Preview — or the dot — it replaced, so there is no standalone pop-in
+         keyframe here. (ytb-pop-in still animates Replies and the delete confirm.) */
       #${PANEL_ID} {
         position: absolute;
         z-index: 2100;
@@ -1567,7 +1654,6 @@
         box-shadow: var(--ytb-e-dialog);
         font: 13px/1.45 var(--ytb-font);
         text-align: left;
-        animation: ytb-pop-in var(--ytb-dur-base) var(--ytb-ease-spring);
       }
       #${PANEL_ID}:focus { outline: none; }
       @keyframes ytb-pop-in {
@@ -1798,7 +1884,17 @@
       }
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
-        #${PANEL_ID}, .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        /* The Note Preview's unfold-from-the-dot collapses to a plain opacity
+           fade: the centring translate stays constant (so nothing animates), but
+           the scale and its transition are dropped. The Expanded Note's FLIP is
+           skipped in JS on this same query, fading opacity only. */
+        .${PREVIEW_CLASS},
+        .${DOT_CLASS}:hover .${PREVIEW_CLASS},
+        .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
+          transform: translateX(-50%);
+          transition: opacity var(--ytb-dur-quick) linear;
+        }
         /* Unseen: a static 2px accent ring replaces the looping halo. */
         .${DOT_UNSEEN_CLASS} {
           animation: none;
