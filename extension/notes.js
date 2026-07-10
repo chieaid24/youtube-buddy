@@ -64,6 +64,10 @@
 	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
 	const NOTE_CARD_MS = 4000; // text-note Playback Notification lifetime
 	const REACTION_BURST_MS = 2000; // Reaction float-and-fade lifetime
+	// Concurrent crossings enter one-per-beat on this stagger, in timestamp order,
+	// instead of all at once — a staggered entrance, not serialization (each
+	// notification's own lifetime still starts at its own entrance).
+	const ENTRANCE_STAGGER_MS = 100;
 	// Steps larger than this between timeupdates are seeks, not playback.
 	const NATURAL_DELTA_SECONDS = 2;
 
@@ -75,7 +79,10 @@
 	let roster = []; // full Room roster (incl. me), for Room-unique Buddy labels
 	let currentVideoId = null;
 	let lastPlaybackTime = null; // previous timeupdate, for natural crossings
-	let burstCount = 0; // fans concurrent Reaction bursts apart
+	// Crossed Notes wait here and drain one-per-beat (ENTRANCE_STAGGER_MS); the
+	// timer is non-null exactly while a drain is in flight.
+	let alertQueue = [];
+	let alertDrainTimer = null;
 	// Unseen state (ADR-0010). `seenSet` mirrors the Room's persisted seen list
 	// (loaded + pruned on each Room read); `unseenDotIds` is the derived set of
 	// Note ids whose dots pulse, kept synchronous so renderDots (which runs on
@@ -129,7 +136,7 @@
 			notesHidden = changes.notesHidden.newValue === true;
 			if (notesHidden) {
 				dismissPanel(); // dismissal semantics: lease-aware resume
-				document.getElementById(ALERTS_ID)?.replaceChildren();
+				resetAlerts(); // clear on-screen + queued, cancel the drain
 			}
 			renderDots(); // reconciles to zero dots when hidden, back when shown
 		}
@@ -1138,21 +1145,31 @@
 	}
 
 	/**
-	 * Anchor the alerts stack at the viewer's Notification Position: one of the
-	 * four player edges (default bottom). Each edge centers the stack along
-	 * itself — top/bottom horizontally, left/right vertically. Inline styles own
-	 * the placement so a Settings change re-anchors an existing stack live; the
-	 * stylesheet only carries the static column look.
+	 * Anchor the alerts stack at the viewer's Notification Position AND lay its
+	 * children ALONG that edge: one of the four player edges (default bottom).
+	 * Top/bottom become a centered horizontal row that wraps to another line
+	 * (away from the edge) when it outgrows the player; left/right stay a vertical
+	 * column. Inline styles own placement and axis so a Settings change re-anchors
+	 * and re-flows an existing stack live; the stylesheet carries only the static
+	 * look (gap, z-index).
 	 */
 	function applyAlertsPosition(wrap, host) {
 		const edge = YTB.NOTIFICATION_EDGES.includes(notificationPosition) ? notificationPosition : 'bottom';
+		const horizontal = edge === 'top' || edge === 'bottom';
 		wrap.style.top = '';
 		wrap.style.bottom = '';
 		wrap.style.left = '';
 		wrap.style.right = '';
 		wrap.style.transform = '';
+		// Main axis runs along the edge; a row wraps (bottom wraps upward so new
+		// lines stay off the edge), a column never wraps (height cap deferred).
+		wrap.style.flexDirection = horizontal ? 'row' : 'column';
+		wrap.style.flexWrap = edge === 'bottom' ? 'wrap-reverse' : edge === 'top' ? 'wrap' : 'nowrap';
+		wrap.style.justifyContent = horizontal ? 'center' : 'flex-start';
+		// Cap a row to the player so it wraps instead of clipping; a column is free.
+		wrap.style.maxWidth = horizontal ? 'calc(100% - 32px)' : '';
 		wrap.style.alignItems = edge === 'left' ? 'flex-start' : edge === 'right' ? 'flex-end' : 'center';
-		if (edge === 'top' || edge === 'bottom') {
+		if (horizontal) {
 			wrap.style.left = '50%';
 			wrap.style.transform = 'translateX(-50%)';
 			if (edge === 'top') wrap.style.top = alertsTopPx(host) + 'px';
@@ -1232,8 +1249,7 @@
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const burst = document.createElement('div');
 		burst.className = 'ytb-alert-burst';
-		// Concurrent Reactions fan out horizontally instead of replacing.
-		burst.style.setProperty('--ytb-fan', `${((burstCount++ % 5) - 2) * 48}px`);
+		// Spacing is the flex row's job now; the burst only floats and fades.
 		const emoji = document.createElement('div');
 		emoji.className = 'ytb-alert-burst-emoji';
 		emoji.textContent = note.body;
@@ -1270,12 +1286,43 @@
 			return;
 		}
 		for (const note of YTB.crossedNotes(notesForCurrentVideo(), previousTime, currentTime)) {
-			if (note.kind === 'emoji') showReactionBurst(note);
-			else showNoteCard(note);
-			// The same natural crossing that fires the Playback Notification also
-			// Acknowledges the dot (ADR-0010) — a no-op unless it was Unseen.
+			// Queue the entrance (drained one-per-beat, in timestamp order) but
+			// Acknowledge NOW: the crossing itself is the ADR-0010 trigger, not the
+			// staggered reveal — a no-op unless the dot was Unseen.
+			alertQueue.push(note);
 			acknowledgeDot(note.id);
 		}
+		scheduleAlertDrain();
+	}
+
+	// Reveal one queued Note per ENTRANCE_STAGGER_MS beat, in the order queued
+	// (crossedNotes is timestamp-sorted). Earlier notifications stay on screen as
+	// later ones arrive — each lives its own lifetime from its own entrance.
+	function scheduleAlertDrain() {
+		if (alertDrainTimer !== null || alertQueue.length === 0) return;
+		drainNextAlert();
+	}
+
+	function drainNextAlert() {
+		const note = alertQueue.shift();
+		if (!note) {
+			alertDrainTimer = null;
+			return;
+		}
+		if (note.kind === 'emoji') showReactionBurst(note);
+		else showNoteCard(note);
+		alertDrainTimer = setTimeout(drainNextAlert, ENTRANCE_STAGGER_MS);
+	}
+
+	// Drop every on-screen and queued notification and cancel the drain — for a
+	// Notes-off toggle and a real video change (a duplicate navigate keeps them).
+	function resetAlerts() {
+		alertQueue = [];
+		if (alertDrainTimer !== null) {
+			clearTimeout(alertDrainTimer);
+			alertDrainTimer = null;
+		}
+		document.getElementById(ALERTS_ID)?.replaceChildren();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -1295,11 +1342,10 @@
 		}
 		currentVideoId = nextVideoId;
 		lastPlaybackTime = null;
-		burstCount = 0;
 		pendingOpenGuardUntil = 0;
 		dismissPanel({ resume: false });
 		pauseLease = false;
-		document.getElementById(ALERTS_ID)?.replaceChildren();
+		resetAlerts(); // clear on-screen + queued, cancel the drain
 		renderDots();
 	});
 
@@ -1689,20 +1735,20 @@
       .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
 
       /* --- Playback Notifications ---
-         Placement (edge anchoring + alignment) is inline via
-         applyAlertsPosition; only the static column look lives here. */
+         Placement AND main axis (row for top/bottom, column for left/right, plus
+         wrap and centering) are inline via applyAlertsPosition; only the static
+         look lives here. */
       #${ALERTS_ID} {
         position: absolute;
         z-index: 2050;
         display: flex;
-        flex-direction: column;
         gap: 8px;
         pointer-events: none;
       }
       .ytb-alert-card {
         pointer-events: auto;
         width: max-content;
-        max-width: 260px;
+        max-width: 200px;
         box-sizing: border-box;
         padding: 9px 12px;
         border: 1px solid var(--ytb-line);
@@ -1733,7 +1779,6 @@
       .ytb-alert-burst {
         pointer-events: none;
         text-align: center;
-        transform: translateX(var(--ytb-fan, 0));
         animation: ytb-burst ${REACTION_BURST_MS}ms ease-out forwards;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }

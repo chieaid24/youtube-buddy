@@ -89,7 +89,7 @@ A text-only message appended to one parent Note and shown as part of that Note's
 _Avoid_: Note (a Reply has no independent timeline position), Reaction, generic comment
 
 **Playback Notification**:
-The transient presentation, anchored at the viewer's Notification Position, triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment. Crossing a Note also Acknowledges it (see Acknowledge).
+The transient presentation, anchored at the viewer's Notification Position, triggered whenever ordinary forward playback crosses a Note or Reaction timestamp. A text Note uses a clickable card that can open its Expanded Note; a Reaction uses a non-interactive animated emoji treatment. When one forward step crosses several at once, they are queued and enter one-per-beat on a ~100ms stagger, in timestamp order — a staggered entrance, not one-at-a-time serialization, so earlier notifications are still on screen as later ones arrive and each lives its own lifetime (a card ~4s, a burst ~2s) from its own entrance. They lay out along the Notification Position edge (see its main axis) and share that one container. Crossing a Note also Acknowledges it (see Acknowledge).
 _Avoid_: Note Preview, Expanded Note, popup (ambiguous)
 
 **Note Composer**:
@@ -168,7 +168,7 @@ The per-install default state of the Add Note composer's Spoiler checkbox — on
 _Avoid_: auto spoiler, spoiler mode
 
 **Notification Position**:
-The player edge where Playback Notifications appear, chosen from four edges — **top**, **bottom**, **left**, **right** — through a visual picker in Settings; the default is bottom. Each choice centers the alert stack along its edge (top/bottom horizontally centered; left/right vertically centered). It affects only Playback Notifications — the Note Preview, Expanded Note, and Add Note composer stay anchored to their own dot or button.
+The player edge where Playback Notifications appear, chosen from four edges — **top**, **bottom**, **left**, **right** — through a visual picker in Settings; the default is bottom. The chosen edge also drives the alerts' main axis: **top** and **bottom** lay concurrent notifications out as a centered horizontal row (Teams/Zoom reaction style) that wraps to another line — away from the edge — when the run outgrows the player, while **left** and **right** stack them as a vertically centered column. It affects only Playback Notifications — the Note Preview, Expanded Note, and Add Note composer stay anchored to their own dot or button.
 _Avoid_: popup location, toast position, alert corner, zone, corner
 
 **Notes Visibility** (aka "Notes off"):
