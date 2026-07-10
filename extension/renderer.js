@@ -639,18 +639,18 @@
 	});
 
 	chrome.storage.onChanged.addListener((changes, area) => {
-		if (area !== 'local') return;
-		let touched = false;
-		if (changes.buddyColors) {
-			YTB._buddyColors = changes.buddyColors.newValue || {};
-			touched = true;
-		}
-		if (changes.buddyProgressHidden) {
-			// Live Buddy Progress Visibility flip from the popup Settings.
-			buddyProgressHidden = changes.buddyProgressHidden.newValue === true;
-			touched = true;
-		}
-		if (!touched) return;
+		if (area !== 'local' || !changes.buddyProgressHidden) return;
+		// Live Buddy Progress Visibility flip from the popup Settings.
+		buddyProgressHidden = changes.buddyProgressHidden.newValue === true;
+		renderWatchMarker(currentVideoId);
+		renderThumbnails();
+	});
+
+	// A Buddy Color re-assignment. shared.js owns the one buddyColors storage
+	// listener and has already refreshed the cache when this rebroadcast fires
+	// (issue #115); repaint the markers and thumbnail bars from cached records.
+	document.addEventListener('ytb:buddy-colors', () => {
+		if (!YTB.isContextActive()) return;
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	});
