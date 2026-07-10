@@ -177,6 +177,15 @@
 				display: none !important;
 			}
 
+			/* Paint the root canvas with the surface token too, not just <body>.
+			   The popup frame (the initial containing block) shows at the very
+			   edge; with only <body> backgrounded it stays transparent and Chrome
+			   fills it white, which reads as a white rim around the panel in dark
+			   mode. Backgrounding <html> makes that edge follow the theme. */
+			html {
+				background: var(--c-surface);
+			}
+
 			body {
 				position: relative;
 				width: 320px;
