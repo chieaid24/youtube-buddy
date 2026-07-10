@@ -1298,6 +1298,38 @@ const YTB = {
 	},
 
 	/**
+	 * Trim a day-grouped Feed (the output of buildFeed) down to its newest
+	 * `limit` items — the Room Feed's reveal window behind "Show more". The
+	 * window is item-level, not day-level: a partly revealed day keeps its
+	 * divider with only the newest tail of its items, and a day left with no
+	 * revealed items is dropped entirely (no divider). Pure — the input groups
+	 * and their item arrays are never mutated — so the window is independently
+	 * unit-testable beside buildFeed, whose contract stays untouched.
+	 * @param {Array<{dayKey: string, items: Array}>} groups day-grouped output of buildFeed
+	 * @param {number} limit how many items to keep, counted from the newest
+	 * @returns {{groups: Array<{dayKey: string, items: Array}>, hidden: number}}
+	 *   the trimmed groups plus how many older items the window hid
+	 */
+	tailFeed(groups, limit) {
+		const source = Array.isArray(groups) ? groups : [];
+		const total = source.reduce((sum, group) => sum + (((group && group.items) || []).length || 0), 0);
+		const keep = Math.max(0, Math.min(total, Math.floor(Number(limit) || 0)));
+		const hidden = total - keep;
+		const trimmed = [];
+		let toSkip = hidden; // items are oldest -> newest, so hide from the front
+		for (const group of source) {
+			const items = (group && group.items) || [];
+			if (toSkip >= items.length) {
+				toSkip -= items.length; // whole day hidden — its divider renders nowhere
+				continue;
+			}
+			trimmed.push({ dayKey: group.dayKey, items: items.slice(toSkip) });
+			toSkip = 0;
+		}
+		return { groups: trimmed, hidden };
+	},
+
+	/**
 	 * Normalize a Room Code to its canonical slug so the pretty label and the
 	 * typed/pasted form both pair. Lowercases, drops a leading "the ", turns runs
 	 * of whitespace into single hyphens, and collapses/trims stray hyphens. So

@@ -1263,6 +1263,90 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 	}
 });
 
+test('Room Feed windows the newest 20 behind Show more; reveals and rebuilds keep the viewer in place', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		// 45 recommend events: Picks 01-30 yesterday noon, Picks 31-45 today noon
+		// (noon anchors keep the day split deterministic whatever the wall clock),
+		// so the initial 20-item window splits yesterday — the window is
+		// item-level, and a partly revealed day keeps its divider.
+		const todayNoon = new Date().setHours(12, 0, 0, 0);
+		const calls: string[] = [];
+		const events = Array.from({ length: 45 }, (_, i) => {
+			const n = String(i + 1).padStart(2, '0');
+			return {
+				id: `e${n}`,
+				type: 'added',
+				videoId: `vid-${n}`,
+				title: `Pick ${n}`,
+				actorClientId: 'buddy-1',
+				at: (i < 30 ? todayNoon - 24 * 3600_000 : todayNoon) + i * 60_000,
+			};
+		});
+		await stubRoomBackend(context, { events }, calls);
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		// Only the newest 20 of 45 render — under both day dividers (yesterday
+		// partly revealed) — with Show more sitting above the topmost divider and
+		// the scrollback pinned to the newest item.
+		const items = page.locator('#ytb-home-section .ytb-hs-item');
+		const more = page.locator('#ytb-home-section .ytb-hs-more');
+		await nudgeUntil(page, () => expect(items).toHaveCount(20, { timeout: 700 }));
+		await expect(items.first()).toContainText('Pick 26'); // the oldest revealed
+		await expect(page.locator('#ytb-home-section .ytb-hs-day')).toHaveCount(2);
+		await expect(more).toHaveCount(1);
+		expect(await more.evaluate((el) => el.nextElementSibling?.className)).toBe('ytb-hs-day');
+		const scrollState = () =>
+			page
+				.locator('#ytb-home-section .ytb-hs-feed-scroll')
+				.evaluate((el) => ({ top: el.scrollTop, gap: el.scrollHeight - el.clientHeight - el.scrollTop }));
+		const pinned = await scrollState();
+		expect(pinned.top).toBeGreaterThan(0);
+		expect(pinned.gap).toBeLessThanOrEqual(8);
+
+		// Reveal a page: 20 older items appear ABOVE, and the row the viewer was
+		// looking at stays exactly where it was (scrollTop compensation). Focus
+		// lands on the control's successor, not the document.
+		await more.scrollIntoViewIfNeeded(); // the user scrolls up to the control
+		const anchor = items.filter({ hasText: 'Pick 26' });
+		const beforeY = (await anchor.boundingBox())!.y;
+		await more.click();
+		await expect(items).toHaveCount(40);
+		await expect(items.first()).toContainText('Pick 06');
+		expect(Math.abs((await anchor.boundingBox())!.y - beforeY)).toBeLessThanOrEqual(1);
+		expect(await page.evaluate(() => (document.activeElement as HTMLElement).className)).toBe('ytb-hs-more');
+
+		// A fresh Room read rebuilds the section; scrolled up, the chat rule
+		// preserves both the reveal count and the exact scroll position.
+		const topBefore = (await scrollState()).top;
+		const reads = calls.filter((entry) => entry.startsWith('GET')).length;
+		await page.evaluate(() => document.dispatchEvent(new CustomEvent('ytb:navigate', { detail: { url: location.href, videoId: null } })));
+		await expect(() => expect(calls.filter((entry) => entry.startsWith('GET')).length).toBeGreaterThan(reads)).toPass();
+		await expect(items).toHaveCount(40); // the reveal count survived the rebuild
+		expect(Math.abs((await scrollState()).top - topBefore)).toBeLessThanOrEqual(1);
+
+		// The final reveal renders the oldest item, removes the control, and moves
+		// focus to the first revealed row instead of dropping the keyboard user.
+		await more.click();
+		await expect(items).toHaveCount(45);
+		await expect(more).toHaveCount(0);
+		await expect(items.first()).toContainText('Pick 01');
+		expect(await page.evaluate(() => (document.activeElement as HTMLElement).className)).toContain('ytb-hs-item');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('a Room Feed reply row opens its Expanded Note on arrival — only the body links, and it survives load churn', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

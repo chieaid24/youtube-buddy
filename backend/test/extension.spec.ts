@@ -25,6 +25,8 @@ type PlaylistRec = { videoId: string };
 // `window.YTB.buildFeed` surfaces as `any` (a classic-script global; ADR-0001);
 // wrap it once so the Room Feed shape flows into the callbacks that read it back.
 const buildFeed = (records: object, viewer: string): FeedGroup[] => window.YTB.buildFeed(records, viewer);
+// `window.YTB.tailFeed` likewise: the wrapper pins the reveal window's shape.
+const tailFeed = (groups: FeedGroup[], limit: number): { groups: FeedGroup[]; hidden: number } => window.YTB.tailFeed(groups, limit);
 
 // Every describe in this file reads `window.YTB`, so the extension globals are
 // installed once per FILE rather than inside one describe's beforeAll — that way
@@ -829,6 +831,44 @@ describe('room home section helpers', () => {
 		expect(window.YTB.dayLabel(keyOf(new Date(2026, 6, 3, 12).getTime()), now)).toMatch(/Jul/);
 	});
 
+	it('tailFeed windows the newest N items, keeps partial-day dividers, and counts the hidden', () => {
+		const item = (at: number) => ({ type: 'system', at }) as FeedItem;
+		const groups: FeedGroup[] = [
+			{ dayKey: '2026-07-01', items: [item(1), item(2), item(3)] },
+			{ dayKey: '2026-07-02', items: [item(4), item(5)] },
+			{ dayKey: '2026-07-03', items: [item(6)] },
+		];
+
+		// A limit above or exactly at the total hides nothing: every day intact.
+		for (const limit of [10, 6]) {
+			const all = tailFeed(groups, limit);
+			expect(all.hidden).toBe(0);
+			expect(all.groups).toEqual(groups);
+		}
+
+		// A limit below the total splits a day: the partly revealed day keeps its
+		// divider with only its newest items (the window is item-level, not
+		// day-level), and the hidden count is the trimmed remainder.
+		const four = tailFeed(groups, 4);
+		expect(four.hidden).toBe(2);
+		expect(four.groups.map((g) => g.dayKey)).toEqual(['2026-07-01', '2026-07-02', '2026-07-03']);
+		expect(four.groups[0].items.map((i) => i.at)).toEqual([3]);
+		expect(four.groups[1].items.map((i) => i.at)).toEqual([4, 5]);
+
+		// A day left with no revealed items renders no divider at all.
+		const two = tailFeed(groups, 2);
+		expect(two.hidden).toBe(4);
+		expect(two.groups.map((g) => g.dayKey)).toEqual(['2026-07-02', '2026-07-03']);
+		expect(two.groups[0].items.map((i) => i.at)).toEqual([5]);
+
+		// A limit of 0 hides everything; empty input trims (and hides) nothing.
+		expect(tailFeed(groups, 0)).toEqual({ groups: [], hidden: 6 });
+		expect(tailFeed([], 20)).toEqual({ groups: [], hidden: 0 });
+
+		// Pure: the input groups and their item arrays were never mutated.
+		expect(groups.map((g) => g.items.map((i) => i.at))).toEqual([[1, 2, 3], [4, 5], [6]]);
+	});
+
 	it('defaults the Room Home Toggle to visible and round-trips a hide per install', async () => {
 		storage = {};
 		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
@@ -1278,6 +1318,7 @@ declare global {
 				}>;
 			}>;
 			dayLabel(dayKey: string, nowMs?: number): string;
+			tailFeed<Group extends { dayKey: string; items: unknown[] }>(groups: Group[], limit: number): { groups: Group[]; hidden: number };
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
 			getHomeSectionHidden(): Promise<boolean>;
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
