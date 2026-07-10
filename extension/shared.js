@@ -880,6 +880,36 @@ const YTB = {
 	},
 
 	/**
+	 * Render plan for one recommend System Message row — pure; home-section.js
+	 * executes it (the deleteConfirmCopy/goHereTarget/dotActivation pattern).
+	 * Live vs struck is a per-EVENT state carried on the buildFeed item as
+	 * `removed`. A struck line renders NO anchor at all — the sole exception to
+	 * the Room Feed's link rule: `linkVideoId` is null, so the title lands on
+	 * the plain-text fallback in the line's own muted color, with no link
+	 * tooltip. Because a line-through conveys nothing to a screen reader, a
+	 * struck line instead carries a "No longer recommended" `rowTooltip` and a
+	 * visually-hidden `srSuffix` inside the sentence.
+	 * @param {{own?: boolean, removed?: boolean, event: {videoId?: string, title?: string, actorClientId?: string}}} item a buildFeed 'system' item
+	 * @param {Array<{clientId: string, name?: string}>} roster the Room roster, for the recommender's Display Name
+	 * @returns {{struck: boolean, prefix: string, label: string, suffix: string, linkVideoId: ?string, linkTooltip: ?string, rowTooltip: ?string, srSuffix: ?string}}
+	 */
+	systemLine(item, roster) {
+		const event = (item && item.event) || {};
+		const struck = Boolean(item && item.removed);
+		const linked = !struck && Boolean(event.videoId);
+		return {
+			struck,
+			prefix: item && item.own ? 'You recommended ' : YTB.mentionName(roster, event.actorClientId) + ' recommended ',
+			label: event.title || 'a video',
+			suffix: item && item.own ? ' to the Room' : '',
+			linkVideoId: linked ? event.videoId : null,
+			linkTooltip: linked ? YTB.titleLinkTooltip(event.title) : null,
+			rowTooltip: struck ? 'No longer recommended' : null,
+			srSuffix: struck ? ' (no longer recommended)' : null,
+		};
+	},
+
+	/**
 	 * "Watched by" attribution for one recommended video, derived live from
 	 * the Room's Progress Records: "You" first (only when you have a record for
 	 * the video), then up to two Buddy Display Names most-recent first (blank
@@ -1004,9 +1034,11 @@ const YTB = {
 	 *     member (ADR-0007 amendment): recipients as "X recommended Title" and
 	 *     the recommender as their own "You recommended Title to the Room" —
 	 *     `own` marks which; non-`added` events are ignored so a stale
-	 *     un-recommend never surfaces. Each carries `removed`: true when the
-	 *     Event's videoId is no longer in the Room's live Recommendation list,
-	 *     so the renderer strikes the line through (un-recommends emit no event);
+	 *     un-recommend never surfaces. Each carries `removed` — a per-EVENT
+	 *     state (ADR-0007, 2026-07-09 amendment): true when a newer `added`
+	 *     Event exists for the same videoId (superseded) OR when the videoId is
+	 *     no longer in the Room's live Recommendation list (un-recommended) —
+	 *     and the renderer strikes the line through (un-recommends emit no event);
 	 *   - Watch Notices ("X started watching Title") shown ONLY to the recommender:
 	 *     one per (Buddy, video) whenever a Buddy has a Progress Record for a
 	 *     video the viewer recommended (`addedBy` == viewer), timestamped by that
@@ -1050,21 +1082,33 @@ const YTB = {
 		// and everyone else the recipient line (ADR-0007 amendment). Only `added`
 		// events count: un-recommends emit no event, so a non-`added` event is
 		// stale and must never render as a recommendation. Instead, removal is
-		// derived here: `removed` is true when the Event's videoId has dropped out
-		// of the Room's live Recommendation list, and the renderer strikes the
-		// line through. A re-recommend puts the videoId back, un-striking it.
+		// derived here, per EVENT (ADR-0007, 2026-07-09 amendment): an `added`
+		// Event is `removed` when a NEWER `added` Event exists for the same
+		// videoId (superseded — the backend re-add is a no-op for an already-live
+		// videoId, so a second Event only exists after a delete, making every
+		// older sibling necessarily dead), or when its videoId has dropped out of
+		// the Room's live Recommendation list (currently un-recommended). So a
+		// re-recommend revives only its own fresh line; the old, dead line stays
+		// struck instead of silently reading as live again.
 		const liveRecommendationIds = new Set();
 		for (const item of playlist) {
 			if (item && item.videoId) liveRecommendationIds.add(item.videoId);
 		}
+		const newestAddedAt = new Map(); // videoId -> max(at) among `added` Events
 		for (const event of events) {
 			if (!event || event.type !== 'added') continue;
+			const at = Number(event.at) || 0;
+			if (at > (newestAddedAt.get(event.videoId) ?? -Infinity)) newestAddedAt.set(event.videoId, at);
+		}
+		for (const event of events) {
+			if (!event || event.type !== 'added') continue;
+			const at = Number(event.at) || 0;
 			items.push({
 				type: 'system',
-				at: Number(event.at) || 0,
+				at,
 				event,
 				own: event.actorClientId === myClientId,
-				removed: !liveRecommendationIds.has(event.videoId),
+				removed: at < newestAddedAt.get(event.videoId) || !liveRecommendationIds.has(event.videoId),
 			});
 		}
 		// Watch Notices: for each video the viewer recommended, one notice per

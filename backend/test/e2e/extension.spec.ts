@@ -1094,20 +1094,25 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 
 	try {
 		// A two-member Room read from the viewer's side: a Buddy's live
-		// Recommendation, the viewer's own live Recommendation, and a Buddy
+		// Recommendation, the viewer's own live Recommendation, a Buddy
 		// recommend whose videoId has since left the live list (un-recommended;
-		// removals emit NO event — ADR-0007). The Buddy also has a Progress
-		// Record for the viewer's pick, producing a Watch Notice.
+		// removals emit NO event — ADR-0007), and one video recommended, then
+		// un-recommended, then re-recommended — two `added` Events, the older
+		// superseded (per-Event strike, issue #110). The Buddy also has a
+		// Progress Record for the viewer's pick, producing a Watch Notice.
 		await stubRoomBackend(context, {
 			progress: [{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-own', timestamp: 30, duration: 100, updatedAt: 4000 }],
 			playlist: [
 				{ videoId: 'vid-live', title: 'Buddy Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 1000 },
 				{ videoId: 'vid-own', title: 'My Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
+				{ videoId: 'vid-re', title: 'Re Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 5000 },
 			],
 			events: [
 				{ id: 'e1', type: 'added', videoId: 'vid-live', title: 'Buddy Pick', actorClientId: 'buddy-1', at: 1000 },
 				{ id: 'e2', type: 'added', videoId: 'vid-own', title: 'My Pick', actorClientId: 'viewer-e2e', at: 2000 },
 				{ id: 'e3', type: 'added', videoId: 'vid-gone', title: 'Gone Pick', actorClientId: 'buddy-1', at: 3000 },
+				{ id: 'e4', type: 'added', videoId: 'vid-re', title: 'Re Pick', actorClientId: 'buddy-1', at: 4000 },
+				{ id: 'e5', type: 'added', videoId: 'vid-re', title: 'Re Pick', actorClientId: 'buddy-1', at: 5000 },
 			],
 		});
 		await context.route('https://www.youtube.com/**', (route) =>
@@ -1122,9 +1127,9 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
 
-		// Three System Messages + one Watch Notice, all on the quiet system row.
+		// Five System Messages + one Watch Notice, all on the quiet system row.
 		const rows = page.locator('#ytb-home-section .ytb-hs-system');
-		await nudgeUntil(page, () => expect(rows).toHaveCount(4, { timeout: 700 }));
+		await nudgeUntil(page, () => expect(rows).toHaveCount(6, { timeout: 700 }));
 
 		// Recipient copy drops "you"; ONLY the title is a link, and it is unquoted.
 		const recipient = rows.filter({ hasText: 'Sam recommended Buddy Pick' });
@@ -1148,6 +1153,28 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(struck).toHaveCount(1);
 		expect(await decorationOf(struck)).toBe('line-through');
 		expect(await decorationOf(recipient)).not.toBe('line-through');
+
+		// A struck line is dead in the DOM too (issue #110): NO anchor at all —
+		// the title is plain muted text — while the row explains itself with a
+		// tooltip and a visually-hidden suffix for assistive tech.
+		await expect(struck.locator('a')).toHaveCount(0);
+		await expect(struck).toHaveAttribute('title', 'No longer recommended');
+		await expect(struck.locator('.ytb-hs-sr')).toContainText('no longer recommended');
+
+		// Per-Event strike (issue #110): recommend -> un-recommend -> re-recommend
+		// yields TWO lines for one video — the superseded Event struck and
+		// unlinked even though its videoId is live again, the newest Event live
+		// and linked.
+		const reRows = rows.filter({ hasText: 'Sam recommended Re Pick' });
+		await expect(reRows).toHaveCount(2);
+		const dead = reRows.filter({ hasText: 'no longer recommended' });
+		await expect(dead).toHaveCount(1);
+		expect(await decorationOf(dead)).toBe('line-through');
+		await expect(dead.locator('a')).toHaveCount(0);
+		const alive = reRows.filter({ hasNotText: 'no longer recommended' });
+		await expect(alive).toHaveCount(1);
+		expect(await decorationOf(alive)).not.toBe('line-through');
+		await expect(alive.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-re');
 
 		// The Watch Notice's title links to the video too.
 		const watch = rows.filter({ hasText: 'Sam started watching My Pick' });
