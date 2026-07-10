@@ -903,15 +903,26 @@ test('Playback Notifications anchor at each of the four Notification Position ed
 		await expect(page.locator('.ytb-alert-card')).toHaveCount(1);
 		await video.evaluate((v: HTMLVideoElement) => v.pause());
 
-		// Inline styles own the placement (applyAlertsPosition).
+		// Inline styles own placement AND the edge-driven main axis
+		// (applyAlertsPosition): a row for top/bottom, a column for left/right.
 		const anchor = () =>
 			page.locator('#ytb-note-alerts').evaluate((node) => {
 				const s = (node as HTMLElement).style;
-				return { top: s.top, bottom: s.bottom, left: s.left, right: s.right, transform: s.transform, alignItems: s.alignItems };
+				return {
+					top: s.top,
+					bottom: s.bottom,
+					left: s.left,
+					right: s.right,
+					transform: s.transform,
+					alignItems: s.alignItems,
+					flexDirection: s.flexDirection,
+					flexWrap: s.flexWrap,
+				};
 			});
 		const setEdge = (edge: string) => popup.evaluate((e) => chrome.storage.local.set({ notificationPosition: e }), edge);
 
-		// Default is bottom: horizontally centered, offset up from the bottom.
+		// Default is bottom: horizontally centered, offset up from the bottom — a
+		// wrapping horizontal row (wrap-reverse keeps new lines off the edge).
 		let a = await anchor();
 		expect(a.left).toBe('50%');
 		expect(a.transform).toBe('translateX(-50%)');
@@ -919,8 +930,10 @@ test('Playback Notifications anchor at each of the four Notification Position ed
 		expect(a.right).toBe('');
 		expect(a.alignItems).toBe('center');
 		expect(a.bottom).toMatch(/^\d+(\.\d+)?px$/);
+		expect(a.flexDirection).toBe('row');
+		expect(a.flexWrap).toBe('wrap-reverse');
 
-		// top: horizontally centered, offset down from the top.
+		// top: horizontally centered, offset down from the top — a wrapping row.
 		await setEdge('top');
 		await expect.poll(async () => (await anchor()).bottom).toBe('');
 		a = await anchor();
@@ -928,8 +941,10 @@ test('Playback Notifications anchor at each of the four Notification Position ed
 		expect(a.transform).toBe('translateX(-50%)');
 		expect(a.alignItems).toBe('center');
 		expect(a.top).toMatch(/^\d+(\.\d+)?px$/);
+		expect(a.flexDirection).toBe('row');
+		expect(a.flexWrap).toBe('wrap');
 
-		// left: vertically centered against the left edge.
+		// left: vertically centered against the left edge — a column.
 		await setEdge('left');
 		await expect.poll(async () => (await anchor()).left).toBe('16px');
 		a = await anchor();
@@ -938,8 +953,10 @@ test('Playback Notifications anchor at each of the four Notification Position ed
 		expect(a.bottom).toBe('');
 		expect(a.right).toBe('');
 		expect(a.alignItems).toBe('flex-start');
+		expect(a.flexDirection).toBe('column');
+		expect(a.flexWrap).toBe('nowrap');
 
-		// right: vertically centered against the right edge.
+		// right: vertically centered against the right edge — a column.
 		await setEdge('right');
 		await expect.poll(async () => (await anchor()).right).toBe('16px');
 		a = await anchor();
@@ -948,14 +965,163 @@ test('Playback Notifications anchor at each of the four Notification Position ed
 		expect(a.bottom).toBe('');
 		expect(a.left).toBe('');
 		expect(a.alignItems).toBe('flex-end');
+		expect(a.flexDirection).toBe('column');
+		expect(a.flexWrap).toBe('nowrap');
 
-		// A stale 8-zone value is not an edge: fall back to the bottom default.
+		// A stale 8-zone value is not an edge: fall back to the bottom default row.
 		await setEdge('top-right');
 		await expect.poll(async () => (await anchor()).top).toBe('');
 		a = await anchor();
 		expect(a.left).toBe('50%');
 		expect(a.transform).toBe('translateX(-50%)');
 		expect(a.bottom).toMatch(/^\d+(\.\d+)?px$/);
+		expect(a.flexDirection).toBe('row');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// Three text Notes clustered so one ordinary forward step crosses them together.
+const clusteredTextNotes = ['alpha', 'beta', 'gamma'].map((body, i) => ({
+	id: `n-${body}`,
+	clientId: 'buddy-1',
+	name: 'Buddy',
+	videoId: 'fixture-video',
+	timestamp: 4 + i * 0.05, // 4.00, 4.05, 4.10 — a single ~0.25s tick clears all three
+	kind: 'text',
+	body,
+	spoiler: false,
+	createdAt: i + 1,
+}));
+
+test('concurrent Playback Notifications drain on a ~100ms stagger, in timestamp order, sharing a row on the bottom edge', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: clusteredTextNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(3, { timeout: 700 }));
+
+		// Record each card's entrance moment + text as it is appended (before the
+		// .show class, so this is the true entrance, not the transition).
+		await page.evaluate(() => {
+			const w = window as unknown as { __entries: { t: number; body: string | null }[] };
+			w.__entries = [];
+			const log = w.__entries;
+			new MutationObserver((records) => {
+				for (const rec of records)
+					for (const node of rec.addedNodes)
+						if (node instanceof HTMLElement && node.classList.contains('ytb-alert-card'))
+							log.push({ t: performance.now(), body: node.querySelector('.ytb-alert-body')?.textContent ?? null });
+			}).observe(document.body, { childList: true, subtree: true });
+		});
+
+		// One forward step from before the cluster crosses all three at once.
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.currentTime = 3.9;
+			return v.play();
+		});
+		// All three enter (none dropped, no concurrency cap); staggered entrance
+		// means they coexist — the first is still on screen (4s life) as the third
+		// arrives, which strict serialization would never allow.
+		await expect(page.locator('.ytb-alert-card')).toHaveCount(3, { timeout: 3000 });
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+
+		const entries = await page.evaluate(() => (window as unknown as { __entries: { t: number; body: string }[] }).__entries);
+		// Timestamp order (alpha < beta < gamma), regardless of Room read order.
+		expect(entries.map((e) => e.body)).toEqual(['alpha', 'beta', 'gamma']);
+		// Entrances are ~100ms apart, not simultaneous (70ms floor absorbs jitter).
+		expect(entries[1].t - entries[0].t).toBeGreaterThanOrEqual(70);
+		expect(entries[2].t - entries[1].t).toBeGreaterThanOrEqual(70);
+
+		// On the bottom edge the three share one horizontal row (equal-ish top) and
+		// sit in disjoint horizontal slots (no overlap), left-to-right in order.
+		const rects = await page
+			.locator('.ytb-alert-card')
+			.evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect()).map((r) => ({ left: r.left, right: r.right, top: r.top })));
+		const tops = rects.map((r) => r.top);
+		expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2);
+		const byLeft = [...rects].sort((p, q) => p.left - q.left);
+		for (let i = 1; i < byLeft.length; i++) expect(byLeft[i].left).toBeGreaterThanOrEqual(byLeft[i - 1].right - 0.5);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('six concurrent Reaction bursts lay out in the row without overlapping (no modulo fan)', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const bursts = Array.from({ length: 6 }, (_, i) => ({
+			id: `n-burst-${i}`,
+			clientId: 'buddy-1',
+			name: 'Buddy',
+			videoId: 'fixture-video',
+			timestamp: 4 + i * 0.02, // 4.00..4.10 — one forward step crosses all six
+			kind: 'emoji',
+			body: '\u{1F525}',
+			spoiler: false,
+			createdAt: i + 1,
+		}));
+		await stubRoomBackend(context, { notes: bursts });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(6, { timeout: 700 }));
+
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.currentTime = 3.9;
+			return v.play();
+		});
+		// All six coexist (2s life, ~500ms total stagger): the old modulo fan wrapped
+		// at five, dropping the sixth onto the first's slot.
+		await expect(page.locator('.ytb-alert-burst')).toHaveCount(6, { timeout: 3000 });
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+
+		// The flex axis owns spacing now — no --ytb-fan custom property remains.
+		const fan = await page
+			.locator('.ytb-alert-burst')
+			.first()
+			.evaluate((n) => (n as HTMLElement).style.getPropertyValue('--ytb-fan'));
+		expect(fan).toBe('');
+
+		// Disjoint horizontal slots ⇒ no two bursts overlap (the vertical float
+		// leaves x untouched, so equal-ish tops are not required).
+		const rects = await page
+			.locator('.ytb-alert-burst')
+			.evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect()).map((r) => ({ left: r.left, right: r.right })));
+		const byLeft = [...rects].sort((p, q) => p.left - q.left);
+		for (let i = 1; i < byLeft.length; i++) expect(byLeft[i].left).toBeGreaterThanOrEqual(byLeft[i - 1].right - 0.5);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
