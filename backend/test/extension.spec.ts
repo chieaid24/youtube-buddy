@@ -46,6 +46,11 @@ beforeAll(async () => {
 					),
 					set: vi.fn(async (values: Record<string, unknown>) => Object.assign(storage, values)),
 				},
+				// Captures shared.js's load-time subscription (the single buddyColors
+				// listener) so specs can drive the callback directly.
+				onChanged: {
+					addListener: vi.fn(),
+				},
 			},
 		},
 	});
@@ -1085,6 +1090,45 @@ describe('recommended for you helpers (ADR-0007)', () => {
 	});
 });
 
+describe('the single buddyColors storage subscription (live Buddy Color repaint)', () => {
+	it('registers exactly one listener, refreshes the cache, and rebroadcasts ytb:buddy-colors', () => {
+		// shared.js is the ONE owner of the subscription: loading it (beforeAll)
+		// registered exactly one buddyColors listener, so correctness never
+		// depends on content-script load order.
+		const registrations = vi.mocked(chrome.storage.onChanged.addListener).mock.calls;
+		expect(registrations).toHaveLength(1);
+		const onChanged = registrations[0][0];
+
+		// The cache refresh is observable through buddyColor's Room-scoped read.
+		// This file runs in workerd, where `document` is undefined — the load in
+		// beforeAll and this call not throwing IS the no-document guarantee.
+		onChanged({ buddyColors: { newValue: { room: { bud: '#f0a500' } } } }, 'local');
+		expect(window.YTB.buddyColor('bud', 'room')).toBe('#f0a500');
+
+		// With a document present the same change also rebroadcasts — the event
+		// the on-page consumers (renderer, notes, home-section) repaint from.
+		const dispatchEvent = vi.fn();
+		(globalThis as { document?: unknown }).document = { dispatchEvent };
+		try {
+			onChanged({ buddyColors: { newValue: { room: { bud: '#00a86b' } } } }, 'local');
+		} finally {
+			delete (globalThis as { document?: unknown }).document;
+		}
+		expect(window.YTB.buddyColor('bud', 'room')).toBe('#00a86b');
+		expect(dispatchEvent).toHaveBeenCalledOnce();
+		expect((dispatchEvent.mock.calls[0][0] as Event).type).toBe('ytb:buddy-colors');
+
+		// Non-local areas and unrelated keys leave the cache alone.
+		onChanged({ buddyColors: { newValue: { room: { bud: '#d936c7' } } } }, 'sync');
+		onChanged({ theme: { newValue: 'dark' } }, 'local');
+		expect(window.YTB.buddyColor('bud', 'room')).toBe('#00a86b');
+
+		// A cleared value empties the cache back to the default palette color.
+		onChanged({ buddyColors: { newValue: undefined } }, 'local');
+		expect(window.YTB.buddyColor('bud', 'room')).toBe(window.YTB.BUDDY_COLORS[0]);
+	});
+});
+
 describe('Unseen Mentions & Replies (ADR-0010)', () => {
 	const me = 'me111111';
 	// One Room read exercising every Unseen rule at once. n-reaction carries a
@@ -1386,6 +1430,8 @@ declare global {
 			syncBuddyColors(code: string, ids: string[], successful: boolean, random?: () => number): Promise<Record<string, string>>;
 			setBuddyColor(code: string, clientId: string, color: string): Promise<boolean>;
 			clearRoomColors(code: string): Promise<void>;
+			buddyColor(clientId: string, code?: string): string;
+			BUDDY_COLORS: string[];
 			relativeTime(thenMs: number, nowMs?: number): string;
 			errorCopy(category: string, action: 'note' | 'reply' | 'reaction'): string;
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];

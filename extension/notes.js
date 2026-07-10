@@ -306,6 +306,22 @@
 		YTB.clearPendingArrival();
 	}
 
+	// A Buddy Color re-assignment (issue #115): shared.js owns the one
+	// buddyColors storage listener and has already refreshed the cache when its
+	// ytb:buddy-colors rebroadcast fires. renderDots repaints every dot and —
+	// through the color-aware signature — rebuilds their Note Previews. The open
+	// Expanded Note is separate DOM renderDots never touches: restyle its
+	// stamped author spans in place, so the panel stays open with its scroll
+	// position and pause lease intact and no conversation read is issued.
+	document.addEventListener('ytb:buddy-colors', () => {
+		renderDots();
+		const panel = document.getElementById(PANEL_ID);
+		if (!panel) return;
+		for (const span of panel.querySelectorAll('[data-ytb-color-cid]')) {
+			span.style.color = YTB.buddyColor(span.dataset.ytbColorCid);
+		}
+	});
+
 	// composer.js posted a Note/Reaction: insert the complete server record into
 	// the active Video Timeline immediately — no waiting for the 60s Room poll.
 	document.addEventListener('ytb:note-posted', (event) => {
@@ -477,7 +493,8 @@
 
 	/** Reconcile one Note Dot's colour, state classes, label, and Preview. */
 	function updateDot(dot, id, { note, locked }) {
-		dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
+		const color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
+		dot.style.background = color;
 		// The open Note's own hover preview is redundant next to its panel.
 		dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
 		// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
@@ -486,7 +503,10 @@
 		dot.classList.toggle(DOT_UNSEEN_CLASS, unseenDotIds.has(id));
 
 		const count = replyCount(id);
-		const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count]);
+		// The resolved paint color is part of the signature: a Buddy Color
+		// re-assignment (issue #115) must rebuild the retained dot's Note Preview,
+		// whose author name carries the color inline.
+		const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count, color]);
 		if (dot.dataset.ytbSig === signature) return;
 		dot.dataset.ytbSig = signature;
 
@@ -751,7 +771,10 @@
 			const emojiAuthor = document.createElement('div');
 			emojiAuthor.className = 'ytb-panel-emoji-author';
 			emojiAuthor.textContent = who;
-			if (note.clientId !== myClientId) emojiAuthor.style.color = YTB.buddyColor(note.clientId);
+			if (note.clientId !== myClientId) {
+				emojiAuthor.style.color = YTB.buddyColor(note.clientId);
+				emojiAuthor.dataset.ytbColorCid = note.clientId; // live repaint hook (issue #115)
+			}
 			panel.append(emoji, emojiAuthor, buildByline(note, who, false));
 		} else if (variant === 'spoiler') {
 			const body = document.createElement('p');
@@ -818,7 +841,10 @@
 			const author = document.createElement('span');
 			author.className = 'ytb-panel-author';
 			author.textContent = who;
-			if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
+			if (note.clientId !== myClientId) {
+				author.style.color = YTB.buddyColor(note.clientId);
+				author.dataset.ytbColorCid = note.clientId; // live repaint hook (issue #115)
+			}
 			byline.append(author);
 		}
 		const posted = document.createElement('span');
@@ -964,7 +990,10 @@
 			const author = document.createElement('span');
 			author.className = 'ytb-panel-reply-author';
 			author.textContent = reply.clientId === myClientId ? 'You' : YTB.buddyName(reply.clientId, reply.name, roster);
-			if (reply.clientId !== myClientId) author.style.color = YTB.buddyColor(reply.clientId);
+			if (reply.clientId !== myClientId) {
+				author.style.color = YTB.buddyColor(reply.clientId);
+				author.dataset.ytbColorCid = reply.clientId; // live repaint hook (issue #115)
+			}
 			const when = document.createElement('span');
 			when.className = 'ytb-rel ytb-panel-reply-time';
 			when.dataset.ytbCreatedAt = String(reply.createdAt || Date.now());

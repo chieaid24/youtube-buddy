@@ -29,7 +29,7 @@ Any other person in your Room — there can be up to four. Their Progress Record
 _Avoid_: friend, peer, partner (in code and UI copy; "friend" is fine in prose)
 
 **Buddy Color**:
-One of eight curated colors used to render a Buddy's progress for one viewer. A new Buddy receives a random currently available color. The viewer can change it by clicking the **Buddy Color Swatch** beside that Buddy's Display Name. Assignments are private to that browser and scoped to the Room Code. A color already assigned to another current Buddy in the same Room is unavailable; the same color may be used independently in another Room or browser. The assignment is discarded when the Buddy leaves, so a later rejoin receives a new random available color.
+One of eight curated colors used to render a Buddy's progress for one viewer. A new Buddy receives a random currently available color. The viewer can change it by clicking the **Buddy Color Swatch** beside that Buddy's Display Name. Re-assigning a color repaints every surface that draws that Buddy — Progress Markers, thumbnail Progress Bars, Note Dots and Note Previews, an open Expanded Note's bylines, and Room Feed author names — immediately, in every open tab, without a reload or a navigation, the same live-follow way the Theme Preference applies (ADR-0008). Assignments are private to that browser and scoped to the Room Code. A color already assigned to another current Buddy in the same Room is unavailable; the same color may be used independently in another Room or browser. The assignment is discarded when the Buddy leaves, so a later rejoin receives a new random available color.
 _Avoid_: palette, global color, shared color
 
 **Room states** (Unpaired / Waiting / In room / Room full):

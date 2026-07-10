@@ -318,6 +318,7 @@
 		author.className = 'ytb-hs-author';
 		author.textContent = YTB.buddyName(record.clientId, record.name, roster);
 		author.style.color = YTB.buddyColor(record.clientId);
+		author.dataset.ytbColorCid = record.clientId; // live repaint hook (issue #115)
 
 		const action = document.createElement('span');
 		action.className = 'ytb-hs-action';
@@ -669,6 +670,19 @@
 		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
 		hiddenPref = changes.homeSectionHidden.newValue === true;
 		applyVisibility();
+	});
+
+	// A Buddy Color re-assignment (issue #115): restyle the stamped Room Feed
+	// author names in place from shared.js's refreshed cache. Deliberately NOT a
+	// re-render — that would disturb the Feed's scroll position and its Show
+	// more reveal state for a pure color change.
+	document.addEventListener('ytb:buddy-colors', () => {
+		if (!YTB.isContextActive()) return;
+		const section = document.getElementById(SECTION_ID);
+		if (!section) return;
+		for (const span of section.querySelectorAll('[data-ytb-color-cid]')) {
+			span.style.color = YTB.buddyColor(span.dataset.ytbColorCid);
+		}
 	});
 
 	// Re-gate the section after a visibility flip: gone while hidden, freshly

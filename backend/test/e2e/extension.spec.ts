@@ -1769,6 +1769,89 @@ test('a Room Feed reply row lands you at your own place, paused, with the Unseen
 	}
 });
 
+test('re-assigning a Buddy Color repaints the Note Dot, the open Expanded Note, and the Room Feed author, live in every open tab', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		// The viewer's own Note (a white dot; its Buddy reply also makes a Feed
+		// row) plus a Buddy's Note (the colored dot whose panel we hold open).
+		await stubRoomBackend(context, {
+			notes: [
+				{
+					id: 'n-mine',
+					clientId: 'viewer-e2e',
+					name: 'Viewer',
+					videoId: 'parent-video',
+					timestamp: 4,
+					kind: 'text',
+					body: 'my moment',
+					spoiler: false,
+					createdAt: 1,
+				},
+				{
+					id: 'n-buddy',
+					clientId: 'buddy-1',
+					name: 'Sam',
+					videoId: 'parent-video',
+					timestamp: 12,
+					kind: 'text',
+					body: 'from Sam',
+					spoiler: false,
+					createdAt: 2,
+				},
+			],
+			replies: [{ id: 'reply-1', noteId: 'n-mine', clientId: 'buddy-1', name: 'Sam', body: 'love this', createdAt: 3 }],
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) => {
+			const body = new URL(route.request().url()).pathname === '/watch' ? playbackFixture(mediaSrc) : homeFixture;
+			return route.fulfill({ status: 200, contentType: 'text/html', body });
+		});
+		const popup = await seedPairedRoom(context);
+
+		// Tab 1: the home route's Room Feed, with Sam's colored author name.
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		const author = home.locator('#ytb-home-section .ytb-hs-author', { hasText: 'Sam' }).first();
+		await nudgeUntil(home, () => expect(author).toBeVisible({ timeout: 700 }));
+
+		// Tab 2: the watch route, with Sam's Note Dot and the viewer's own.
+		const watch = await context.newPage();
+		await watch.goto('https://www.youtube.com/watch?v=parent-video');
+		const buddyDot = watch.locator('.ytb-note-dot[data-ytb-note-id="n-buddy"]');
+		const ownDot = watch.locator('.ytb-note-dot[data-ytb-note-id="n-mine"]');
+		await nudgeUntil(watch, () => expect(watch.locator('.ytb-note-dot')).toHaveCount(2, { timeout: 700 }));
+
+		// Hold Sam's Expanded Note open so its byline is live DOM during the change.
+		await buddyDot.click();
+		const panel = watch.locator('#ytb-note-panel');
+		await expect(panel).toBeVisible();
+		const byline = panel.locator('.ytb-panel-author');
+		await expect(byline).toHaveText('Sam');
+
+		// Pick a target color that differs from the random initial allocation.
+		const initial = await buddyDot.evaluate((el) => getComputedStyle(el).backgroundColor);
+		const target = initial === 'rgb(232, 93, 4)' ? { hex: '#00a6d6', rgb: 'rgb(0, 166, 214)' } : { hex: '#e85d04', rgb: 'rgb(232, 93, 4)' };
+
+		// Re-assign through the popup's chrome.storage.local — the real writer's
+		// seam. No navigation and no reload follow; the repaint must be live.
+		await popup.evaluate((hex) => chrome.storage.local.set({ buddyColors: { roome2e: { 'buddy-1': hex } } }), target.hex);
+
+		// Every surface repaints in place, across both open tabs.
+		await expect(buddyDot).toHaveCSS('background-color', target.rgb);
+		await expect(byline).toHaveCSS('color', target.rgb);
+		await expect(panel).toBeVisible(); // stayed open through the repaint
+		await expect(author).toHaveCSS('color', target.rgb);
+		// The viewer's own dot is never tinted with a Buddy Color.
+		await expect(ownDot).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('a posted Note captures the video title, and Feed rows name the video — plain text, only when captured', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

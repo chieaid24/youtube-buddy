@@ -1663,4 +1663,18 @@ const YTB = {
 	},
 };
 
+// The ONE `buddyColors` storage subscription. shared.js owns the cache
+// refresh, so correctness never depends on which content script registered a
+// listener first; pages repaint from the `ytb:buddy-colors` rebroadcast —
+// mirroring renderer.js's `ytb:room-data` rebroadcast of a Room read. Fires in
+// every context that loads this file: content scripts and the popup repaint
+// live (the popup is also the only writer and re-renders itself anyway), and
+// the workerd test harness — where `document` is undefined — just refreshes
+// the cache, hence the guard on the dispatch.
+chrome.storage.onChanged.addListener((changes, area) => {
+	if (area !== 'local' || !changes.buddyColors) return;
+	YTB._buddyColors = changes.buddyColors.newValue || {};
+	if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('ytb:buddy-colors'));
+});
+
 window.YTB = YTB;
