@@ -738,6 +738,93 @@ const YTB = {
 			.sort((a, b) => a.timestamp - b.timestamp);
 	},
 
+	// --- Dot Cluster helpers (pure — the fan math, tested at the shared.js seam) ---
+
+	/**
+	 * Dot Cluster grouping (#119): given each Note Dot's timestamp fraction in
+	 * [0,1], the rendered progress-bar width in px, and the dot diameter in px,
+	 * group the dots whose rendered circles touch or overlap. Grouping is
+	 * TRANSITIVE — a chain of dots each overlapping the next is a single Cluster
+	 * even when the outer two do not touch — and a lone dot is a Cluster of one.
+	 *
+	 * Returns clusters as arrays of ORIGINAL indices (into `fractions`), each
+	 * cluster ordered by fraction (timestamp) and the clusters themselves ordered
+	 * left to right. Pure (no DOM): the wiring reads pixel geometry and hands it
+	 * here, so the grouping is unit-tested at the shared.js seam.
+	 * @param {number[]} fractions each dot's bar fraction in [0,1]
+	 * @param {number} barWidth rendered progress-bar width in px
+	 * @param {number} dotDiameter dot diameter in px
+	 * @returns {number[][]} clusters of original indices, each sorted by fraction
+	 */
+	clusterDots(fractions, barWidth, dotDiameter) {
+		const width = Number(barWidth) || 0;
+		const diameter = Math.max(0, Number(dotDiameter) || 0);
+		const order = (fractions || [])
+			.map((fraction, index) => ({ index, fraction: Number(fraction) || 0 }))
+			.sort((a, b) => a.fraction - b.fraction);
+		const clusters = [];
+		let current = null;
+		let prevFraction = 0;
+		for (const { index, fraction } of order) {
+			// Circles touch or overlap when the gap between centers is within one
+			// diameter; comparing to the PREVIOUS sorted dot makes the merge
+			// transitive (a covered middle dot chains its neighbours together).
+			if (current && (fraction - prevFraction) * width <= diameter) {
+				current.push(index);
+			} else {
+				current = [index];
+				clusters.push(current);
+			}
+			prevFraction = fraction;
+		}
+		return clusters;
+	},
+
+	/**
+	 * Dot Cluster fan offsets (#119): given a Cluster's member fractions, the gap
+	 * in px between adjacent fanned dots, the bar width in px, and the dot
+	 * diameter in px, return a per-member horizontal PIXEL offset that fans the
+	 * members apart evenly about the Cluster's centroid, ordered by timestamp and
+	 * clamped so no member's circle is pushed past either edge of the bar. A
+	 * Cluster of one gets a zero offset.
+	 *
+	 * Offsets return in the SAME order as the input fractions (the wiring keeps
+	 * each dot paired with its offset); a member's fanned SLOT is chosen by
+	 * timestamp order. Pure display math — the underlying `left` positions never
+	 * change — so it is unit-tested at the shared.js seam.
+	 * @param {number[]} fractions the Cluster members' bar fractions in [0,1]
+	 * @param {number} gap px between adjacent fanned dot centers
+	 * @param {number} barWidth rendered progress-bar width in px
+	 * @param {number} dotDiameter dot diameter in px
+	 * @returns {number[]} per-member px offsets, in input order
+	 */
+	fanOffsets(fractions, gap, barWidth, dotDiameter) {
+		const members = fractions || [];
+		const n = members.length;
+		if (n === 0) return [];
+		if (n === 1) return [0];
+		const width = Number(barWidth) || 0;
+		const step = Number(gap) || 0;
+		const radius = Math.max(0, Number(dotDiameter) || 0) / 2;
+		// Rank members by timestamp to assign evenly spaced fan slots, remembering
+		// each original position so the offsets return in input order.
+		const ranked = members.map((fraction, index) => ({ index, fraction: Number(fraction) || 0 })).sort((a, b) => a.fraction - b.fraction);
+		const centroidPx = (ranked.reduce((sum, m) => sum + m.fraction, 0) / n) * width;
+		// Target fanned centers: evenly spaced by `step`, symmetric about the
+		// centroid so the Cluster keeps its footing while opening up.
+		const centers = ranked.map((_, rank) => centroidPx + (rank - (n - 1) / 2) * step);
+		// Slide the WHOLE fan (preserving even spacing) so its outer circles stay
+		// on the bar. If it is wider than the bar, favour the left edge.
+		let shift = 0;
+		if (centers[0] < radius) shift = radius - centers[0];
+		else if (centers[n - 1] > width - radius) shift = width - radius - centers[n - 1];
+		const offsets = new Array(n);
+		ranked.forEach((m, rank) => {
+			offsets[m.index] = centers[rank] + shift - m.fraction * width;
+		});
+		return offsets;
+	},
+
 	// --- Room Home Section helpers (pure — tested at the shared.js seam) ---
 
 	/**
