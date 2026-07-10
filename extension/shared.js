@@ -101,14 +101,10 @@ const YTB = {
 	// this many distinct videos (API/KV names keep the playlist term, ADR-0007).
 	MAX_PLAYLIST_ITEMS: 30,
 
-	// Two timeline dots whose timestamps fall within this window would overlap;
-	// spreadFractions separates them. Mirrored by the Playback Notification
-	// "natural crossing" delta in notes.js.
-	SPREAD_WINDOW_SECONDS: 2,
-
 	// The Expanded Note omits "Go here" when the paused playhead already sits
 	// within this many seconds of the Note's moment (nearNoteMoment) — there is
-	// nowhere meaningful to go. Independent of SPREAD_WINDOW_SECONDS.
+	// nowhere meaningful to go. Independent of the Playback Notification
+	// "natural crossing" delta in notes.js.
 	GO_HERE_NEAR_SECONDS: 2,
 
 	// --- storage (chrome.storage.local) ---
@@ -719,41 +715,6 @@ const YTB = {
 		const head = Number(playhead);
 		if (!Number.isFinite(head)) return false;
 		return Math.abs(head - Number(timestamp)) <= YTB.GO_HERE_NEAR_SECONDS;
-	},
-
-	/**
-	 * Spread timeline dots that would overlap. Dots whose timestamps chain
-	 * within SPREAD_WINDOW_SECONDS form a group; each group is spread
-	 * horizontally by `minGap` around its natural center — chronological order
-	 * preserved, clamped inside [0,1] — so every dot keeps a separate pointer
-	 * and keyboard target. Dots are never merged and their true timestamps are
-	 * untouched (this maps ids to DISPLAY fractions only).
-	 * @param {Array<{id: string, timestamp: number, fraction: number}>} dots
-	 * @param {number} [minGap] minimum separation as a fraction of the bar
-	 * @returns {Map<string, number>} id -> display fraction
-	 */
-	spreadFractions(dots, minGap = 0.012) {
-		const sorted = [...dots].sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : 1));
-		const out = new Map();
-		let group = [];
-		const flush = () => {
-			if (group.length === 0) return;
-			if (group.length === 1) {
-				out.set(group[0].id, group[0].fraction);
-			} else {
-				const span = (group.length - 1) * minGap;
-				const center = group.reduce((sum, dot) => sum + dot.fraction, 0) / group.length;
-				const start = Math.max(0, Math.min(center - span / 2, 1 - span));
-				group.forEach((dot, i) => out.set(dot.id, start + i * minGap));
-			}
-			group = [];
-		};
-		for (const dot of sorted) {
-			if (group.length > 0 && dot.timestamp - group[group.length - 1].timestamp > YTB.SPREAD_WINDOW_SECONDS) flush();
-			group.push(dot);
-		}
-		flush();
-		return out;
 	},
 
 	/**

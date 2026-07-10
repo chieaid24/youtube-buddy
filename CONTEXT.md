@@ -73,7 +73,7 @@ YouTube's own red resume-playback bar on a thumbnail — how far **you** watched
 _Avoid_: progress bar (alone), resume bar, red bar
 
 **Note Dot**:
-The small dot placed on the Video Timeline at a Note's timestamp — the base timeline element from which a Note Preview (on hover) and an Expanded Note (on click) open. A locked Spoiler shows an obscured Note Dot; a Reaction and a text Note each show their own dot. An **Unseen** Note Dot pulses an apricot halo until Acknowledged; the dot itself never moves or resizes. Distinct from a Progress Marker (a live watch position, not authored content).
+The small flat dot floating just above the Video Timeline at a Note's exact timestamp — a ~6px single-color circle (the author's Buddy Color; the viewer's own Notes white) with no border, outline, ring, or shadow, never displaced: co-timed Note Dots simply overlap. It swallows the pointer events it receives, so hovering it never pops YouTube's storyboard thumbnail or time pill. The base timeline element from which a Note Preview (on hover) and an Expanded Note (on click) open. A locked Spoiler shows an obscured Note Dot; a Reaction and a text Note each show their own dot. An **Unseen** Note Dot pulses an apricot halo until Acknowledged; the dot itself never moves or resizes. Distinct from a Progress Marker (a live watch position, not authored content, drawn on the bar itself).
 _Avoid_: marker, Progress Marker, pin
 
 **Note Preview**:

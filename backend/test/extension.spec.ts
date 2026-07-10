@@ -296,37 +296,6 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.nearNoteMoment(42, Number.NaN)).toBe(false);
 	});
 
-	it('spreads dots within the 2-second window, preserving order and clamping to the bar', () => {
-		// Two dots 1s apart at the same spot: separated by >= the gap, in order.
-		const pair = window.YTB.spreadFractions([
-			{ id: 'a', timestamp: 10, fraction: 0.5 },
-			{ id: 'b', timestamp: 11, fraction: 0.5005 },
-		]);
-		expect(pair.get('a')!).toBeLessThan(pair.get('b')!);
-		expect(pair.get('b')! - pair.get('a')!).toBeCloseTo(0.012, 5);
-
-		// A cluster at the very start of the timeline stays inside [0,1].
-		const edge = window.YTB.spreadFractions([
-			{ id: 'a', timestamp: 0, fraction: 0 },
-			{ id: 'b', timestamp: 1, fraction: 0.001 },
-			{ id: 'c', timestamp: 2, fraction: 0.002 },
-		]);
-		for (const fraction of edge.values()) {
-			expect(fraction).toBeGreaterThanOrEqual(0);
-			expect(fraction).toBeLessThanOrEqual(1);
-		}
-		expect(edge.get('a')!).toBeLessThan(edge.get('b')!);
-		expect(edge.get('b')!).toBeLessThan(edge.get('c')!);
-
-		// Dots further than 2s apart keep their natural positions.
-		const apart = window.YTB.spreadFractions([
-			{ id: 'a', timestamp: 10, fraction: 0.2 },
-			{ id: 'b', timestamp: 20, fraction: 0.4 },
-		]);
-		expect(apart.get('a')).toBe(0.2);
-		expect(apart.get('b')).toBe(0.4);
-	});
-
 	it('detects natural playback crossings repeatedly, as a pure filter', () => {
 		const notes = [{ timestamp: 10 }, { timestamp: 12 }, { timestamp: 30 }];
 		expect(window.YTB.crossedNotes(notes, 9, 12.5).map((n: { timestamp: number }) => n.timestamp)).toEqual([10, 12]);
@@ -1142,7 +1111,6 @@ declare global {
 			clearRoomColors(code: string): Promise<void>;
 			relativeTime(thenMs: number, nowMs?: number): string;
 			errorCopy(category: string, action: 'note' | 'reply' | 'reaction'): string;
-			spreadFractions(dots: Array<{ id: string; timestamp: number; fraction: number }>, minGap?: number): Map<string, number>;
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];
 			dotActivation(note: { kind?: string; spoiler?: boolean; timestamp?: number }): { action: 'open' };
 			notePanelVariant(note: { kind?: string; spoiler?: boolean; timestamp?: number }, playhead: number): 'text' | 'reaction' | 'spoiler';
