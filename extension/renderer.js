@@ -277,8 +277,7 @@
 
 	// YouTube's Watched Bar, both tile generations: the lockup overlay's rounded
 	// inset bar, and the classic resume-playback overlay renderer.
-	const WATCHED_BAR_SELECTOR =
-		'.ytThumbnailOverlayProgressBarHostWatchedProgressBar, ytd-thumbnail-overlay-resume-playback-renderer';
+	const WATCHED_BAR_SELECTOR = '.ytThumbnailOverlayProgressBarHostWatchedProgressBar, ytd-thumbnail-overlay-resume-playback-renderer';
 
 	// YouTube's bottom overlay host — duration badge + Watched Bar. The Progress
 	// Bar is inserted BEFORE it so the badge always paints above our bands.
