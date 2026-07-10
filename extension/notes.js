@@ -55,6 +55,10 @@
 	const DOT_LOCKED_CLASS = 'ytb-note-dot-locked';
 	const DOT_OPEN_CLASS = 'ytb-note-dot-open'; // suppresses the open Note's own preview
 	const DOT_UNSEEN_CLASS = 'ytb-note-dot-unseen'; // pulses the apricot halo (ADR-0010)
+	const CLUSTER_CLASS = 'ytb-dot-cluster'; // wrapper owning a Cluster's hover/fan (#123)
+	const CLUSTER_PINNED_CLASS = 'ytb-dot-cluster-pinned'; // stays fanned while its Note's panel is open
+	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
+	const CLUSTER_FAN_GAP = 14; // px between adjacent fanned dot centers (a covered dot becomes hoverable)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -330,84 +334,157 @@
 					// Spoiler state follows the viewer's playhead and can relock when
 					// the video is revisited from an earlier point.
 					locked: Boolean(note.spoiler) && playhead < timestamp,
-					// The dot's exact moment on the bar. Never displaced: co-timed
-					// dots overlap (truth of position beats legibility).
+					// The dot's exact moment on the bar. Never displaced at rest:
+					// co-timed dots overlap and fan apart only on hover (truth of
+					// position beats legibility).
 					fraction: Math.max(0, Math.min(1, timestamp / duration)),
 				});
 			}
 		}
 
+		// Index every existing dot by id — a dot lives under a Cluster wrapper now,
+		// so search the whole bar, not just its direct children.
 		const existing = new Map();
-		for (const dot of bar.querySelectorAll(':scope > .' + DOT_CLASS)) {
+		for (const dot of bar.querySelectorAll('.' + DOT_CLASS)) {
 			const id = dot.dataset.ytbNoteId;
 			if (desired.has(id)) existing.set(id, dot);
 			else dot.remove();
 		}
-		if (desired.size === 0) return;
+		if (desired.size === 0) {
+			for (const wrapper of bar.querySelectorAll('.' + CLUSTER_CLASS)) wrapper.remove();
+			return;
+		}
 		if (getComputedStyle(bar).position === 'static') bar.style.position = 'relative';
 
-		for (const [id, { note, locked, fraction }] of desired) {
-			let dot = existing.get(id);
-			if (!dot) {
-				dot = document.createElement('button');
-				dot.type = 'button';
-				dot.className = DOT_CLASS;
-				dot.dataset.ytbNoteId = id;
-				const preview = dot.appendChild(document.createElement('div'));
-				preview.className = PREVIEW_CLASS;
-				// Never let the player interpret a dot press as a seek. Clicking the
-				// dot OR its Note Preview opens that Note's Expanded Note (the click
-				// itself never seeks — Go here inside the panel is the only seek).
-				// The hover family is swallowed too, so a hovered dot never leaks
-				// into the bar beneath it: YouTube pops no storyboard thumbnail and
-				// no time pill behind a Note Preview.
+		// Group overlapping dots into Clusters from their pixel geometry (#123).
+		// Transitive and recomputed every render, so a Cluster re-forms as the bar
+		// resizes (timeupdate/mutation/resize all re-enter here).
+		const ids = [...desired.keys()];
+		const fractions = ids.map((id) => desired.get(id).fraction);
+		const barWidth = bar.getBoundingClientRect().width || 0;
+		const clusters = YTB.clusterDots(fractions, barWidth, DOT_DIAMETER);
+
+		// Reconcile Cluster wrappers keyed by their exact membership. A steady poll
+		// (unchanged membership) reuses each wrapper and never re-parents a dot,
+		// which would restart its Unseen pulse; a Note added or removed rebuilds
+		// only the affected wrapper and moves surviving dots into it.
+		const byKey = new Map();
+		for (const wrapper of bar.querySelectorAll('.' + CLUSTER_CLASS)) byKey.set(wrapper.dataset.ytbClusterKey, wrapper);
+		const wanted = new Set();
+
+		for (const cluster of clusters) {
+			const memberIds = cluster.map((i) => ids[i]);
+			const memberFractions = cluster.map((i) => fractions[i]);
+			const key = memberIds.join('|'); // members already sorted by fraction
+			wanted.add(key);
+
+			let wrapper = byKey.get(key);
+			if (!wrapper) {
+				wrapper = document.createElement('div');
+				wrapper.className = CLUSTER_CLASS;
+				wrapper.dataset.ytbClusterKey = key;
+				// Swallow the press/hover family over the keeper (the gaps the fan
+				// opens) exactly as the dots do, so YouTube pops no storyboard or
+				// time pill behind the fan. Harmless at rest: the wrapper is
+				// pointer-events:none there and receives none of these.
 				for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
-					dot.addEventListener(type, (e) => e.stopPropagation());
+					wrapper.addEventListener(type, (e) => e.stopPropagation());
 				}
-				dot.addEventListener('click', (e) => {
-					e.stopPropagation();
-					e.preventDefault();
-					onDotActivate(dot);
-				});
-				// Hovering an Unseen dot Acknowledges it (ADR-0010) — the Note Preview
-				// that hover opens is the eye-catch the pulse asked for; keyboard
-				// focus, which opens the same preview, Acknowledges identically.
-				// (mouseenter never bubbles, so it needs no swallowing above.)
-				dot.addEventListener('mouseenter', () => acknowledgeDot(dot.dataset.ytbNoteId));
-				dot.addEventListener('focus', () => acknowledgeDot(dot.dataset.ytbNoteId));
-				bar.appendChild(dot);
+				bar.appendChild(wrapper);
 			}
-			dot.style.left = (fraction * 100).toFixed(3) + '%';
-			dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
-			// The open Note's own hover preview is redundant next to its panel.
-			dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
-			// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
-			// construction: the halo is box-shadow only, so neighbouring dots —
-			// which sit at their true, possibly overlapping fractions — are never
-			// displaced.
-			dot.classList.toggle(DOT_UNSEEN_CLASS, unseenDotIds.has(id));
+			// The wrapper anchors at the Cluster centre as a percentage (resize-
+			// robust); each member sits at its true px offset from that centre, and
+			// the fan is a hover-only transform layered on top.
+			const center = (memberFractions[0] + memberFractions[memberFractions.length - 1]) / 2;
+			wrapper.style.left = (center * 100).toFixed(3) + '%';
 
-			const count = replyCount(id);
-			const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count]);
-			if (dot.dataset.ytbSig === signature) continue;
-			dot.dataset.ytbSig = signature;
-
-			const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
-			const at = YTB.formatTime(note.timestamp);
-			const isReaction = note.kind === 'emoji';
-			dot.classList.toggle(DOT_LOCKED_CLASS, locked);
-			dot.classList.toggle(DOT_REACTION_CLASS, isReaction && !locked);
-			dot.classList.toggle(DOT_TEXT_CLASS, !isReaction && !locked);
-			dot.setAttribute(
-				'aria-label',
-				locked
-					? `Spoiler note at ${at}. Open note`
-					: isReaction
-						? `Reaction ${note.body} by ${who} at ${at}. Open note`
-						: `Note by ${who} at ${at}. Open conversation`,
-			);
-			buildPreview(dot.querySelector('.' + PREVIEW_CLASS), note, who, locked, count);
+			const offsets = YTB.fanOffsets(memberFractions, CLUSTER_FAN_GAP, barWidth, DOT_DIAMETER);
+			let halfExtent = 0;
+			memberIds.forEach((id, k) => {
+				const basePx = (memberFractions[k] - center) * barWidth;
+				const dot = existing.get(id) || buildDot(id);
+				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
+				dot.style.left = basePx.toFixed(2) + 'px';
+				dot.style.setProperty('--ytb-fan', offsets[k].toFixed(2) + 'px');
+				updateDot(dot, id, desired.get(id));
+				halfExtent = Math.max(halfExtent, Math.abs(basePx + offsets[k]));
+			});
+			// The hover-keeper spans the fanned band so the pointer can cross the
+			// gaps the fan opens (and travel between members) without collapsing it.
+			wrapper.style.setProperty('--ytb-fan-extent', (2 * (halfExtent + DOT_DIAMETER / 2)).toFixed(2) + 'px');
+			// A Cluster with an open Expanded Note stays fanned, so the anchor dot
+			// never slides out from under the panel.
+			wrapper.classList.toggle(CLUSTER_PINNED_CLASS, Boolean(openNote) && memberIds.includes(openNote.id));
 		}
+
+		// Drop wrappers whose membership no longer exists; their surviving dots were
+		// already moved into the new wrapper above, so only empties remain.
+		for (const [key, wrapper] of byKey) {
+			if (!wanted.has(key)) wrapper.remove();
+		}
+	}
+
+	/** One-time construction of a Note Dot button, its Preview, and listeners. */
+	function buildDot(id) {
+		const dot = document.createElement('button');
+		dot.type = 'button';
+		dot.className = DOT_CLASS;
+		dot.dataset.ytbNoteId = id;
+		const preview = dot.appendChild(document.createElement('div'));
+		preview.className = PREVIEW_CLASS;
+		// Never let the player interpret a dot press as a seek. Clicking the dot OR
+		// its Note Preview opens that Note's Expanded Note (the click itself never
+		// seeks — Go here inside the panel is the only seek). The hover family is
+		// swallowed too, so a hovered dot never leaks into the bar beneath it:
+		// YouTube pops no storyboard thumbnail and no time pill behind a Note
+		// Preview.
+		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
+			dot.addEventListener(type, (e) => e.stopPropagation());
+		}
+		dot.addEventListener('click', (e) => {
+			e.stopPropagation();
+			e.preventDefault();
+			onDotActivate(dot);
+		});
+		// Hovering an Unseen dot Acknowledges it (ADR-0010) — the Note Preview that
+		// hover opens is the eye-catch the pulse asked for; keyboard focus, which
+		// opens the same preview, Acknowledges identically. (mouseenter never
+		// bubbles, so it needs no swallowing above.)
+		dot.addEventListener('mouseenter', () => acknowledgeDot(dot.dataset.ytbNoteId));
+		dot.addEventListener('focus', () => acknowledgeDot(dot.dataset.ytbNoteId));
+		return dot;
+	}
+
+	/** Reconcile one Note Dot's colour, state classes, label, and Preview. */
+	function updateDot(dot, id, { note, locked }) {
+		dot.style.background = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
+		// The open Note's own hover preview is redundant next to its panel.
+		dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
+		// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
+		// construction: the halo is box-shadow only, so neighbouring dots — which
+		// sit at their true, possibly overlapping fractions — are never displaced.
+		dot.classList.toggle(DOT_UNSEEN_CLASS, unseenDotIds.has(id));
+
+		const count = replyCount(id);
+		const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count]);
+		if (dot.dataset.ytbSig === signature) return;
+		dot.dataset.ytbSig = signature;
+
+		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
+		const at = YTB.formatTime(note.timestamp);
+		const isReaction = note.kind === 'emoji';
+		dot.classList.toggle(DOT_LOCKED_CLASS, locked);
+		dot.classList.toggle(DOT_REACTION_CLASS, isReaction && !locked);
+		dot.classList.toggle(DOT_TEXT_CLASS, !isReaction && !locked);
+		dot.setAttribute(
+			'aria-label',
+			locked
+				? `Spoiler note at ${at}. Open note`
+				: isReaction
+					? `Reaction ${note.body} by ${who} at ${at}. Open note`
+					: `Note by ${who} at ${at}. Open conversation`,
+		);
+		buildPreview(dot.querySelector('.' + PREVIEW_CLASS), note, who, locked, count);
 	}
 
 	// Activating ANY Note Dot or Note Preview — text, Reaction, or locked
@@ -495,7 +572,8 @@
 	function dotFor(noteId) {
 		const bar = document.querySelector('.ytp-progress-bar');
 		if (!bar) return null;
-		for (const dot of bar.querySelectorAll(':scope > .' + DOT_CLASS)) {
+		// Dots nest inside their Cluster wrapper, so search the whole bar.
+		for (const dot of bar.querySelectorAll('.' + DOT_CLASS)) {
 			if (dot.dataset.ytbNoteId === noteId) return dot;
 		}
 		return null;
@@ -533,7 +611,11 @@
 		host.appendChild(panel);
 		positionPanel(panel);
 		panel.focus();
-		dotFor(note.id)?.classList.add(DOT_OPEN_CLASS);
+		const anchorDot = dotFor(note.id);
+		anchorDot?.classList.add(DOT_OPEN_CLASS);
+		// Pin the anchor's Cluster fanned for as long as the panel is open, so the
+		// dot does not slide out from under it.
+		anchorDot?.closest('.' + CLUSTER_CLASS)?.classList.add(CLUSTER_PINNED_CLASS);
 
 		// Only a text Note has a conversation to poll; read-only variants (Reaction,
 		// locked Spoiler) just refresh their posted-time label.
@@ -1046,6 +1128,7 @@
 		stopConversationPoll();
 		document.getElementById(PANEL_ID)?.remove();
 		document.querySelector('.' + DOT_OPEN_CLASS)?.classList.remove(DOT_OPEN_CLASS);
+		document.querySelector('.' + CLUSTER_PINNED_CLASS)?.classList.remove(CLUSTER_PINNED_CLASS);
 		openNote = null;
 		pendingReply = false;
 		pendingDelete = false;
@@ -1077,7 +1160,15 @@
 		const path = event.composedPath ? event.composedPath() : [];
 		for (const target of path) {
 			if (!(target instanceof Element)) continue;
-			if (target.id === PANEL_ID || target.classList.contains(DOT_CLASS) || target.classList.contains('ytb-alert-card')) return;
+			// A click on the Cluster wrapper's hover-keeper (a gap between fanned
+			// dots) is interacting with the Cluster, not dismissing the panel.
+			if (
+				target.id === PANEL_ID ||
+				target.classList.contains(DOT_CLASS) ||
+				target.classList.contains(CLUSTER_CLASS) ||
+				target.classList.contains('ytb-alert-card')
+			)
+				return;
 		}
 		dismissPanel();
 	});
@@ -1311,6 +1402,7 @@
 
 	for (const type of ['resize', 'fullscreenchange']) {
 		window.addEventListener(type, () => {
+			renderDots(); // re-form Clusters + reposition dots at the new bar width
 			const panel = document.getElementById(PANEL_ID);
 			if (panel) positionPanel(panel);
 		});
@@ -1350,14 +1442,50 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
-      /* A flat, single-color circle floating just clear of the bar's top edge
-         (a child of the bar, so it inherits the control chrome's autohide fade
-         and stays bar-aligned through resizes and fullscreen for free). No
-         border, outline, ring, or shadow — a pale dot over a bright frame is
-         the accepted trade. */
-      .${DOT_CLASS} {
+      /* --- Dot Cluster (#123): the wrapper owning the hover/focus state for the
+         dots that overlap at rest. It carries the vertical lift (its members sit
+         at its bottom edge, just clear of the bar) and anchors at the Cluster
+         centre as a percentage, so its resting position is resize-robust. It is
+         pointer-events:none at rest — only the member dots catch the pointer, so
+         it never blocks the scrubber — but while hovered a ::before keeper spans
+         the fanned band so the pointer can cross the gaps the fan opens (and
+         travel between members) without the fan collapsing. */
+      .${CLUSTER_CLASS} {
         position: absolute;
         bottom: calc(100% + 3px);
+        width: 0;
+        height: 6px;
+        z-index: 41;
+        pointer-events: none;
+      }
+      .${CLUSTER_CLASS}::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        transform: translateX(-50%);
+        width: var(--ytb-fan-extent, 0px);
+        top: -4px;
+        bottom: -6px;
+        pointer-events: none;
+      }
+      .${CLUSTER_CLASS}:hover::before { pointer-events: auto; }
+      /* Fan the members apart on hover, keyboard focus, or while a member's panel
+         is open (pinned). Display offset only (a transform) — the dots' base left
+         offset never changes, and the fan reverses the instant the state clears. */
+      .${CLUSTER_CLASS}:hover > .${DOT_CLASS},
+      .${CLUSTER_CLASS}:focus-within > .${DOT_CLASS},
+      .${CLUSTER_CLASS}.${CLUSTER_PINNED_CLASS} > .${DOT_CLASS} {
+        transform: translateX(var(--ytb-fan, 0px));
+      }
+
+      /* A flat, single-color circle floating just clear of the bar's top edge
+         (nested in its Cluster wrapper, so it inherits the control chrome's
+         autohide fade and stays bar-aligned through resizes and fullscreen for
+         free). No border, outline, ring, or shadow — a pale dot over a bright
+         frame is the accepted trade. */
+      .${DOT_CLASS} {
+        position: absolute;
+        bottom: 0;
         width: 6px;
         height: 6px;
         margin-left: -3px;
@@ -1365,8 +1493,12 @@
         border: 0;
         border-radius: 50%;
         background: #fff;
-        z-index: 41;
         cursor: default;
+        /* pointer-events is inherited: the dot must re-assert auto so it stays
+           hittable inside the pointer-events:none Cluster wrapper. */
+        pointer-events: auto;
+        transform: translateX(0);
+        transition: transform var(--ytb-dur-base) var(--ytb-ease-spring);
       }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {
@@ -1754,6 +1886,9 @@
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
         #${PANEL_ID}, .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        /* The Cluster fan is a reachability affordance, not decoration, so it
+           still applies — it just snaps instead of animating. */
+        .${DOT_CLASS} { transition: none; }
         /* Unseen: a static 2px accent ring replaces the looping halo. */
         .${DOT_UNSEEN_CLASS} {
           animation: none;

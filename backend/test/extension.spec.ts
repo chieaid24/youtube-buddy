@@ -309,6 +309,60 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.crossedNotes(notes, 10, 11)).toEqual([]);
 	});
 
+	it('groups overlapping Note Dots into transitive Dot Clusters', () => {
+		const cluster = (fractions: number[], barWidth: number, diameter: number): number[][] =>
+			window.YTB.clusterDots(fractions, barWidth, diameter);
+		// A lone dot is a Cluster of one; two dots well over a diameter apart do NOT
+		// overlap (bar 1000px, dot 6px: 0.3 apart == 300px).
+		expect(cluster([0.2], 1000, 6)).toEqual([[0]]);
+		expect(cluster([0.2, 0.5], 1000, 6)).toEqual([[0], [1]]);
+		// Touching boundary is inclusive (<=): centres exactly one diameter apart
+		// merge. Uses exact binary fractions (bar 1024, dot 8) so no float noise
+		// straddles the boundary — 0.5078125 - 0.5 == 8/1024 exactly.
+		expect(cluster([0.5, 0.5078125], 1024, 8)).toEqual([[0, 1]]);
+		// Overlapping pair (5px apart) merges; clusters return left to right,
+		// members by fraction (the later-listed earlier dot leads the group).
+		expect(cluster([0.505, 0.5], 1000, 6)).toEqual([[1, 0]]);
+		// Transitive chain: three dots each 4px from the NEXT are one Cluster even
+		// though the outer two (8px apart, over a diameter) do not touch.
+		expect(cluster([0.5, 0.504, 0.508], 1000, 6)).toEqual([[0, 1, 2]]);
+		// Identical timestamps overlap (zero distance) — one Cluster.
+		expect(cluster([0.4, 0.4], 1000, 6)).toEqual([[0, 1]]);
+		// A separate far dot stays its own Cluster.
+		expect(cluster([0.5, 0.504, 0.9], 1000, 6)).toEqual([[0, 1], [2]]);
+		// Degenerate inputs.
+		expect(cluster([], 1000, 6)).toEqual([]);
+	});
+
+	it('fans a Dot Cluster evenly about its centroid, clamped to the bar', () => {
+		const fan = (fractions: number[], gap: number, barWidth: number, diameter: number): number[] =>
+			window.YTB.fanOffsets(fractions, gap, barWidth, diameter);
+		// A lone dot never moves.
+		expect(fan([0.5], 14, 1000, 6)).toEqual([0]);
+		// A co-timed pair separates symmetrically by the gap about the centroid.
+		expect(fan([0.5, 0.5], 14, 1000, 6)).toEqual([-7, 7]);
+		// Offsets return in INPUT order but slots go by timestamp: the earlier dot
+		// takes the left slot regardless of input order.
+		expect(fan([0.5, 0.5], 14, 1000, 6)).toEqual([-7, 7]);
+		// A tight triple centred at 0.5 (bar 1000 -> 500px) fans to 500 +/- gap.
+		const triple = fan([0.5, 0.5, 0.5], 20, 1000, 6);
+		expect(triple).toEqual([-20, 0, 20]);
+		// Edge clamp: a pair hard against the right edge slides left so no circle
+		// (radius 3) is pushed past 1000. Fanned centres would be 998+/-7 = [991,1005];
+		// the whole fan shifts by -8 so the rightmost centre lands at 997 = 1000-3.
+		const right = fan([0.998, 0.998], 14, 1000, 6);
+		// original centre px = 998; offsets = clampedCentre - 998.
+		expect(right[0]).toBeCloseTo(991 - 8 - 998, 5); // -15
+		expect(right[1]).toBeCloseTo(1005 - 8 - 998, 5); // -1
+		// Left-edge clamp mirrors it: fanned centres [-5, 9] shift +8 so the left
+		// circle sits at 3 = radius.
+		const left = fan([0.002, 0.002], 14, 1000, 6);
+		expect(left[0]).toBeCloseTo(-5 + 8 - 2, 5); // 1
+		expect(left[1]).toBeCloseTo(9 + 8 - 2, 5); // 15
+		// Degenerate input.
+		expect(fan([], 14, 1000, 6)).toEqual([]);
+	});
+
 	it('routes a video play: load-churn grace holds the panel, later plays dismiss it', () => {
 		// No panel open: a play is nothing to do with the Expanded Note.
 		expect(window.YTB.panelPlayAction({ panelOpen: false, withinGrace: true })).toBe('ignore');
