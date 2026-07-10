@@ -13,8 +13,9 @@
 // rule: it auto-scrolls to the newest item only while the viewer is already
 // at the bottom, otherwise the rebuild preserves their exact scroll position.
 // Feed link rule (CONTEXT.md): on a reply/mention row only the quoted body
-// links — to the video at the Note's timestamp, opening its Expanded Note on
-// arrival; on System Messages and Watch Notices only the video title links
+// links — to the video at YOUR OWN place (`/watch?v=<id>`, no `&t=` seek,
+// ADR-0010): you arrive paused with the Unseen dot(s) pulsing, and choose
+// which to open; on System Messages and Watch Notices only the video title links
 // (to the video's watch page). Everything else in a row — author, action,
 // context, timestamp — is plain text, and a struck System Message is the sole
 // exception: no link at all.
@@ -308,7 +309,7 @@
 		// Reply-Mention, the Note itself for a Note-Mention. Absent (parent not in
 		// this Room read) leaves the quoted body non-clickable.
 		const target = item.note;
-		const canOpen = Boolean(target && target.videoId && target.id && Number.isFinite(Number(target.timestamp)));
+		const canOpen = Boolean(target && target.videoId);
 
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item';
@@ -325,20 +326,20 @@
 		// Only the quoted body is the link (CONTEXT.md Room Feed link rule): the
 		// author, action, context, and timestamp stay plain text, so clicking
 		// anywhere but the body does nothing. The anchor navigates to the video at
-		// the Note's timestamp (SPA on YouTube, full reload in tests) and records
-		// the open-target so notes.js opens the Expanded Note on arrival's first
-		// Room read. No preventDefault: the anchor IS the navigation.
+		// YOUR OWN place — `/watch?v=<id>` with no `&t=` seek (ADR-0010, SPA on
+		// YouTube, full reload in tests) — and records a short-lived arrival
+		// handshake so notes.js pauses you there IF an Unseen dot is on that video.
+		// No preventDefault: the anchor IS the navigation.
 		const body = document.createElement(canOpen ? 'a' : 'span');
 		body.className = canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text';
 		body.textContent = '"' + record.body + '"';
 		if (canOpen) {
-			const seconds = Math.max(0, Math.floor(Number(target.timestamp)));
-			body.href = '/watch?v=' + encodeURIComponent(target.videoId) + '&t=' + seconds;
-			// On a reply row the quoted text is the Reply, but the link lands on its
-			// parent Note's video and moment — neither of which the row always shows.
-			body.title = YTB.noteLinkTooltip(target);
+			body.href = '/watch?v=' + encodeURIComponent(target.videoId);
+			// The visible text is the quoted body; the tooltip names where the link
+			// lands (the parent Note's video, which a reply row need not otherwise show).
+			body.title = YTB.titleLinkTooltip(target.videoTitle);
 			body.addEventListener('click', () => {
-				YTB.setPendingNoteOpen({ videoId: target.videoId, noteId: target.id });
+				YTB.setPendingArrival(target.videoId);
 			});
 		}
 

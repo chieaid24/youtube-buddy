@@ -1687,13 +1687,14 @@ test('Room Feed windows the newest 20 behind Show more; reveals and rebuilds kee
 	}
 });
 
-test('a Room Feed reply row opens its Expanded Note on arrival — only the body links, and it survives load churn', async () => {
+test('a Room Feed reply row lands you at your own place, paused, with the Unseen dot pulsing — no seek, no panel (ADR-0010)', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
 	try {
 		// The viewer authored a Note; a Buddy replied to it — so the Room Feed
-		// carries a "replied to your note" row pointing at that Note.
+		// carries a "replied to your note" row, and the reply leaves the Note's dot
+		// Unseen (it addresses the viewer, and the seen set starts empty).
 		await stubRoomBackend(context, {
 			notes: [
 				{
@@ -1711,7 +1712,7 @@ test('a Room Feed reply row opens its Expanded Note on arrival — only the body
 			replies: [{ id: 'reply-1', noteId: 'note-1', clientId: 'buddy-1', name: 'Sam', body: 'love this', createdAt: 2 }],
 		});
 		// The home route serves the browse fixture (where the Feed injects); the
-		// watch route serves a playable fixture (where notes.js opens the panel).
+		// watch route serves a playable fixture (where notes.js draws the dot).
 		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
 		await context.route('https://www.youtube.com/**', (route) => {
 			const body = new URL(route.request().url()).pathname === '/watch' ? playbackFixture(mediaSrc) : homeFixture;
@@ -1729,26 +1730,28 @@ test('a Room Feed reply row opens its Expanded Note on arrival — only the body
 		await expect(row.locator('a')).toHaveCount(1); // exactly one link — the body
 		const link = row.locator('a.ytb-hs-text-link');
 		await expect(link).toHaveText('"love this"'); // the quoted reply body only
-		await expect(link).toHaveAttribute('href', '/watch?v=parent-video&t=4'); // seek baked in
-		// The tooltip names where the link lands. This Note captured no title, so
-		// the tooltip names only the moment.
-		await expect(link).toHaveAttribute('title', 'Open this note at 0:04');
+		// The anchor hands you the VIDEO, not the moment: no `&t=` seek (ADR-0010).
+		await expect(link).toHaveAttribute('href', '/watch?v=parent-video');
+		// This Note captured no title, so the tooltip falls back to the video label.
+		await expect(link).toHaveAttribute('title', 'Watch this video');
 
-		// Clicking the body records the open-target, then navigates to the video (a
-		// full reload here; an SPA nav on real YouTube — the handshake survives both).
+		// Clicking the body records the arrival handshake, then navigates to the
+		// video (a full reload here; an SPA nav on real YouTube — it survives both).
 		await link.click();
-		await page.waitForURL(/\/watch\?v=parent-video&t=4$/);
+		await page.waitForURL(/\/watch\?v=parent-video$/);
 
-		// On arrival the parent Note's Expanded Note opens once its Room read lands.
-		const panel = page.locator('#ytb-note-panel');
-		await expect(panel).toBeVisible();
-		await expect(panel.locator('.ytb-panel-body')).toContainText('my moment');
+		// No Expanded Note auto-opens: the panel is nowhere near the timeline it is
+		// anchored to. The Unseen dot pulses instead, and you choose to open it.
+		const dot = page.locator('.ytb-note-dot[data-ytb-note-id="note-1"]');
+		await nudgeUntil(page, () => expect(dot).toHaveClass(/ytb-note-dot-unseen/, { timeout: 700 }));
+		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
 
-		// Load churn must NOT dismiss it. Reproduce the two culprits: a duplicate
-		// navigation-finish for the SAME url (YouTube re-emits these as the watch
-		// page settles) and the player's autoplay `play` (no user gesture) starting
-		// after the panel opened. Both leave the panel open, and the play is
-		// re-paused so the viewer can read the Note.
+		// Arrival left the player paused at your own place, and it holds through the
+		// watch page's autoplay settling. Reproduce the churn: a duplicate
+		// navigation-finish for the SAME url plus the player's autoplay `play` (no
+		// user gesture). The grace re-pauses it; the dot keeps pulsing (the row
+		// click Acknowledged nothing), and still no panel.
+		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 		await page.evaluate(() => {
 			const url = location.href;
 			const videoId = new URL(url).searchParams.get('v');
@@ -1756,9 +1759,9 @@ test('a Room Feed reply row opens its Expanded Note on arrival — only the body
 			document.querySelector('video')?.play();
 		});
 		await page.waitForTimeout(300);
-		await expect(panel).toBeVisible();
-		await expect(panel.locator('.ytb-panel-body')).toContainText('my moment');
 		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+		await expect(dot).toHaveClass(/ytb-note-dot-unseen/);
+		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -1835,17 +1838,15 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 		await nudgeUntil(page, () => expect(replyRow).toHaveCount(1, { timeout: 700 }));
 		await expect(replyRow.locator('.ytb-hs-context')).toHaveText('on "Rick Astley - Never Gonna Give You Up"');
 		await expect(replyRow.locator('.ytb-hs-context a')).toHaveCount(0);
-		// The body link's tooltip names that same video and the Note's moment.
-		await expect(replyRow.locator('a.ytb-hs-text-link')).toHaveAttribute(
-			'title',
-			'Open this note on "Rick Astley - Never Gonna Give You Up" at 0:04',
-		);
+		// The body link navigates to the video (no seek, ADR-0010); its tooltip
+		// names that same video.
+		await expect(replyRow.locator('a.ytb-hs-text-link')).toHaveAttribute('title', 'Watch "Rick Astley - Never Gonna Give You Up"');
 
 		// A Note with no captured title names no video — never a placeholder.
 		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'mentioned you' });
 		await expect(mentionRow).toHaveCount(1);
 		await expect(mentionRow.locator('.ytb-hs-context')).toHaveCount(0);
-		await expect(mentionRow.locator('a.ytb-hs-text-link')).toHaveAttribute('title', 'Open this note at 0:09');
+		await expect(mentionRow.locator('a.ytb-hs-text-link')).toHaveAttribute('title', 'Watch this video');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
