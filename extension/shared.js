@@ -808,9 +808,7 @@ const YTB = {
 		const radius = Math.max(0, Number(dotDiameter) || 0) / 2;
 		// Rank members by timestamp to assign evenly spaced fan slots, remembering
 		// each original position so the offsets return in input order.
-		const ranked = members
-			.map((fraction, index) => ({ index, fraction: Number(fraction) || 0 }))
-			.sort((a, b) => a.fraction - b.fraction);
+		const ranked = members.map((fraction, index) => ({ index, fraction: Number(fraction) || 0 })).sort((a, b) => a.fraction - b.fraction);
 		const centroidPx = (ranked.reduce((sum, m) => sum + m.fraction, 0) / n) * width;
 		// Target fanned centers: evenly spaced by `step`, symmetric about the
 		// centroid so the Cluster keeps its footing while opening up.
