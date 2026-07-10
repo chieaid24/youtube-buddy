@@ -8,12 +8,16 @@
 // Room" to the recommender; struck through per Event once superseded or
 // un-recommended — ADR-0007), and Watch Notices ("X started watching ...",
 // shown to the recommender when a Buddy watches their pick), grouped under day
-// dividers, newest at the bottom, auto-scrolled. Feed link rule (CONTEXT.md):
-// on a reply/mention row only the quoted body links — to the video at the
-// Note's timestamp, opening its Expanded Note on arrival; on System Messages
-// and Watch Notices only the video title links (to the video's watch page).
-// Everything else in a row — author, action, context, timestamp — is plain
-// text, and a struck System Message is the sole exception: no link at all.
+// dividers, newest at the bottom. The Feed is windowed to the newest 20 items
+// behind an inline "Show more" control (YTB.tailFeed), and follows the chat
+// rule: it auto-scrolls to the newest item only while the viewer is already
+// at the bottom, otherwise the rebuild preserves their exact scroll position.
+// Feed link rule (CONTEXT.md): on a reply/mention row only the quoted body
+// links — to the video at the Note's timestamp, opening its Expanded Note on
+// arrival; on System Messages and Watch Notices only the video title links
+// (to the video's watch page). Everything else in a row — author, action,
+// context, timestamp — is plain text, and a struck System Message is the sole
+// exception: no link at all.
 // Right: Recommended for you (ADR-0007) — the Room's Recommendations whose
 // `addedBy` is NOT the viewer, minus locally Dismissed videoIds, as a
 // horizontal thumbnail row with a live "Watched by ..." attribution and a
@@ -60,6 +64,30 @@
 	let hiddenPref = null;
 	let dismissedIds = new Set(); // this Room's local Dismissals (videoIds)
 	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
+
+	// The Feed's reveal window — transient view state (a number in module
+	// state, deliberately never chrome.storage.local: the Feed has no
+	// read/unread state by design). Only the newest `revealCount` items render;
+	// each "Show more" click reveals FEED_PAGE older ones. The count survives
+	// polls, ytb:mutation re-injection attempts, and the Dismiss re-render; it
+	// resets on a new visit to the home route and on a Room Code change —
+	// reopening the Feed is like reopening a chat. `lastFeedTotal` remembers the
+	// previous render's FULL item count so items a poll appends while the
+	// viewer is scrolled up grow the window rather than sliding visible rows
+	// out of its top.
+	const FEED_PAGE = 20;
+	// "At the bottom" tolerance: fractional scroll heights and zoom rounding
+	// mean scrollTop rarely lands exactly on scrollHeight - clientHeight.
+	const PIN_PX = 8;
+	let revealCount = FEED_PAGE;
+	let lastFeedTotal = null; // null: nothing rendered yet to diff against
+	let pinOverride = false; // force the next render to the bottom (post-reset)
+
+	function resetFeedWindow() {
+		revealCount = FEED_PAGE;
+		lastFeedTotal = null;
+		pinOverride = true; // a fresh Feed opens scrolled to the newest item
+	}
 
 	injectStyle();
 
@@ -112,6 +140,15 @@
 		const detail = lastDetail;
 		const roomCode = detail && detail.roomCode;
 
+		// The chat rule: capture the Feed's scroll state BEFORE the rebuild wipes
+		// it. Pinned to the bottom (or no Feed yet) means "follow the newest";
+		// scrolled up means the viewer is reading their history — preserve their
+		// exact spot instead of yanking them back down.
+		const prevScroll = section.querySelector('.ytb-hs-feed-scroll');
+		const pinned = pinOverride || !prevScroll || prevScroll.scrollHeight - prevScroll.clientHeight - prevScroll.scrollTop <= PIN_PX;
+		const prevTop = prevScroll ? prevScroll.scrollTop : 0;
+		pinOverride = false;
+
 		const head = document.createElement('header');
 		head.className = 'ytb-hs-head';
 		const dot = document.createElement('span');
@@ -138,14 +175,16 @@
 			locked.textContent = 'This Room is full, so nothing can be shown here.';
 			body.append(locked);
 		} else {
-			body.append(buildFeedColumn(detail), buildRecommendedColumn(detail));
+			body.append(buildFeedColumn(detail, pinned), buildRecommendedColumn(detail));
 		}
 
 		section.replaceChildren(head, body);
 
-		// Chat order: keep the newest Feed items in view on every render.
+		// Chat order: follow the newest item only while the viewer was already at
+		// the bottom; otherwise restore their exact scroll position — the window
+		// growth above guarantees the same rows still sit at the same offsets.
 		const scroll = section.querySelector('.ytb-hs-feed-scroll');
-		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+		if (scroll) scroll.scrollTop = pinned ? scroll.scrollHeight : prevTop;
 	}
 
 	// The header's close control: a third entry point to the same per-install
@@ -173,7 +212,7 @@
 
 	// --- Room Feed (left column) ---
 
-	function buildFeedColumn(detail) {
+	function buildFeedColumn(detail, pinned) {
 		const column = document.createElement('section');
 		column.className = 'ytb-hs-feed';
 		column.setAttribute('aria-label', 'Room Feed');
@@ -189,8 +228,17 @@
 
 		const roster = YTB.roomRoster(detail);
 		const groups = YTB.buildFeed(detail, myClientId);
+		const total = groups.reduce((sum, group) => sum + group.items.length, 0);
 
-		if (groups.length === 0) {
+		// Items a poll appended while the viewer is scrolled up must not slide
+		// the row they are reading out of the top of the window: grow the reveal
+		// count by the number appended. Pinned to the bottom, the count stays put
+		// and the window slides instead — an idle home page must not grow its
+		// DOM without bound.
+		if (lastFeedTotal !== null && !pinned && total > lastFeedTotal) revealCount += total - lastFeedTotal;
+		lastFeedTotal = total;
+
+		if (total === 0) {
 			const empty = document.createElement('p');
 			empty.className = 'ytb-hs-empty';
 			empty.textContent = 'Nothing yet. Replies to your notes and @mentions of you land here.';
@@ -198,7 +246,50 @@
 			return column;
 		}
 
-		for (const group of groups) {
+		fillFeedScroll(scroll, groups, roster);
+		return column;
+	}
+
+	// Populate the Feed's scroll region: the newest `revealCount` items
+	// (YTB.tailFeed), behind a "Show more" control that sits above the topmost
+	// day divider, inline in the scroll content — it scrolls with the history
+	// rather than floating over it, and it is absent once nothing older is
+	// hidden. Re-run in place on each reveal.
+	function fillFeedScroll(scroll, groups, roster) {
+		const { groups: visible, hidden } = YTB.tailFeed(groups, revealCount);
+		scroll.replaceChildren();
+
+		if (hidden > 0) {
+			const more = document.createElement('button');
+			more.type = 'button';
+			more.className = 'ytb-hs-more';
+			more.textContent = 'Show more';
+			more.setAttribute('aria-label', 'Show ' + Math.min(FEED_PAGE, hidden) + ' older Feed items');
+			more.addEventListener('click', () => {
+				// Reveal the next page and leave the viewer looking at the same row:
+				// every height change happens ABOVE the previously-topmost visible row
+				// (rows prepended, this control replaced or removed), so compensating
+				// scrollTop by the height delta keeps that row exactly where it was.
+				const prevHeight = scroll.scrollHeight;
+				const prevTop = scroll.scrollTop;
+				revealCount += FEED_PAGE;
+				fillFeedScroll(scroll, groups, roster);
+				scroll.scrollTop = prevTop + (scroll.scrollHeight - prevHeight);
+				// Keep the keyboard anchored (the rebuild dropped the old control):
+				// focus its successor, or on the final reveal the first revealed row,
+				// rather than dropping the keyboard user onto the document. Never let
+				// focus() scroll — that would undo the compensation above.
+				const next = scroll.querySelector('.ytb-hs-more');
+				const anchor = next || scroll.querySelector('.ytb-hs-item');
+				if (anchor) {
+					if (!next) anchor.tabIndex = -1;
+					anchor.focus({ preventScroll: true });
+				}
+			});
+			scroll.append(more);
+		}
+
+		for (const group of visible) {
 			const divider = document.createElement('div');
 			divider.className = 'ytb-hs-day';
 			divider.textContent = YTB.dayLabel(group.dayKey);
@@ -209,7 +300,6 @@
 				else scroll.append(buildFeedRow(item, roster));
 			}
 		}
-		return column;
 	}
 
 	function buildFeedRow(item, roster) {
@@ -523,7 +613,12 @@
 
 	document.addEventListener('ytb:navigate', () => {
 		if (!YTB.isContextActive()) return;
+		const wasHome = onHome;
 		onHome = isHomePath();
+		// A NEW visit to the home route reopens the Feed like reopening a chat:
+		// the reveal window resets to the newest page. Same-page navigates (e.g.
+		// commitCode's poll nudge) keep the viewer's window.
+		if (onHome && !wasHome) resetFeedWindow();
 		ensureSection();
 	});
 
@@ -546,6 +641,7 @@
 		if (code !== dismissedRoom) {
 			dismissedIds = new Set();
 			dismissedRoom = code;
+			resetFeedWindow(); // a Room Code change reopens the Feed fresh
 		}
 		if (code) {
 			const persisted = await YTB.dismissedVideoIds(code);
@@ -659,6 +755,27 @@
         color: var(--ytb-ink-muted);
       }
       #${SECTION_ID} .ytb-hs-day:first-child { margin-top: 0; }
+      /* Show more: inline at the top of the scrollback, above the topmost day
+         divider; scrolls with the content (not sticky) and adds no height to
+         the section — the scroll region's max-height is unchanged. */
+      #${SECTION_ID} .ytb-hs-more {
+        display: block;
+        width: 100%;
+        margin: 0 0 4px;
+        padding: 5px 8px;
+        border: 0;
+        border-radius: var(--ytb-r-sm);
+        background: var(--ytb-accent-050);
+        color: var(--ytb-accent-800);
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        cursor: pointer;
+        transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${SECTION_ID} .ytb-hs-more:hover { background: var(--ytb-accent-100); }
+      #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-item { margin: 3px 0; overflow-wrap: anywhere; }
       /* Only the quoted body is the link; hover/focus affordances live on it. */
       #${SECTION_ID} a.ytb-hs-text-link {
@@ -774,7 +891,7 @@
       #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 12px; color: var(--ytb-danger-text); }
       @media (prefers-reduced-motion: reduce) {
-        #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close { transition: none; }
+        #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-more { transition: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
