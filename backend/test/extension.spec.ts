@@ -984,7 +984,16 @@ describe('Unseen Mentions & Replies (ADR-0010)', () => {
 			mentions: [me],
 			createdAt: 1300,
 		},
-		{ id: 'n-reaction', clientId: 'bob22222', videoId: 'v1', timestamp: 50, kind: 'emoji', body: '\u{1F525}', mentions: [me], createdAt: 1400 },
+		{
+			id: 'n-reaction',
+			clientId: 'bob22222',
+			videoId: 'v1',
+			timestamp: 50,
+			kind: 'emoji',
+			body: '\u{1F525}',
+			mentions: [me],
+			createdAt: 1400,
+		},
 		{ id: 'n-self', clientId: me, videoId: 'v1', timestamp: 60, kind: 'text', body: 'me @ me', mentions: [me], createdAt: 1500 },
 	];
 	const replies = [
