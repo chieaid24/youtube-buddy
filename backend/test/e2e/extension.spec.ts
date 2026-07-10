@@ -623,6 +623,81 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 	}
 });
 
+test('an Unseen Mention pulses its Note Dot; hovering Acknowledges it and a reload keeps it clear', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		// One Buddy Note Mentioning the viewer (viewer-e2e, seeded below) and one
+		// plain Buddy Note: only the Mention's dot may pulse (ADR-0010).
+		await stubRoomBackend(context, {
+			notes: [
+				{
+					id: 'n-mention',
+					clientId: 'buddy-1',
+					name: 'Buddy',
+					videoId: 'fixture-video',
+					timestamp: 4,
+					kind: 'text',
+					body: 'look at this',
+					spoiler: false,
+					mentions: ['viewer-e2e'],
+					createdAt: 1,
+				},
+				{
+					id: 'n-plain',
+					clientId: 'buddy-1',
+					name: 'Buddy',
+					videoId: 'fixture-video',
+					timestamp: 12,
+					kind: 'text',
+					body: 'no mention here',
+					spoiler: false,
+					createdAt: 2,
+				},
+			],
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+
+		const popup = await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+
+		const mentionDot = page.locator('.ytb-note-dot[data-ytb-note-id="n-mention"]');
+		const plainDot = page.locator('.ytb-note-dot[data-ytb-note-id="n-plain"]');
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(2, { timeout: 700 }));
+
+		// The Mention's dot pulses (the seen set starts empty); the plain dot never does.
+		await nudgeUntil(page, () => expect(mentionDot).toHaveClass(/ytb-note-dot-unseen/, { timeout: 700 }));
+		await expect(plainDot).not.toHaveClass(/ytb-note-dot-unseen/);
+
+		// Hovering the dot Acknowledges it: the pulse stops...
+		await mentionDot.hover();
+		await expect(mentionDot).not.toHaveClass(/ytb-note-dot-unseen/);
+		// ...and the seen state lands in Room-scoped chrome.storage.local, never on
+		// the wire (the stub records every request; none may carry the seen ids).
+		await expect
+			.poll(async () => popup.evaluate(async () => (await chrome.storage.local.get('seenItems')).seenItems))
+			.toEqual({ roome2e: ['n-mention'] });
+
+		// A reload re-reads the Room and the persisted seen set: Acknowledged stays
+		// silent, and nothing else has started pulsing.
+		await page.reload();
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(2, { timeout: 700 }));
+		await page.waitForTimeout(400); // give the async seen-state sync a beat to derive pulses
+		await expect(mentionDot).not.toHaveClass(/ytb-note-dot-unseen/);
+		await expect(plainDot).not.toHaveClass(/ytb-note-dot-unseen/);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('Playback Notifications anchor at each of the four Notification Position edges, live', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

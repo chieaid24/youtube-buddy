@@ -155,6 +155,11 @@
 					roomCode: activeRoomCode,
 					myClientId,
 					locked: Boolean(locked),
+					// Whether this broadcast carries a SUCCESSFUL Room read. A failed GET
+					// still broadcasts (with empty arrays) so consumers reconcile, but
+					// they must not treat the emptiness as truth — notes.js only prunes
+					// the Unseen seen-set (ADR-0010) against an ok read.
+					ok: Boolean(r.ok),
 				},
 			}),
 		);

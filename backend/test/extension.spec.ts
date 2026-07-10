@@ -964,6 +964,152 @@ describe('recommended for you helpers (ADR-0007)', () => {
 	});
 });
 
+describe('Unseen Mentions & Replies (ADR-0010)', () => {
+	const me = 'me111111';
+	// One Room read exercising every Unseen rule at once. n-reaction carries a
+	// deliberately malformed `mentions` (the composer never sends one for a
+	// Reaction) to prove the derivation excludes Reactions structurally.
+	const notes = [
+		{ id: 'n-mention', clientId: 'bob22222', videoId: 'v1', timestamp: 10, kind: 'text', body: 'look', mentions: [me], createdAt: 1000 },
+		{ id: 'n-plain', clientId: 'bob22222', videoId: 'v1', timestamp: 20, kind: 'text', body: 'no mention', createdAt: 1100 },
+		{ id: 'n-mine', clientId: me, videoId: 'v1', timestamp: 30, kind: 'text', body: 'my note', createdAt: 1200 },
+		{
+			id: 'n-spoiler',
+			clientId: 'ana33333',
+			videoId: 'v1',
+			timestamp: 40,
+			kind: 'text',
+			body: 'the ending',
+			spoiler: true,
+			mentions: [me],
+			createdAt: 1300,
+		},
+		{
+			id: 'n-reaction',
+			clientId: 'bob22222',
+			videoId: 'v1',
+			timestamp: 50,
+			kind: 'emoji',
+			body: '\u{1F525}',
+			mentions: [me],
+			createdAt: 1400,
+		},
+		{ id: 'n-self', clientId: me, videoId: 'v1', timestamp: 60, kind: 'text', body: 'me @ me', mentions: [me], createdAt: 1500 },
+	];
+	const replies = [
+		{ id: 'r-to-mine', clientId: 'bob22222', noteId: 'n-mine', body: 'nice', createdAt: 2000 },
+		{ id: 'r-mention', clientId: 'ana33333', noteId: 'n-plain', body: 'hey', mentions: [me], createdAt: 2100 },
+		{ id: 'r-mine', clientId: me, noteId: 'n-mention', body: 'thanks', createdAt: 2200 },
+		{ id: 'r-others', clientId: 'ana33333', noteId: 'n-plain', body: 'between others', createdAt: 2300 },
+		{ id: 'r-orphan', clientId: 'bob22222', noteId: 'n-gone', body: 'parent aged out', mentions: [me], createdAt: 2400 },
+		{ id: 'r-on-reaction', clientId: 'bob22222', noteId: 'n-reaction', body: 'malformed', mentions: [me], createdAt: 2500 },
+	];
+	const records = { notes, replies };
+
+	it('shares one "addressed to me" rule with the Room Feed (noteAddressesMe / replyAddressesMe)', () => {
+		expect(window.YTB.noteAddressesMe(notes[0], me)).toBe(true); // foreign, mentions me
+		expect(window.YTB.noteAddressesMe(notes[1], me)).toBe(false); // foreign, no mention
+		expect(window.YTB.noteAddressesMe(notes[5], me)).toBe(false); // my own write is never news to me
+		expect(window.YTB.noteAddressesMe(null, me)).toBe(false);
+
+		const mine = notes[2];
+		const foreign = notes[1];
+		expect(window.YTB.replyAddressesMe(replies[0], mine, me)).toBe(true); // Buddy Reply under my Note
+		expect(window.YTB.replyAddressesMe(replies[1], foreign, me)).toBe(true); // Mentions me under anyone's Note
+		expect(window.YTB.replyAddressesMe(replies[3], foreign, me)).toBe(false); // Buddies talking to each other
+		expect(window.YTB.replyAddressesMe(replies[2], notes[0], me)).toBe(false); // my own Reply
+		expect(window.YTB.replyAddressesMe(replies[4], null, me)).toBe(true); // a Mention needs no parent to address me
+	});
+
+	it('derives the pulsing dots: Mentions and addressed Replies, never own writes or Reactions', () => {
+		// n-mention (Mention), n-spoiler (a locked Spoiler CAN pulse), n-mine (a
+		// Buddy replied to my Note), n-plain (a Reply beneath it Mentions me).
+		// NOT n-reaction (a Reaction never pulses, even malformed), NOT n-self
+		// (own writes), and r-orphan has no dot to anchor to.
+		expect(window.YTB.unseenNoteIds(records, me, []).sort()).toEqual(['n-mention', 'n-mine', 'n-plain', 'n-spoiler']);
+		// Another member sees their own Unseen set, not mine: bob's Notes pulse
+		// for bob where others replied beneath them (r-mine, r-mention, r-others),
+		// and ana — whom nothing addresses — sees no pulse at all.
+		expect(window.YTB.unseenNoteIds(records, 'bob22222', []).sort()).toEqual(['n-mention', 'n-plain']);
+		expect(window.YTB.unseenNoteIds(records, 'ana33333', [])).toEqual([]);
+		// Defensive: an absent read pulses nothing.
+		expect(window.YTB.unseenNoteIds(undefined as never, me, [])).toEqual([]);
+	});
+
+	it('drops seen ids from the pulse set', () => {
+		expect(window.YTB.unseenNoteIds(records, me, ['n-mention', 'r-to-mine']).sort()).toEqual(['n-plain', 'n-spoiler']);
+		expect(window.YTB.unseenNoteIds(records, me, ['n-mention', 'n-spoiler', 'r-to-mine', 'r-mention'])).toEqual([]);
+	});
+
+	it('Acknowledge clears exactly the ids anchored to one dot', () => {
+		expect(window.YTB.acknowledgeTargets(records, me, 'n-mention')).toEqual(['n-mention']); // my own r-mine is not included
+		expect(window.YTB.acknowledgeTargets(records, me, 'n-mine')).toEqual(['r-to-mine']); // my Note itself is not addressed to me
+		expect(window.YTB.acknowledgeTargets(records, me, 'n-plain')).toEqual(['r-mention']); // r-others is not addressed to me
+		expect(window.YTB.acknowledgeTargets(records, me, 'n-spoiler')).toEqual(['n-spoiler']);
+		expect(window.YTB.acknowledgeTargets(records, me, 'n-reaction')).toEqual([]);
+		expect(window.YTB.acknowledgeTargets(records, me, 'n-gone')).toEqual([]);
+	});
+
+	it('Acknowledging one dot stops only that pulse', async () => {
+		storage = {};
+		const ids = window.YTB.acknowledgeTargets(records, me, 'n-mine');
+		const seen = await window.YTB.markSeen('room', ids);
+		expect(window.YTB.unseenNoteIds(records, me, seen).sort()).toEqual(['n-mention', 'n-plain', 'n-spoiler']);
+	});
+
+	it('never drifts from the Room Feed: pulsing dots are exactly the dots the Feed anchors items to', () => {
+		// Restricted to well-formed records: the Feed also surfaces a Reply whose
+		// parent is gone (nothing on the timeline can anchor it) and would list a
+		// malformed Reaction Mention; neither exists in real data.
+		const wellFormed = {
+			notes: notes.filter((note) => note.id !== 'n-reaction'),
+			replies: replies.filter((reply) => reply.id !== 'r-on-reaction' && reply.id !== 'r-orphan'),
+		};
+		const anchors = new Set<string>();
+		for (const group of buildFeed(wellFormed, me)) {
+			for (const item of group.items) {
+				if (item.type !== 'reply' && item.type !== 'mention') continue;
+				if (item.note) anchors.add(item.note.id);
+			}
+		}
+		expect(new Set(window.YTB.unseenNoteIds(wellFormed, me, []))).toEqual(anchors);
+	});
+
+	it('stores Acknowledged ids per Room in chrome.storage.local, idempotently, without any backend call', async () => {
+		storage = {};
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(window.YTB.seenIds('room-a')).resolves.toEqual([]);
+		await window.YTB.markSeen('room-a', ['n1', 'r1']);
+		await window.YTB.markSeen('room-a', ['r1', 'r2']); // overlapping Acknowledge: idempotent
+		await window.YTB.markSeen('room-b', ['n9']); // Room-scoped, like a Dismiss
+
+		await expect(window.YTB.seenIds('room-a')).resolves.toEqual(['n1', 'r1', 'r2']);
+		await expect(window.YTB.seenIds('room-b')).resolves.toEqual(['n9']);
+		expect(storage.seenItems).toEqual({ 'room-a': ['n1', 'r1', 'r2'], 'room-b': ['n9'] });
+		// Seen state is private and local: no request ever carries it to the backend.
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		// Unpaired (no code) reads empty and writes nothing; junk ids are dropped.
+		await expect(window.YTB.seenIds('')).resolves.toEqual([]);
+		await window.YTB.markSeen('', ['n1']);
+		await window.YTB.markSeen('room-a', ['', 123 as unknown as string]);
+		expect(storage.seenItems).toEqual({ 'room-a': ['n1', 'r1', 'r2'], 'room-b': ['n9'] });
+	});
+
+	it('prunes the seen set against a Room read, keeping other Rooms intact', async () => {
+		storage = { seenItems: { room: ['n1', 'r1', 'r-deleted'], other: ['n9'] } };
+		await expect(window.YTB.pruneSeen('room', ['n1', 'r1', 'n-new'])).resolves.toEqual(['n1', 'r1']);
+		expect(storage.seenItems).toEqual({ room: ['n1', 'r1'], other: ['n9'] });
+		// Nothing aged out: the write is skipped and the list survives unchanged.
+		await expect(window.YTB.pruneSeen('room', ['n1', 'r1'])).resolves.toEqual(['n1', 'r1']);
+		// Unpaired: nothing to prune, nothing written.
+		await expect(window.YTB.pruneSeen('', ['n1'])).resolves.toEqual([]);
+		expect(storage.seenItems).toEqual({ room: ['n1', 'r1'], other: ['n9'] });
+	});
+});
+
 describe('pending Note open handshake (Room Feed row -> notes.js)', () => {
 	it('round-trips a target, stamping it with a time', async () => {
 		storage = {};
@@ -1049,6 +1195,17 @@ declare global {
 			): Array<{ videoId: string; addedBy: string; addedAt: number }>;
 			dismissedVideoIds(code: string): Promise<string[]>;
 			dismissVideo(code: string, videoId: string): Promise<string[]>;
+			noteAddressesMe(note: { clientId?: string; mentions?: string[] } | null, myClientId: string): boolean;
+			replyAddressesMe(
+				reply: { clientId?: string; mentions?: string[] } | null,
+				parentNote: { clientId?: string } | null,
+				myClientId: string,
+			): boolean;
+			unseenNoteIds(records: object, myClientId: string, seenIds?: Iterable<string>): string[];
+			acknowledgeTargets(records: object, myClientId: string, noteId: string): string[];
+			seenIds(code: string): Promise<string[]>;
+			markSeen(code: string, ids: Iterable<string>): Promise<string[]>;
+			pruneSeen(code: string, liveIds: Iterable<string>): Promise<string[]>;
 			ADJECTIVES: string[];
 			hashClientId(clientId: string): number;
 			baseBuddyName(clientId: string, name?: string): string;
