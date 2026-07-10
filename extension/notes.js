@@ -92,16 +92,17 @@
 	let labelTimer = null;
 	let pendingReply = false;
 	let pendingDelete = false;
-	// A Room Feed reply/mention row (home-section.js) recorded a Note to open on
-	// arrival; consumed on the first Room read for its video. Loaded once (covers
-	// a full reload) and mirrored live from storage (covers SPA nav, where this
-	// script stays alive) — see below.
-	let pendingNoteOpen = null;
+	// A Room Feed reply/mention row (home-section.js) recorded the video to pause
+	// on arrival (ADR-0010); consumed on the first Room read for that video, which
+	// pauses the player only if an Unseen dot is on it. Loaded once (covers a full
+	// reload) and mirrored live from storage (covers SPA nav, where this script
+	// stays alive) — see below.
+	let pendingArrival = null;
 	// Timestamp until which a `play` is treated as watch-page load churn (autoplay
-	// settling in after a Room Feed row opened this Note) instead of a deliberate
-	// resume: within it the panel is kept open and the video re-paused. Armed only
-	// by a pending open; a real navigation clears it. See YTB.panelPlayAction.
-	let pendingOpenGuardUntil = 0;
+	// settling in after a Room Feed row paused us on arrival) instead of a
+	// deliberate resume: within it the arrival pause is re-asserted. Armed only by
+	// the arrival pause; a real navigation clears it. See YTB.playAction.
+	let arrivalGraceUntil = 0;
 
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
@@ -115,12 +116,12 @@
 		renderDots();
 	});
 
-	// Read any target a Room Feed row left before this script (re)loaded, then
-	// consume it once its Room read lands. On SPA nav this script never reloads,
-	// so the onChanged mirror below picks up the write instead.
-	YTB.getPendingNoteOpen().then((target) => {
-		pendingNoteOpen = target;
-		tryOpenPending();
+	// Read any arrival a Room Feed row left before this script (re)loaded; the
+	// decision (pause iff an Unseen dot is on this video) runs once its Room read
+	// lands. On SPA nav this script never reloads, so the onChanged mirror below
+	// picks up the write instead.
+	YTB.getPendingArrival().then((arrival) => {
+		pendingArrival = arrival;
 	});
 
 	chrome.storage.onChanged.addListener((changes, area) => {
@@ -140,10 +141,11 @@
 			const host = player();
 			if (wrap && host) applyAlertsPosition(wrap, host); // live re-anchor
 		}
-		if ('pendingNoteOpen' in changes) {
-			const next = changes.pendingNoteOpen.newValue;
-			pendingNoteOpen = next && next.videoId && next.noteId ? next : null;
-			tryOpenPending();
+		if ('pendingArrival' in changes) {
+			const next = changes.pendingArrival.newValue;
+			pendingArrival = next && next.videoId ? next : null;
+			// The decision waits for this video's Room read (below); here we only
+			// mirror the write so it survives the SPA navigation about to happen.
 		}
 	});
 
@@ -179,7 +181,6 @@
 		repliesByNoteId = nextReplies;
 		syncSeenState(detail); // async: dots may render below before the pulse set lands
 		renderDots();
-		tryOpenPending(); // a Room Feed row may have asked to open a Note here
 	});
 
 	// ---------------------------------------------------------------------------
@@ -213,6 +214,7 @@
 		if (!code || !myClientId) {
 			seenSet = new Set();
 			unseenDotIds = new Set();
+			tryPendingArrival(); // no Room: consume the handshake without pausing
 			return;
 		}
 		let kept;
@@ -229,6 +231,7 @@
 		recomputeUnseen();
 		if (openNote) acknowledgeDot(openNote.id);
 		renderDots();
+		tryPendingArrival(); // arrival pause depends on the Unseen set just computed
 	}
 
 	/**
@@ -248,38 +251,48 @@
 		renderDots();
 	}
 
-	/**
-	 * If a Room Feed row queued a Note to open and this video now carries it, open
-	 * the Expanded Note and clear the slot. Leaves the slot for a later Room read
-	 * when the Note has not loaded yet (a mismatched video, or a poll that predates
-	 * it); an expired or vanished target is dropped so it never pops on a later
-	 * visit.
-	 */
-	function tryOpenPending() {
-		const target = pendingNoteOpen;
-		if (!target) return;
-		if (Date.now() - (Number(target.at) || 0) > YTB.PENDING_NOTE_OPEN_TTL_MS) {
-			clearPendingOpen();
-			return;
+	/** Does the current video carry at least one Unseen (pulsing) Note Dot? The
+	 * arrival pause is conditional on exactly this (ADR-0010): unseenDotIds is
+	 * Room-wide, so scope it to the notes on this video before deciding. */
+	function hasUnseenDotOnCurrentVideo() {
+		for (const note of notesForCurrentVideo()) {
+			if (unseenDotIds.has(note.id)) return true;
 		}
-		if (target.videoId !== currentVideoId) return; // still en route to the video
-		if (notesHidden) {
-			clearPendingOpen(); // Notes are off: honor the toggle, drop the request
-			return;
-		}
-		const note = (notesByVideoId.get(currentVideoId) || []).find((candidate) => candidate.id === target.noteId);
-		if (!note) return; // not in this read yet — retry on the next one (until TTL)
-		clearPendingOpen();
-		// Arm the load-churn grace BEFORE opening: the watch page is still settling
-		// on arrival, and its autoplay `play` must re-pause and keep this panel open
-		// rather than dismiss it (the whole point of the Feed handshake).
-		pendingOpenGuardUntil = Date.now() + YTB.PANEL_LOAD_GRACE_MS;
-		openPanel(note);
+		return false;
 	}
 
-	function clearPendingOpen() {
-		pendingNoteOpen = null;
-		YTB.clearPendingNoteOpen();
+	/**
+	 * A Room Feed row navigated us here asking to pause on arrival IF there is
+	 * something Unseen to look at (ADR-0010). Runs after each Room read's Unseen
+	 * recompute. On the target video this is our arrival: consume the one-shot
+	 * handshake now (whether or not we pause, so it never fires on a later visit),
+	 * then pause — holding through autoplay's settling `play` — only when Notes are
+	 * visible AND a dot on this video is Unseen. Otherwise nothing happens: never
+	 * seize the player with nothing pulsing, never override Notes Visibility. A
+	 * stale (expired) or other-video handshake is left/dropped until it expires.
+	 */
+	function tryPendingArrival() {
+		const arrival = pendingArrival;
+		if (!arrival) return;
+		if (Date.now() - (Number(arrival.at) || 0) > YTB.PENDING_ARRIVAL_TTL_MS) {
+			clearPendingArrival();
+			return;
+		}
+		if (arrival.videoId !== currentVideoId) return; // still en route, or for another video
+		clearPendingArrival();
+		if (notesHidden || !hasUnseenDotOnCurrentVideo()) return;
+		const video = document.querySelector('video');
+		if (!video) return;
+		// Pause at the viewer's own place and hold through the watch page's autoplay
+		// settling (reusing the load-churn grace); the Unseen dot(s) pulse, and the
+		// viewer chooses which to open.
+		arrivalGraceUntil = Date.now() + YTB.PANEL_LOAD_GRACE_MS;
+		if (!video.paused) video.pause();
+	}
+
+	function clearPendingArrival() {
+		pendingArrival = null;
+		YTB.clearPendingArrival();
 	}
 
 	// composer.js posted a Note/Reaction: insert the complete server record into
@@ -1088,23 +1101,20 @@
 		}
 	});
 
-	// Manually resuming playback closes the panel (without re-pausing) — EXCEPT a
-	// play during the load-churn grace after a Room Feed row opened the panel,
-	// where autoplay kicking in as the watch page settles must not dismiss it.
+	// A play during the arrival grace is autoplay settling in as the watch page
+	// loads (a Room Feed row paused us here) — re-assert the pause so the Unseen
+	// dot(s) stay in view. Otherwise a play is the viewer's deliberate resume:
+	// with an Expanded Note open it dismisses the panel (without re-pausing).
 	document.addEventListener(
 		'play',
 		(event) => {
 			if (!(event.target instanceof HTMLVideoElement)) return;
-			const action = YTB.panelPlayAction({
+			const action = YTB.playAction({
+				withinGrace: Date.now() < arrivalGraceUntil,
 				panelOpen: Boolean(document.getElementById(PANEL_ID)),
-				withinGrace: Date.now() < pendingOpenGuardUntil,
 			});
 			if (action === 'ignore') return;
 			if (action === 'hold') {
-				// Re-assert the pause so the viewer can read the Note. Take the lease
-				// if OPENING didn't (the video wasn't playing yet), so an outside-click
-				// dismissal still resumes the playback the viewer was sent to.
-				pauseLease = true;
 				event.target.pause();
 				return;
 			}
@@ -1287,8 +1297,9 @@
 		// A duplicate navigation-finish for the SAME video — YouTube re-emits these
 		// as the watch page loads (content.js forwards every yt-navigate-finish).
 		// Treat it as a no-op: tearing the panel down here is what dismissed an
-		// Expanded Note a Room Feed row had just opened. Keep the panel, lease, and
-		// alerts; only reconcile dots.
+		// Expanded Note, and clearing the arrival grace here would let autoplay
+		// escape the arrival pause. Keep the panel, lease, grace, and alerts; only
+		// reconcile dots.
 		if (nextVideoId === currentVideoId) {
 			renderDots();
 			return;
@@ -1296,7 +1307,7 @@
 		currentVideoId = nextVideoId;
 		lastPlaybackTime = null;
 		burstCount = 0;
-		pendingOpenGuardUntil = 0;
+		arrivalGraceUntil = 0;
 		dismissPanel({ resume: false });
 		pauseLease = false;
 		document.getElementById(ALERTS_ID)?.replaceChildren();

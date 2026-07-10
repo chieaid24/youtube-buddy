@@ -309,15 +309,15 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.crossedNotes(notes, 10, 11)).toEqual([]);
 	});
 
-	it('routes a video play: load-churn grace holds the panel, later plays dismiss it', () => {
-		// No panel open: a play is nothing to do with the Expanded Note.
-		expect(window.YTB.panelPlayAction({ panelOpen: false, withinGrace: true })).toBe('ignore');
-		expect(window.YTB.panelPlayAction({ panelOpen: false, withinGrace: false })).toBe('ignore');
-		// Panel open + inside the grace after a Room Feed open: autoplay settling in
-		// must re-pause and keep it open, never dismiss.
-		expect(window.YTB.panelPlayAction({ panelOpen: true, withinGrace: true })).toBe('hold');
-		// Panel open + past the grace: a deliberate resume dismisses it as before.
-		expect(window.YTB.panelPlayAction({ panelOpen: true, withinGrace: false })).toBe('dismiss');
+	it('routes a video play: the arrival grace holds, later plays dismiss an open panel', () => {
+		// Inside the arrival grace (a Room Feed row paused us on arrival): autoplay
+		// settling in must re-pause, whatever else is on screen (ADR-0010).
+		expect(window.YTB.playAction({ withinGrace: true, panelOpen: false })).toBe('hold');
+		expect(window.YTB.playAction({ withinGrace: true, panelOpen: true })).toBe('hold');
+		// Past the grace, with an Expanded Note open: a deliberate resume dismisses it.
+		expect(window.YTB.playAction({ withinGrace: false, panelOpen: true })).toBe('dismiss');
+		// Past the grace, no panel: a play is nothing to do with us.
+		expect(window.YTB.playAction({ withinGrace: false, panelOpen: false })).toBe('ignore');
 	});
 });
 
@@ -455,23 +455,9 @@ describe('videoContext', () => {
 	});
 });
 
-// Tooltips for the Room Feed's two link kinds. Both name the destination the
-// row's visible text leaves implicit.
-describe('noteLinkTooltip', () => {
-	it("names the Note's video and moment", () => {
-		expect(window.YTB.noteLinkTooltip({ videoTitle: 'Blade Runner', timestamp: 412 })).toBe('Open this note on "Blade Runner" at 6:52');
-	});
-
-	it('drops the title clause when the Note captured none', () => {
-		expect(window.YTB.noteLinkTooltip({ timestamp: 412 })).toBe('Open this note at 6:52');
-		expect(window.YTB.noteLinkTooltip({ videoTitle: '   ', timestamp: 0 })).toBe('Open this note at 0:00');
-	});
-
-	it('formats past an hour and floors a fractional timestamp', () => {
-		expect(window.YTB.noteLinkTooltip({ videoTitle: 'Long', timestamp: 3723.9 })).toBe('Open this note on "Long" at 1:02:03');
-	});
-});
-
+// The Room Feed's link tooltip — for both the System Message / Watch Notice title
+// link and a Note/Reply row's quoted body, which now navigates to the video (no
+// seek, ADR-0010). Names the destination the row's visible text leaves implicit.
 describe('titleLinkTooltip', () => {
 	it('quotes the title', () => {
 		expect(window.YTB.titleLinkTooltip('Blade Runner')).toBe('Watch "Blade Runner"');
@@ -1191,39 +1177,38 @@ describe('Unseen Mentions & Replies (ADR-0010)', () => {
 	});
 });
 
-describe('pending Note open handshake (Room Feed row -> notes.js)', () => {
-	it('round-trips a target, stamping it with a time', async () => {
+describe('pending arrival handshake (Room Feed row -> notes.js)', () => {
+	it('round-trips a videoId, stamping it with a time', async () => {
 		storage = {};
-		await expect(window.YTB.setPendingNoteOpen({ videoId: 'v1', noteId: 'n1' })).resolves.toBe(true);
-		const stored = storage.pendingNoteOpen as { videoId: string; noteId: string; at: number };
-		expect(stored).toMatchObject({ videoId: 'v1', noteId: 'n1' });
+		await expect(window.YTB.setPendingArrival('v1')).resolves.toBe(true);
+		const stored = storage.pendingArrival as { videoId: string; at: number };
+		expect(stored).toMatchObject({ videoId: 'v1' });
 		expect(typeof stored.at).toBe('number');
-		await expect(window.YTB.getPendingNoteOpen()).resolves.toMatchObject({ videoId: 'v1', noteId: 'n1' });
+		await expect(window.YTB.getPendingArrival()).resolves.toMatchObject({ videoId: 'v1' });
 	});
 
-	it('rejects a malformed target without writing anything', async () => {
+	it('rejects a missing videoId without writing anything', async () => {
 		storage = {};
-		await expect(window.YTB.setPendingNoteOpen({ videoId: 'v1' } as never)).resolves.toBe(false);
-		await expect(window.YTB.setPendingNoteOpen({ noteId: 'n1' } as never)).resolves.toBe(false);
-		await expect(window.YTB.setPendingNoteOpen(null as never)).resolves.toBe(false);
-		expect('pendingNoteOpen' in storage).toBe(false);
+		await expect(window.YTB.setPendingArrival('' as never)).resolves.toBe(false);
+		await expect(window.YTB.setPendingArrival(null as never)).resolves.toBe(false);
+		expect('pendingArrival' in storage).toBe(false);
 	});
 
-	it('treats a target past its TTL, or a garbage value, as absent', async () => {
-		storage = { pendingNoteOpen: { videoId: 'v1', noteId: 'n1', at: Date.now() - window.YTB.PENDING_NOTE_OPEN_TTL_MS - 1 } };
-		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
-		storage = { pendingNoteOpen: 'junk' };
-		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
-		storage = { pendingNoteOpen: { videoId: 'v1' } };
-		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+	it('treats an arrival past its TTL, or a garbage value, as absent', async () => {
+		storage = { pendingArrival: { videoId: 'v1', at: Date.now() - window.YTB.PENDING_ARRIVAL_TTL_MS - 1 } };
+		await expect(window.YTB.getPendingArrival()).resolves.toBeNull();
+		storage = { pendingArrival: 'junk' };
+		await expect(window.YTB.getPendingArrival()).resolves.toBeNull();
+		storage = { pendingArrival: {} };
+		await expect(window.YTB.getPendingArrival()).resolves.toBeNull();
 	});
 
 	it('clears the slot idempotently', async () => {
-		storage = { pendingNoteOpen: { videoId: 'v1', noteId: 'n1', at: Date.now() } };
-		await window.YTB.clearPendingNoteOpen();
-		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
-		await window.YTB.clearPendingNoteOpen(); // idempotent
-		await expect(window.YTB.getPendingNoteOpen()).resolves.toBeNull();
+		storage = { pendingArrival: { videoId: 'v1', at: Date.now() } };
+		await window.YTB.clearPendingArrival();
+		await expect(window.YTB.getPendingArrival()).resolves.toBeNull();
+		await window.YTB.clearPendingArrival(); // idempotent
+		await expect(window.YTB.getPendingArrival()).resolves.toBeNull();
 	});
 });
 
@@ -1297,7 +1282,6 @@ declare global {
 			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
 			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
 			videoContext(note: { videoTitle?: string } | null): string;
-			noteLinkTooltip(note: { videoTitle?: string; timestamp: number }): string;
 			titleLinkTooltip(title: string | null): string;
 			watchedByLabel(progress: object[], videoId: string, myClientId: string, roster?: Array<{ clientId: string; name?: string }>): string;
 			buildFeed(
@@ -1322,12 +1306,12 @@ declare global {
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
 			getHomeSectionHidden(): Promise<boolean>;
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
-			PENDING_NOTE_OPEN_TTL_MS: number;
+			PENDING_ARRIVAL_TTL_MS: number;
 			PANEL_LOAD_GRACE_MS: number;
-			panelPlayAction(state: { panelOpen: boolean; withinGrace: boolean }): 'ignore' | 'hold' | 'dismiss';
-			setPendingNoteOpen(target: { videoId: string; noteId: string }): Promise<boolean>;
-			getPendingNoteOpen(): Promise<{ videoId: string; noteId: string; at: number } | null>;
-			clearPendingNoteOpen(): Promise<boolean>;
+			playAction(state: { withinGrace: boolean; panelOpen: boolean }): 'hold' | 'dismiss' | 'ignore';
+			setPendingArrival(videoId: string): Promise<boolean>;
+			getPendingArrival(): Promise<{ videoId: string; at: number } | null>;
+			clearPendingArrival(): Promise<boolean>;
 			THEMES: string[];
 			NOTIFICATION_EDGES: string[];
 			themeMarker(preference: string, pageDark: boolean | null): 'light' | 'dark' | null;
