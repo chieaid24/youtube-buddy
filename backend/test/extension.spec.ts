@@ -255,6 +255,7 @@ describe('note presentation helpers', () => {
 
 	it('maps error categories to safe user copy', () => {
 		expect(window.YTB.errorCopy('network', 'note')).toBe("Can't reach the backend. Check your connection and try again.");
+		expect(window.YTB.errorCopy('network', 'recommendation')).toBe("Can't reach the backend. Check your connection and try again.");
 		expect(window.YTB.errorCopy('reply_cap', 'reply')).toBe('This note already has 10 replies.');
 		expect(window.YTB.errorCopy('room_full', 'note')).toBe("This Room is full, so you can't post here.");
 		expect(window.YTB.errorCopy('missing_parent', 'reply')).toBe('This note is no longer available.');
@@ -1456,7 +1457,7 @@ declare global {
 			buddyColor(clientId: string, code?: string): string;
 			BUDDY_COLORS: string[];
 			relativeTime(thenMs: number, nowMs?: number): string;
-			errorCopy(category: string, action: 'note' | 'reply' | 'reaction'): string;
+			errorCopy(category: string, action: 'note' | 'reply' | 'reaction' | 'recommendation'): string;
 			connectionState(prevFailures: number, ok: boolean): { failures: number; lost: boolean };
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];
 			dotActivation(note: { kind?: string; spoiler?: boolean; timestamp?: number }): { action: 'open' };

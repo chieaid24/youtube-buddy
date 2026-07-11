@@ -770,6 +770,9 @@ function playbackFixture(mediaSrc: string) {
         <div class="ytp-left-controls"></div>
       </div>
     </main>
+    <ytd-watch-metadata>
+      <div id="actions"><div id="top-level-buttons-computed"></div></div>
+    </ytd-watch-metadata>
   </body>
 </html>`;
 }
@@ -833,6 +836,101 @@ const roomNotes = [
 		createdAt: 3,
 	},
 ];
+
+test('foreground write failures distinguish an unreachable backend from server rejections', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	let failure: 'network' | 'server' = 'network';
+	const textNote = roomNotes[0];
+
+	try {
+		await context.route('http://localhost:8787/**', (route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			if (request.method() === 'GET') {
+				const body =
+					url.pathname === '/conversation'
+						? { note: textNote, replies: [] }
+						: { progress: [], presence: [], notes: [textNote], replies: [], playlist: [], events: [] };
+				return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(body) });
+			}
+
+			const foreground = ['/notes', '/replies', '/playlist'].includes(url.pathname);
+			if (!foreground) {
+				return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
+			}
+			if (failure === 'network') return route.abort('connectionrefused');
+			const category = url.pathname === '/notes' ? 'room_full' : url.pathname === '/replies' ? 'reply_cap' : 'playlist_full';
+			return route.fulfill({
+				status: 409,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({ error: category.replace('_', ' '), category }),
+			});
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const networkCopy = "Can't reach the backend. Check your connection and try again.";
+		const noteComposer = page.locator('#ytb-note-composer');
+		const noteError = noteComposer.locator('.ytb-note-error');
+		const panel = page.locator('#ytb-note-panel');
+		const pill = page.locator('#ytb-playlist-add-button');
+
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot-text')).toHaveCount(1, { timeout: 700 }));
+		await expect(pill).toHaveText('Recommend to Buddies');
+
+		// One failed attempt surfaces connectivity immediately on each explicit-write
+		// surface. The draft stays in place for a direct retry.
+		await page.locator('#ytb-note-button').click();
+		await noteComposer.locator('textarea').fill('network note');
+		await page.keyboard.press('Enter');
+		await expect(noteError).toHaveText(networkCopy);
+
+		await page.keyboard.press('Escape');
+		await page.locator('.ytb-note-dot-text').click();
+		await panel.locator('.ytb-panel-reply-input').fill('network reply');
+		await page.keyboard.press('Enter');
+		await expect(panel.locator('.ytb-panel-error')).toHaveText(networkCopy);
+
+		await pill.click();
+		await expect(pill).toHaveText('Recommend to Buddies');
+		await expect(page.locator('#ytb-playlist-feedback')).toHaveText(networkCopy);
+		expect(errors).toHaveLength(3);
+		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
+		errors.length = 0;
+
+		// Server rejections keep their existing category-specific copy; the network
+		// sentence is never used merely because a write failed.
+		failure = 'server';
+		await page.keyboard.press('Escape');
+		await page.locator('#ytb-note-button').click();
+		await noteComposer.locator('textarea').fill('room-full note');
+		await page.keyboard.press('Enter');
+		await expect(noteError).toHaveText("This Room is full, so you can't post here.");
+
+		await page.keyboard.press('Escape');
+		await page.locator('.ytb-note-dot-text').click();
+		await panel.locator('.ytb-panel-reply-input').fill('eleventh reply');
+		await page.keyboard.press('Enter');
+		await expect(panel.locator('.ytb-panel-error')).toHaveText('This note already has 10 replies.');
+
+		await expect(pill).toHaveAttribute('data-ytb-state', 'idle', { timeout: 2500 });
+		await pill.click();
+		await expect(pill).toHaveText('Room list full');
+		expect(errors).toHaveLength(3);
+		expect(errors.every((error) => error.includes('409 (Conflict)'))).toBe(true);
+	} finally {
+		await context.close();
+	}
+});
 
 test('every Note Dot opens its Expanded Note variant; the click never seeks or changes playback', async () => {
 	const context = await launchExtension();
@@ -2247,6 +2345,25 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 		expect(posts).toHaveLength(2);
 		expect(posts[1]).toContain('"videoId":"vid-classic"');
 		expect(posts[1]).toContain('"title":"Classic Video Title"');
+		await nudgeUntil(page, () => expect(row).toHaveCount(0, { timeout: 700 }));
+
+		// The same network category uses the complete connectivity sentence in a
+		// thumbnail menu. Its taller wrapped row refits the pre-sized menu instead
+		// of clipping or adding a scrollbar.
+		await context.route('http://localhost:8787/playlist**', (route) => {
+			if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			return route.abort('connectionrefused');
+		});
+		await page.locator('#lockup-kebab').click();
+		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await row.click();
+		await expect(row).toHaveClass(/is-network-error/);
+		await expect(row).toContainText("Can't reach the backend. Check your connection and try again.");
+		expect(await rowFullyVisible('yt-contextual-sheet-layout')).toBe(true);
+		expect((await row.boundingBox())?.width).toBeLessThanOrEqual(320);
+		expect(errors).toHaveLength(1);
+		expect(errors[0]).toContain('ERR_CONNECTION_REFUSED');
+		errors.length = 0;
 		await nudgeUntil(page, () => expect(row).toHaveCount(0, { timeout: 700 }));
 
 		// A click inside the Room Home Section's own cards never arms the
