@@ -816,3 +816,19 @@ function formatLastSeen(updatedAt) {
 	const day = Math.floor(hr / 24);
 	return `${day}d ago`;
 }
+
+// --- In-page Control Panel overlay: report content height to the host ---
+// When popup.html is embedded as the overlay iframe (home-toggle.js), the host
+// YouTube page can't read our height across the extension/page origin boundary,
+// so we post it and let the host size the iframe snugly for the current view.
+// Inert in the toolbar popup, where window.parent === window and nothing here
+// listens for the message.
+(function reportPanelHeight() {
+	if (window.parent === window) return;
+	const post = () => {
+		const height = Math.ceil(document.body.getBoundingClientRect().height);
+		window.parent.postMessage({ type: 'ytb:panel-height', height }, '*');
+	};
+	new ResizeObserver(post).observe(document.body);
+	post();
+})();
