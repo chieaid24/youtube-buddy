@@ -688,6 +688,37 @@ describe('room home section helpers', () => {
 		expect(window.YTB.watchedByLabel(progress, 'unwatched', me)).toBe('');
 	});
 
+	it('labels watched-by Buddies-only (the Watched-By Dots tooltip): no "You", same order and collapse', () => {
+		const progress = roomRead.progress;
+		const buddiesOnly = { buddiesOnly: true };
+		// The viewer's own record is dropped WITHOUT a "You" entry; the Buddy
+		// ordering (most recent first) and the two-name collapse are unchanged.
+		expect(window.YTB.watchedByLabel(progress, 'v1', me, undefined, buddiesOnly)).toBe('Cid, Ana, and 1 other');
+		// Another viewer's perspective: their own record excluded the same way.
+		expect(window.YTB.watchedByLabel(progress, 'v1', 'cid44444', undefined, buddiesOnly)).toBe('Ana, Bob, and 1 other');
+		expect(window.YTB.watchedByLabel(progress, 'v1', 'bob22222', undefined, buddiesOnly)).toBe('Cid, Ana, and 1 other');
+		// Exactly two Buddies: plain "A and B", no collapse.
+		expect(
+			window.YTB.watchedByLabel(
+				[
+					{ clientId: me, videoId: 'v3', updatedAt: 3 },
+					{ clientId: 'bob22222', name: 'Bob', videoId: 'v3', updatedAt: 2 },
+					{ clientId: 'ana33333', name: 'Ana', videoId: 'v3', updatedAt: 1 },
+				],
+				'v3',
+				me,
+				undefined,
+				buddiesOnly,
+			),
+		).toBe('Bob and Ana');
+		// A single Buddy watcher: bare name.
+		expect(window.YTB.watchedByLabel(progress, 'v2', me, undefined, buddiesOnly)).toBe('Bobby');
+		// Only the viewer watched: empty — a video only you watched shows no dots.
+		expect(window.YTB.watchedByLabel([{ clientId: me, videoId: 'v5', updatedAt: 1 }], 'v5', me, undefined, buddiesOnly)).toBe('');
+		// Nobody watched: empty label.
+		expect(window.YTB.watchedByLabel(progress, 'unwatched', me, undefined, buddiesOnly)).toBe('');
+	});
+
 	it('builds the personalized Feed: replies to mine, mentions of me, and System Messages', () => {
 		const base = new Date(2026, 6, 4, 12, 0, 0).getTime(); // local noon — no midnight straddle
 		const notes = [
@@ -1404,7 +1435,13 @@ declare global {
 			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
 			videoContext(note: { videoTitle?: string } | null): string;
 			titleLinkTooltip(title: string | null): string;
-			watchedByLabel(progress: object[], videoId: string, myClientId: string, roster?: Array<{ clientId: string; name?: string }>): string;
+			watchedByLabel(
+				progress: object[],
+				videoId: string,
+				myClientId: string,
+				roster?: Array<{ clientId: string; name?: string }>,
+				options?: { buddiesOnly?: boolean },
+			): string;
 			buildFeed(
 				records: object,
 				myClientId: string,

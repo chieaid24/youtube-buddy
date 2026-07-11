@@ -162,7 +162,7 @@ test('loads the unpacked extension and runs every content script', async () => {
 		await expect(page.locator('#ytb-composer-styles')).toHaveCount(1);
 		await expect(page.locator('#ytb-home-toggle-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-home-toggle')).toHaveCount(0); // guide row is home-route only
-		await expect(page.locator('.ytb-thumb-bar')).toHaveCount(0);
+		await expect(page.locator('.ytb-thumb-dots')).toHaveCount(0);
 		await page.waitForTimeout(750);
 		const extensions = await context.newPage();
 		const item = await extensionItem(extensions);
@@ -174,20 +174,22 @@ test('loads the unpacked extension and runs every content script', async () => {
 	}
 });
 
-// The feed thumbnail generations the Progress Bar must stay inside: a lockup
-// tile whose /watch anchor is WIDER AND TALLER than its real thumbnail box
-// (today's home/channel grids), a lockup tile carrying a simulated Watched Bar
-// shaped like YouTube's live CSS (4px, margin 0 4px 4px 8px, 2px radius), and
-// a classic tile whose anchor IS the thumbnail box (search; the extension's
-// own Recommended-for-you cards share this shape).
-const thumbBarFixture = `<!doctype html>
+// The feed thumbnail generations the Watched-By Dots must stay inside: a
+// lockup tile whose /watch anchor is WIDER AND TALLER than its real thumbnail
+// box (today's home/channel grids), a lockup tile carrying a simulated Watched
+// Bar (the dots are top-left — fully decoupled from the bottom Watched Bar),
+// and a classic tile whose anchor IS the thumbnail box (search). Plus a
+// document-level ytd-video-preview host (hidden until the test reveals it)
+// standing in for YouTube's hover-autoplay inline preview, with a high
+// z-index player pane the dots must beat.
+const watchedByDotsFixture = `<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8"><title>YouTube thumbnail-bar fixture</title>
+    <meta charset="utf-8"><title>YouTube watched-by-dots fixture</title>
     <style>
       body { margin: 0; padding: 24px; }
       ytd-rich-item-renderer, yt-lockup-view-model, yt-thumbnail-view-model,
-      yt-thumbnail-bottom-overlay-view-model { display: block; }
+      yt-thumbnail-bottom-overlay-view-model, ytd-video-preview { display: block; }
     </style>
   </head>
   <body>
@@ -218,32 +220,43 @@ const thumbBarFixture = `<!doctype html>
     <a id="classic-anchor" href="/watch?v=vid-classic" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
       <img alt="" style="display: block; width: 100%; height: 100%">
     </a>
+    <ytd-video-preview id="preview-host" style="display: none; position: fixed; left: 24px; top: 340px; width: 480px; height: 270px; z-index: 2200; background: #000">
+      <a id="preview-anchor" href="/watch?v=vid-lockup" style="display: block; width: 100%; height: 100%">
+        <img alt="" style="display: block; width: 100%; height: 100%">
+      </a>
+      <div id="preview-player" style="position: absolute; inset: 0; z-index: 50; background: #111"></div>
+    </ytd-video-preview>
   </body>
 </html>`;
 
-test('the thumbnail Progress Bar stays inside the thumbnail box, mirrors the Watched Bar, and stacks above it', async () => {
+test('the Watched-By Dots sit top-left inside the thumbnail box, label their Buddies, and survive the inline preview', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
 	try {
 		await stubRoomBackend(context, {
 			progress: [
-				// Sam hugs the left edge of vid-lockup so the tooltip clamp is provable.
 				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-lockup', timestamp: 2, duration: 100, updatedAt: 1 },
 				{ clientId: 'buddy-2', name: 'Kim', videoId: 'vid-lockup', timestamp: 70, duration: 100, updatedAt: 2 },
+				// The viewer's own record must never grow a dot (YouTube's red
+				// Watched Bar already tells the viewer's state).
+				{ clientId: 'viewer-e2e', name: 'Viewer', videoId: 'vid-lockup', timestamp: 90, duration: 100, updatedAt: 9 },
 				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-watched', timestamp: 40, duration: 100, updatedAt: 3 },
 				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-classic', timestamp: 55, duration: 100, updatedAt: 4 },
 			],
 		});
 		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: thumbBarFixture }),
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchedByDotsFixture }),
 		);
 		const popup = await seedPairedRoom(context);
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
-		const bars = page.locator('.ytb-thumb-bar');
-		await nudgeUntil(page, () => expect(bars).toHaveCount(3, { timeout: 700 }));
+		const clusters = page.locator('.ytb-thumb-dots');
+		await nudgeUntil(page, () => expect(clusters).toHaveCount(3, { timeout: 700 }));
+
+		// The retired Progress Bar renders nowhere.
+		await expect(page.locator('.ytb-thumb-bar')).toHaveCount(0);
 
 		const rect = (selector: string) =>
 			page.evaluate((sel) => {
@@ -251,96 +264,140 @@ test('the thumbnail Progress Bar stays inside the thumbnail box, mirrors the Wat
 				return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
 			}, selector);
 
-		// Lockup tile: the bar lives inside the REAL thumbnail box — never the
-		// larger anchor — with the Watched Bar's geometry: 4px tall, inset
-		// 0 4px 4px 8px, a 2px radius on the band strip.
+		// Keyboard focus shows the tooltip (asserted before any pointer input so
+		// :focus-visible matches). The cluster is a focusable labelled image.
+		const classicTip = page.locator('#classic-anchor .ytb-thumb-dots > .ytb-watch-tooltip');
+		await page.evaluate(() => document.querySelector<HTMLElement>('#classic-anchor .ytb-thumb-dots')!.focus());
+		await expect(classicTip).toHaveText('Watched by Sam');
+		await expect.poll(() => classicTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+		await page.evaluate(() => document.querySelector<HTMLElement>('#classic-anchor .ytb-thumb-dots')!.blur());
+
+		// Lockup tile: the cluster lives inside the REAL thumbnail box — never
+		// the larger anchor — its dots inset 8px from the box's top-left, one
+		// flat dot per Buddy (the viewer excluded), newest watcher first.
 		const lockupThumb = await rect('#lockup-thumb');
-		const lockupBar = await rect('#lockup-thumb .ytb-thumb-bar');
-		expect(lockupBar.height).toBeCloseTo(4, 1);
-		expect(lockupBar.left).toBeCloseTo(lockupThumb.left + 8, 1);
-		expect(lockupBar.right).toBeCloseTo(lockupThumb.right - 4, 1);
-		expect(lockupBar.bottom).toBeCloseTo(lockupThumb.bottom - 4, 1);
-		await expect(page.locator('#lockup-anchor > .ytb-thumb-bar')).toHaveCount(0);
-		expect(await page.evaluate(() => getComputedStyle(document.querySelector('#lockup-thumb .ytb-thumb-track')!).borderRadius)).toBe('2px');
+		const lockupDots = page.locator('#lockup-thumb .ytb-thumb-dot');
+		await expect(lockupDots).toHaveCount(2);
+		await expect(page.locator('#lockup-anchor > .ytb-thumb-dots')).toHaveCount(0);
+		expect(await lockupDots.evaluateAll((dots) => dots.map((d) => (d as HTMLElement).dataset.ytbCid))).toEqual(['buddy-2', 'buddy-1']);
+		const firstDot = await rect('#lockup-thumb .ytb-thumb-dot');
+		expect(firstDot.left).toBeCloseTo(lockupThumb.left + 8, 1);
+		expect(firstDot.top).toBeCloseTo(lockupThumb.top + 8, 1);
+		expect(firstDot.width).toBeCloseTo(8, 1);
+		expect(await page.evaluate(() => getComputedStyle(document.querySelector('#lockup-thumb .ytb-thumb-dot')!).borderRadius)).toBe('50%');
 		// The box already establishes a positioning context, so no YouTube element
 		// is mutated to position: relative.
 		expect(await page.evaluate(() => document.querySelector<HTMLElement>('#lockup-anchor')!.style.position)).toBe('');
 
-		// Band composition is unchanged: Sam owns [0 .. 2%], Kim [2% .. 70%], and
-		// the fill ends at the furthest Buddy (the remainder stays transparent).
-		const bands = await page.evaluate(() => {
-			const track = document.querySelector('#lockup-thumb .ytb-thumb-track')!;
-			const t = track.getBoundingClientRect();
-			return [...track.children].map((seg) => {
-				const r = seg.getBoundingClientRect();
-				return { from: (r.left - t.left) / t.width, to: (r.right - t.left) / t.width };
-			});
-		});
-		expect(bands).toHaveLength(2);
-		expect(bands[0].from).toBeCloseTo(0, 2);
-		expect(bands[0].to).toBeCloseTo(0.02, 2);
-		expect(bands[1].from).toBeCloseTo(0.02, 2);
-		expect(bands[1].to).toBeCloseTo(0.7, 2);
+		// The whole cluster (its padded hover target included) never overhangs
+		// the image box.
+		const lockupCluster = await rect('#lockup-thumb .ytb-thumb-dots');
+		expect(lockupCluster.left).toBeGreaterThanOrEqual(lockupThumb.left);
+		expect(lockupCluster.top).toBeGreaterThanOrEqual(lockupThumb.top);
+		expect(lockupCluster.right).toBeLessThanOrEqual(lockupThumb.right);
+		expect(lockupCluster.bottom).toBeLessThanOrEqual(lockupThumb.bottom);
 
-		// The duration badge is never painted over: the bar clears it entirely,
-		// and it sits BEFORE the bottom overlay in the DOM so the badge would win
-		// the paint order even if they ever met.
-		const badge = await rect('#lockup-badge');
-		expect(lockupBar.top).toBeGreaterThanOrEqual(badge.bottom - 0.5);
-		expect(
-			await page.evaluate(() => {
-				const bar = document.querySelector('#lockup-thumb .ytb-thumb-bar')!;
-				const overlay = document.querySelector('#lockup-thumb yt-thumbnail-bottom-overlay-view-model')!;
-				return Boolean(bar.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING);
-			}),
-		).toBe(true);
-
-		// Watched tile: the Progress Bar sits directly above the Watched Bar —
-		// never covering it — still inside the thumbnail box.
-		const watchedThumb = await rect('#watched-thumb');
-		const watchedBar = await rect('#watched-bar');
-		const stacked = await rect('#watched-thumb .ytb-thumb-bar');
-		expect(stacked.bottom).toBeLessThanOrEqual(watchedBar.top + 0.5);
-		expect(stacked.left).toBeCloseTo(watchedThumb.left + 8, 1);
-		expect(stacked.right).toBeCloseTo(watchedThumb.right - 4, 1);
-		expect(stacked.top).toBeGreaterThanOrEqual(watchedThumb.top);
-
-		// Classic tile (the anchor IS the thumbnail box — search, and the same
-		// shape as our Recommended-for-you cards): same inset slot.
-		const classic = await rect('#classic-anchor');
-		const classicBar = await rect('#classic-anchor .ytb-thumb-bar');
-		expect(classicBar.left).toBeCloseTo(classic.left + 8, 1);
-		expect(classicBar.right).toBeCloseTo(classic.right - 4, 1);
-		expect(classicBar.bottom).toBeCloseTo(classic.bottom - 4, 1);
-
-		// The hover tooltip survives the overflow: hidden box: Sam's band hugs the
-		// left edge, so an unclamped centered tooltip would start left of the box.
-		await page.locator('#lockup-thumb .ytb-thumb-seg').first().hover();
-		const tip = page.locator('#lockup-thumb .ytb-thumb-bar > .ytb-watch-tooltip');
-		await expect(tip).toHaveText('Sam · @0:02');
+		// Hover shows the single dark Buddies-only tooltip — most recent watcher
+		// first, no "You" for the viewer's own record — fully inside the box.
+		await page.locator('#lockup-thumb .ytb-thumb-dots').hover();
+		const tip = page.locator('#lockup-thumb .ytb-thumb-dots > .ytb-watch-tooltip');
+		await expect(tip).toHaveText('Watched by Kim and Sam');
 		await expect.poll(() => tip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
-		const tipRect = await rect('#lockup-thumb .ytb-thumb-bar > .ytb-watch-tooltip');
+		const tipRect = await rect('#lockup-thumb .ytb-thumb-dots > .ytb-watch-tooltip');
 		expect(tipRect.left).toBeGreaterThanOrEqual(lockupThumb.left);
 		expect(tipRect.right).toBeLessThanOrEqual(lockupThumb.right);
+		await page.mouse.move(0, 0);
 
-		// Recycle safety: a mutation pass over unchanged data must not rebuild the
-		// bar (the signature guard) — a probe property survives the nudge.
+		// Watched tile: the dots are decoupled from the bottom Watched Bar —
+		// top-left, nowhere near it, and the Watched Bar itself is untouched.
+		const watchedThumb = await rect('#watched-thumb');
+		const watchedDot = await rect('#watched-thumb .ytb-thumb-dot');
+		expect(watchedDot.left).toBeCloseTo(watchedThumb.left + 8, 1);
+		expect(watchedDot.top).toBeCloseTo(watchedThumb.top + 8, 1);
+		await expect(page.locator('#watched-thumb .ytb-thumb-dot')).toHaveCount(1);
+
+		// Classic tile (the anchor IS the thumbnail box — search): same corner.
+		const classic = await rect('#classic-anchor');
+		const classicDot = await rect('#classic-anchor .ytb-thumb-dot');
+		expect(classicDot.left).toBeCloseTo(classic.left + 8, 1);
+		expect(classicDot.top).toBeCloseTo(classic.top + 8, 1);
+
+		// Autoplay survival, in-box flavor: a high z-index pane covering the
+		// whole box (an inline preview player mounting inside the tile) must not
+		// bury the dots — they stay on top and stay hoverable.
 		await page.evaluate(() => {
-			(document.querySelector('#lockup-thumb .ytb-thumb-bar') as HTMLElement & { __ytbProbe?: boolean }).__ytbProbe = true;
+			const cover = document.createElement('div');
+			cover.id = 'inline-cover';
+			cover.style.cssText = 'position: absolute; inset: 0; z-index: 500; background: rgba(0, 0, 0, 0.4)';
+			document.querySelector('#lockup-thumb')!.appendChild(cover);
+		});
+		expect(
+			await page.evaluate(() => {
+				const cluster = document.querySelector('#lockup-thumb .ytb-thumb-dots')!;
+				const r = cluster.getBoundingClientRect();
+				const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+				return cluster === hit || cluster.contains(hit);
+			}),
+		).toBe(true);
+		await page.locator('#lockup-thumb .ytb-thumb-dots').hover();
+		await expect.poll(() => tip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+		await page.mouse.move(0, 0);
+		await page.evaluate(() => document.querySelector('#inline-cover')!.remove());
+
+		// Autoplay survival, overlay flavor: a document-level ytd-video-preview
+		// host covering the tile gets the cluster mirrored INTO it, above its
+		// player pane, tooltip intact; it disappears with the preview.
+		await page.evaluate(() => {
+			document.querySelector<HTMLElement>('#preview-host')!.style.display = 'block';
+		});
+		const previewCluster = page.locator('#preview-host .ytb-thumb-dots');
+		await nudgeUntil(page, () => expect(previewCluster).toHaveCount(1, { timeout: 700 }));
+		await expect(page.locator('#preview-host .ytb-thumb-dot')).toHaveCount(2);
+		expect(
+			await page.evaluate(() => {
+				const cluster = document.querySelector('#preview-host .ytb-thumb-dots')!;
+				const r = cluster.getBoundingClientRect();
+				const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+				return cluster === hit || cluster.contains(hit);
+			}),
+		).toBe(true);
+		await previewCluster.hover();
+		const previewTip = page.locator('#preview-host .ytb-thumb-dots > .ytb-watch-tooltip');
+		await expect(previewTip).toHaveText('Watched by Kim and Sam');
+		await expect.poll(() => previewTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+		await page.mouse.move(0, 0);
+		await page.evaluate(() => {
+			document.querySelector<HTMLElement>('#preview-host')!.style.display = 'none';
+		});
+		await nudgeUntil(page, () => expect(previewCluster).toHaveCount(0, { timeout: 700 }));
+
+		// Recycle safety: a mutation pass over unchanged data must not rebuild
+		// the cluster (the signature guard) — a probe property survives the nudge.
+		await page.evaluate(() => {
+			(document.querySelector('#lockup-thumb .ytb-thumb-dots') as HTMLElement & { __ytbProbe?: boolean }).__ytbProbe = true;
 		});
 		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
 		await page.waitForTimeout(400);
 		expect(
 			await page.evaluate(
-				() => (document.querySelector('#lockup-thumb .ytb-thumb-bar') as HTMLElement & { __ytbProbe?: boolean }).__ytbProbe,
+				() => (document.querySelector('#lockup-thumb .ytb-thumb-dots') as HTMLElement & { __ytbProbe?: boolean }).__ytbProbe,
 			),
 		).toBe(true);
 
-		// Buddy Progress Visibility off removes every bar, live; back on restores.
+		// A Buddy Color re-assignment repaints the dots live — no rebuild, no
+		// reload (the color write triggers shared.js's storage listener, which
+		// rebroadcasts ytb:buddy-colors).
+		await popup.evaluate(() => chrome.storage.local.set({ buddyColors: { roome2e: { 'buddy-1': '#e85d04', 'buddy-2': '#00a86b' } } }));
+		await expect
+			.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('#lockup-thumb .ytb-thumb-dot')!).backgroundColor))
+			.toBe('rgb(0, 168, 107)');
+
+		// Buddy Progress Visibility off removes every cluster, live; back on
+		// restores them.
 		await popup.evaluate(() => chrome.storage.local.set({ buddyProgressHidden: true }));
-		await expect(bars).toHaveCount(0);
+		await expect(clusters).toHaveCount(0);
 		await popup.evaluate(() => chrome.storage.local.set({ buddyProgressHidden: false }));
-		await nudgeUntil(page, () => expect(bars).toHaveCount(3, { timeout: 700 }));
+		await nudgeUntil(page, () => expect(clusters).toHaveCount(3, { timeout: 700 }));
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

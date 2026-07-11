@@ -1,9 +1,10 @@
 // extension/renderer.js
 //
 // The renderer: draws the Buddies' Progress Records — a colored marker per Buddy
-// on the active video's player progress bar, and the Progress Bar (a segmented
-// band strip in the Buddy Colors, mirroring YouTube's own Watched Bar geometry)
-// inside thumbnail boxes across the home/recommended/search/listing surfaces.
+// on the active video's player progress bar, and the Watched-By Dots (a
+// top-left cluster of flat dots in the Buddy Colors, one per Buddy with a
+// Progress Record for that video — presence only, no fraction) inside
+// thumbnail boxes across the home/recommended/search/listing surfaces.
 // Display-only (no click-to-seek).
 //
 // It is also the Room's single poller: every refresh rebroadcasts the fetched
@@ -35,21 +36,17 @@
 
 	const MARKER_CLASS = 'ytb-watch-marker';
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
-	const THUMB_BAR_CLASS = 'ytb-thumb-bar'; // Progress Bar container on a thumbnail
-	const THUMB_TRACK_CLASS = 'ytb-thumb-track'; // pill-clipped band strip inside the container
-	const THUMB_SEG_CLASS = 'ytb-thumb-seg'; // one colored band per Buddy
+	const THUMB_DOTS_CLASS = 'ytb-thumb-dots'; // Watched-By Dots cluster on a thumbnail
+	const THUMB_DOT_CLASS = 'ytb-thumb-dot'; // one flat Buddy-colored dot
 	const TOAST_WRAP_CLASS = 'ytb-toast-wrap'; // fixed stack container
 	const TOAST_CLASS = 'ytb-toast'; // one "<Buddy> joined" toast
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
-	// The Watched Bar's own inset from the thumbnail edges (its documented
-	// margin: 0 4px 4px 8px), which the Progress Bar mirrors.
-	const BAR_INSET_LEFT = 8;
-	const BAR_INSET_RIGHT = 4;
-	const BAR_INSET_BOTTOM = 4;
-	const BAR_HEIGHT = 4;
-	const STACK_GAP = 2; // air between the stacked Progress Bar and Watched Bar
+	// The dots' inset from the thumbnail's top-left corner, and their geometry.
+	const DOTS_INSET = 8;
+	const DOT_SIZE = 8;
+	const DOT_GAP = 4;
 
 	// --- state ---
 	let myClientId = null; // memoized; my own records are filtered out
@@ -260,36 +257,31 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Thumbnails: one Progress Bar per tile, one colored band per Buddy.
-	// Bands are sorted by position; each Buddy owns [previous Buddy's pos .. own
-	// pos] in their color. So with Alice @ 30% and Bob @ 70%, 0–30% is Alice's
-	// color and 30–70% is Bob's, and the fill stops at the furthest Buddy.
-	//
-	// The Progress Bar is drawn inside the tile's REAL thumbnail box and mirrors
-	// the geometry of YouTube's own Watched Bar (4px tall, inset 0 4px 4px 8px,
-	// 2px radius, transparent remainder). Where a tile also shows the Watched Bar
-	// — the viewer's own history, never ours to draw — the Progress Bar stacks
-	// directly above it instead of covering it.
+	// Thumbnails: Watched-By Dots — a top-left cluster of flat dots inside each
+	// tile's thumbnail box, one dot per Buddy who has a Progress Record for that
+	// video, ordered most-recent-first. A dot means only "this Buddy has a
+	// record" — no fraction, no timestamp — and the viewer is never included
+	// (YouTube's own red Watched Bar already tells the viewer's state). Hovering
+	// or keyboard-focusing the cluster shows one dark "Watched by <names>"
+	// tooltip (the Buddies-only watchedByLabel).
 	//
 	// YouTube-thumbnail-DOM fragility is deliberately contained in this section
 	// (as playlist-add.js and home-toggle.js do for the menu and guide DOM).
 	// ---------------------------------------------------------------------------
 
-	// YouTube's Watched Bar, both tile generations: the lockup overlay's rounded
-	// inset bar, and the classic resume-playback overlay renderer.
-	const WATCHED_BAR_SELECTOR = '.ytThumbnailOverlayProgressBarHostWatchedProgressBar, ytd-thumbnail-overlay-resume-playback-renderer';
-
-	// YouTube's bottom overlay host — duration badge + Watched Bar. The Progress
-	// Bar is inserted BEFORE it so the badge always paints above our bands.
-	const BOTTOM_OVERLAY_SELECTOR = 'yt-thumbnail-bottom-overlay-view-model, #overlays';
+	// YouTube's hover-autoplay inline preview host. When the preview is a
+	// document-level overlay covering the tile, the in-box cluster is buried
+	// under a foreign stacking context no z-index of ours can beat — so the
+	// cluster is mirrored INTO the visible preview host (and removed with it).
+	const PREVIEW_HOST_SELECTOR = 'ytd-video-preview';
 
 	/**
-	 * The tile's real thumbnail box — the element the Progress Bar must never
+	 * The tile's real thumbnail box — the element the Watched-By Dots must never
 	 * escape. On lockup tiles (`yt-lockup-view-model`) the `/watch` anchor is
-	 * WIDER AND TALLER than the image, so the bar anchors to the nested
+	 * WIDER AND TALLER than the image, so the cluster anchors to the nested
 	 * `yt-thumbnail-view-model` (already `position: relative; overflow: hidden`
-	 * and exactly the image box). Classic `a#thumbnail` tiles and our own
-	 * Recommended-for-you card thumbs ARE their image box, so the anchor stands.
+	 * and exactly the image box). Classic `a#thumbnail` tiles ARE their image
+	 * box, so the anchor stands.
 	 * @param {Element} anchor
 	 * @returns {Element}
 	 */
@@ -298,167 +290,135 @@
 	}
 
 	/**
-	 * The Progress Bar's bottom inset inside `box`, in px. Without a Watched Bar
-	 * the Progress Bar takes the Watched Bar's own slot; with one, it stacks
-	 * directly above it (measured live — YouTube hydrates the overlay late), with
-	 * a hair of air so the two bars read as two. Falls back to the Watched Bar's
-	 * documented geometry (4px bar + 4px bottom margin) when unmeasurable.
-	 * @param {Element} box
-	 * @returns {number}
-	 */
-	function progressBarBottomInset(box) {
-		const watched = box.querySelector(WATCHED_BAR_SELECTOR);
-		if (!watched) return BAR_INSET_BOTTOM;
-		const boxRect = box.getBoundingClientRect();
-		const watchedRect = watched.getBoundingClientRect();
-		const clearance = boxRect.bottom - watchedRect.top;
-		if (watchedRect.height > 0 && clearance > 0 && clearance < boxRect.height / 2) {
-			return clearance + STACK_GAP;
-		}
-		return BAR_INSET_BOTTOM + BAR_HEIGHT + STACK_GAP;
-	}
-
-	/**
-	 * Overlay the Progress Bar on every thumbnail tile whose video matches.
-	 * Idempotent + recycle-safe: YouTube reuses tile DOM nodes for different
-	 * videos as you scroll, so each pass re-keys the bar to the tile's CURRENT
-	 * videoId and only rebuilds its bands when the video or the positions change
-	 * (a signature guard) — frequent ytb:mutation passes never tear down a
-	 * tooltip mid-hover. The stacking inset alone is re-checked every pass, since
-	 * the Watched Bar can hydrate long after the tile (and the bands) exist.
+	 * Overlay the Watched-By Dots on every thumbnail tile whose video has at
+	 * least one Buddy Progress Record. Idempotent + recycle-safe: YouTube reuses
+	 * tile DOM nodes for different videos as you scroll, so each pass re-keys
+	 * the cluster to the tile's CURRENT videoId and only rebuilds its dots when
+	 * the video or the watcher set changes (a signature guard) — frequent
+	 * ytb:mutation passes never tear down a tooltip mid-hover. Dot COLORS are
+	 * repainted every pass: a Buddy Color re-assignment changes no ids, so it
+	 * must never be short-circuited by the signature.
 	 */
 	function renderThumbnails() {
 		const anchors = document.querySelectorAll('a[href*="/watch?v="]');
 		for (const anchor of anchors) {
 			// Decorate only thumbnail anchors — the ones wrapping the tile image — so
-			// we never draw a bar across a video-title link. The image check is
+			// we never draw dots on a video-title link. The image check is
 			// surface-agnostic: it matches both the classic `a#thumbnail` tiles and
 			// the newer `yt-lockup-view-model` tiles, whose anchors differ.
 			if (!anchor.querySelector('img')) continue;
 
+			// Our own Recommended-for-you cards keep their below-card text label
+			// ("Watched by ..."); dots there would double-label the same info.
+			if (anchor.closest('#ytb-home-section')) continue;
+
+			// Anchors inside a hover-autoplay preview host belong to
+			// renderPreviewDots below — decorating both would double the dots.
+			if (anchor.closest(PREVIEW_HOST_SELECTOR)) continue;
+
 			const videoId = videoIdFromHref(anchor.getAttribute('href'));
-			// Hidden Buddy Progress removes every tile's bar via the empty-segments
-			// branch below.
+			// Hidden Buddy Progress removes every tile's dots via the null branch.
 			const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
 
-			// One band per Buddy with a computable position, sorted ascending. The
-			// clientId tiebreak keeps equal-position bands deterministic.
-			const segments = [];
-			if (records) {
-				for (const r of records) {
-					const fraction = positionFraction(r);
-					if (fraction !== null) {
-						segments.push({ cid: r.clientId, fraction, record: r });
-					}
-				}
-				segments.sort((a, b) => a.fraction - b.fraction || (a.cid < b.cid ? -1 : 1));
-			}
+			// The cluster lives inside the thumbnail box, itself inside the anchor —
+			// one anchor-scoped lookup finds it wherever the box resolved to.
+			let cluster = anchor.querySelector('.' + THUMB_DOTS_CLASS);
 
-			// The bar lives inside the thumbnail box, itself inside the anchor — one
-			// anchor-scoped lookup finds it wherever the box resolved to.
-			let container = anchor.querySelector('.' + THUMB_BAR_CLASS);
-
-			if (segments.length === 0) {
-				if (container) container.remove();
+			if (!records || records.length === 0) {
+				if (cluster) cluster.remove();
 				continue;
 			}
 
 			const box = thumbBoxFor(anchor);
-			if (container && !box.contains(container)) {
-				// The tile hydrated its real thumbnail box after the bar attached to
-				// the anchor — rebuild inside the right parent.
-				container.remove();
-				container = null;
+			if (cluster && !box.contains(cluster)) {
+				// The tile hydrated its real thumbnail box after the cluster attached
+				// to the anchor — rebuild inside the right parent.
+				cluster.remove();
+				cluster = null;
 			}
 
-			if (!container) {
-				// The thumbnail box must establish a positioning context; only mutate
-				// YouTube's layout when it doesn't already (`yt-thumbnail-view-model`
-				// ships `position: relative`, classic `a#thumbnail` does not).
-				if (getComputedStyle(box).position === 'static') {
-					box.style.position = 'relative';
-				}
-				container = document.createElement('div');
-				container.className = THUMB_BAR_CLASS;
-				const track = document.createElement('div');
-				track.className = THUMB_TRACK_CLASS;
-				const tooltip = document.createElement('div');
-				tooltip.className = TOOLTIP_CLASS;
-				container.append(track, tooltip);
-				// Slot the bar UNDER YouTube's bottom overlay (duration badge +
-				// Watched Bar) so the badge always paints above the bands; tiles
-				// without one (our own Recommended-for-you cards) just append.
-				const overlay = box.querySelector(BOTTOM_OVERLAY_SELECTOR);
-				if (overlay && overlay.parentElement) {
-					overlay.parentElement.insertBefore(container, overlay);
-				} else {
-					box.appendChild(container);
-				}
+			renderDotsCluster(box, cluster, videoId, records);
+		}
+
+		renderPreviewDots();
+	}
+
+	/**
+	 * Build (or reconcile) one Watched-By Dots cluster inside `box`: one flat
+	 * dot per Buddy record, newest first, plus the single dark tooltip. Shared
+	 * by the per-tile pass and the preview mirror.
+	 * @param {Element} box the positioning parent the cluster must stay inside
+	 * @param {?Element} cluster the existing cluster in `box`, if any
+	 * @param {string} videoId
+	 * @param {Array<object>} records this video's Buddy records (latest per Buddy)
+	 */
+	function renderDotsCluster(box, cluster, videoId, records) {
+		// Most-recent watcher first — the same order watchedByLabel names them.
+		const watchers = records.slice().sort((a, b) => b.updatedAt - a.updatedAt || (a.clientId < b.clientId ? -1 : 1));
+
+		if (!cluster) {
+			// The thumbnail box must establish a positioning context; only mutate
+			// YouTube's layout when it doesn't already (`yt-thumbnail-view-model`
+			// ships `position: relative`, classic `a#thumbnail` does not).
+			if (getComputedStyle(box).position === 'static') {
+				box.style.position = 'relative';
 			}
+			cluster = document.createElement('div');
+			cluster.className = THUMB_DOTS_CLASS;
+			cluster.setAttribute('role', 'img');
+			cluster.tabIndex = 0; // keyboard focus shows the tooltip
+			const tooltip = document.createElement('div');
+			tooltip.className = TOOLTIP_CLASS;
+			cluster.appendChild(tooltip);
+			box.appendChild(cluster);
+		}
 
-			// Keep the stacking inset current on every pass (no-op when unchanged).
-			const bottom = progressBarBottomInset(box) + 'px';
-			if (container.style.bottom !== bottom) container.style.bottom = bottom;
+		// Label first (cheap, and names can change without the watcher set
+		// changing): the Buddies-only variant — never a "You" entry.
+		const label = 'Watched by ' + YTB.watchedByLabel(watchers, videoId, myClientId, roster, { buddiesOnly: true });
+		cluster.setAttribute('aria-label', label);
+		cluster.querySelector(':scope > .' + TOOLTIP_CLASS).textContent = label;
 
-			// Rebuild bands only when the video or its positions changed.
-			const sig = videoId + '|' + segments.map((s) => s.cid + ':' + s.fraction.toFixed(3)).join(',');
-			if (container.dataset.ytbSig === sig) continue;
-
-			const track = container.querySelector('.' + THUMB_TRACK_CLASS);
-			track.textContent = ''; // clear old bands before rebuilding
-			let prev = 0;
-			for (const s of segments) {
-				const seg = document.createElement('div');
-				seg.className = THUMB_SEG_CLASS;
-				seg.style.left = (prev * 100).toFixed(3) + '%';
-				seg.style.width = ((s.fraction - prev) * 100).toFixed(3) + '%';
-				seg.style.background = YTB.buddyColor(s.cid);
-				const who = YTB.buddyName(s.record.clientId, s.record.name, roster);
-				const label = who + ' · @' + YTB.formatTime(s.record.timestamp);
-				seg.addEventListener('mouseenter', () => showThumbTooltip(container, box, seg, label));
-				seg.addEventListener('mouseleave', () => hideThumbTooltip(container));
-				track.appendChild(seg);
-				prev = s.fraction;
+		// Rebuild the dots only when the video or its watcher set changed.
+		const sig = videoId + '|' + watchers.map((w) => w.clientId).join(',');
+		if (cluster.dataset.ytbSig !== sig) {
+			for (const dot of cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS)) dot.remove();
+			const tooltip = cluster.querySelector(':scope > .' + TOOLTIP_CLASS);
+			for (const w of watchers) {
+				const dot = document.createElement('div');
+				dot.className = THUMB_DOT_CLASS;
+				dot.dataset.ytbCid = w.clientId;
+				cluster.insertBefore(dot, tooltip);
 			}
-			container.dataset.ytbSig = sig;
+			cluster.dataset.ytbSig = sig;
+		}
+
+		// Colors every pass — never behind the signature guard (see above).
+		for (const dot of cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS)) {
+			dot.style.background = YTB.buddyColor(dot.dataset.ytbCid);
 		}
 	}
 
 	/**
-	 * Show the Progress Bar's hover tooltip above the hovered band, clamped fully
-	 * inside the thumbnail box: the box clips at `overflow: hidden`, so a tooltip
-	 * centered on an edge-hugging band would otherwise lose its ends.
-	 * @param {Element} container
-	 * @param {Element} box
-	 * @param {Element} seg
-	 * @param {string} text
+	 * Mirror the Watched-By Dots into YouTube's hover-autoplay inline preview
+	 * while it covers a decorated tile, so the dots stay visible AND hoverable
+	 * during the preview. Runs on every render pass (the preview mounting
+	 * triggers ytb:mutation); a preview that is hidden, previewing an
+	 * un-watched video, or gone again loses its mirrored cluster.
 	 */
-	function showThumbTooltip(container, box, seg, text) {
-		const tip = container.querySelector(':scope > .' + TOOLTIP_CLASS);
-		if (!tip) return;
-		tip.textContent = text;
-		tip.style.opacity = '1';
-		const containerRect = container.getBoundingClientRect();
-		const boxRect = box.getBoundingClientRect();
-		const segRect = seg.getBoundingClientRect();
-		const half = tip.offsetWidth / 2;
-		const pad = 2;
-		let center = segRect.left + segRect.width / 2 - containerRect.left;
-		const min = boxRect.left - containerRect.left + half + pad;
-		const max = boxRect.right - containerRect.left - half - pad;
-		if (min <= max) {
-			center = Math.min(Math.max(center, min), max);
-		} else {
-			// Wider than the thumbnail itself: the best we can do is center it.
-			center = (boxRect.left + boxRect.right) / 2 - containerRect.left;
+	function renderPreviewDots() {
+		for (const host of document.querySelectorAll(PREVIEW_HOST_SELECTOR)) {
+			const cluster = host.querySelector('.' + THUMB_DOTS_CLASS);
+			const anchor = host.querySelector('a[href*="/watch?v="]');
+			const visible = host.getBoundingClientRect().width > 0;
+			const videoId = visible && anchor ? videoIdFromHref(anchor.getAttribute('href')) : null;
+			const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
+			if (!records || records.length === 0) {
+				if (cluster) cluster.remove();
+				continue;
+			}
+			renderDotsCluster(host, cluster, videoId, records);
 		}
-		tip.style.left = center.toFixed(1) + 'px';
-	}
-
-	/** @param {Element} container */
-	function hideThumbTooltip(container) {
-		const tip = container.querySelector(':scope > .' + TOOLTIP_CLASS);
-		if (tip) tip.style.opacity = '';
 	}
 
 	// ---------------------------------------------------------------------------
@@ -550,37 +510,50 @@
       .${MARKER_CLASS}:hover .${TOOLTIP_CLASS} {
         opacity: 1;
       }
-      /* The Progress Bar mirrors the Watched Bar's geometry: 4px tall, inset
-         0 4px 4px 8px from the thumbnail edges, 2px radius, no track — the
-         remainder past the furthest Buddy stays transparent. The bottom inset
-         is inline (lifted above a Watched Bar when the tile shows one). */
-      .${THUMB_BAR_CLASS} {
+      /* Watched-By Dots: a top-left cluster of flat Buddy-colored dots inside
+         the thumbnail box. The negative margin keeps the dots' visual inset at
+         ${DOTS_INSET}px while the padding grows the hover/focus target beyond
+         the tiny dots. High z-index so the cluster rides above tile overlays
+         and an in-box inline preview player. */
+      .${THUMB_DOTS_CLASS} {
         position: absolute;
-        left: ${BAR_INSET_LEFT}px;
-        right: ${BAR_INSET_RIGHT}px;
-        bottom: ${BAR_INSET_BOTTOM}px;
-        height: ${BAR_HEIGHT}px;
-        pointer-events: none;
-      }
-      .${THUMB_TRACK_CLASS} {
-        position: absolute;
-        inset: 0;
-        border-radius: 2px;
-        overflow: hidden; /* pill-clip the square band corners */
-      }
-      .${THUMB_SEG_CLASS} {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        background: ${fallback};
+        top: ${DOTS_INSET}px;
+        left: ${DOTS_INSET}px;
+        display: flex;
+        align-items: center;
+        gap: ${DOT_GAP}px;
+        padding: 4px;
+        margin: -4px;
+        border-radius: 999px;
+        z-index: 600;
         pointer-events: auto;
         cursor: default;
       }
-      /* The thumbnail tooltip is container-level (the pill-clipping track would
-         swallow it) and JS-positioned: left in px, clamped inside the box. */
-      .${THUMB_BAR_CLASS} > .${TOOLTIP_CLASS} {
-        bottom: ${BAR_HEIGHT + 4}px;
-        left: 0;
+      .${THUMB_DOTS_CLASS}:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.9);
+        outline-offset: 1px;
+      }
+      .${THUMB_DOT_CLASS} {
+        width: ${DOT_SIZE}px;
+        height: ${DOT_SIZE}px;
+        border-radius: 50%;
+        background: ${fallback};
+      }
+      /* The cluster's single dark tooltip opens below the dots, left-aligned
+         (the box clips at overflow: hidden, so it must open inward), wrapping
+         instead of clipping when the name list runs long. */
+      .${THUMB_DOTS_CLASS} > .${TOOLTIP_CLASS} {
+        top: calc(100% + 4px);
+        bottom: auto;
+        left: 4px;
+        transform: none;
+        white-space: normal;
+        width: max-content;
+        max-width: 220px;
+      }
+      .${THUMB_DOTS_CLASS}:hover > .${TOOLTIP_CLASS},
+      .${THUMB_DOTS_CLASS}:focus-visible > .${TOOLTIP_CLASS} {
+        opacity: 1;
       }
       .${TOAST_WRAP_CLASS} {
         position: fixed;
