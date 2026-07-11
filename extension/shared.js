@@ -1002,18 +1002,22 @@ const YTB = {
 	},
 
 	/**
-	 * "Watched by" attribution for one recommended video, derived live from
-	 * the Room's Progress Records: "You" first (only when you have a record for
-	 * the video), then up to two Buddy Display Names most-recent first (blank
+	 * "Watched by" attribution for one video, derived live from the Room's
+	 * Progress Records: "You" first (only when you have a record for the
+	 * video), then up to two Buddy Display Names most-recent first (blank
 	 * names via the buddyName fallback), then "and N other(s)". Returns '' when
-	 * nobody in the Room has a Progress Record for the video.
+	 * nobody in the Room has a Progress Record for the video. The Buddies-only
+	 * variant (`buddiesOnly: true` — the Watched-By Dots tooltip) drops the
+	 * "You" entry entirely: the viewer's own state is YouTube's red Watched
+	 * Bar's to tell, never ours.
 	 * @param {Array<object>} progress Room read progress records (all members).
 	 * @param {string} videoId
 	 * @param {string} myClientId
 	 * @param {Array<{clientId: string, name?: string}>} [roster] the Room roster; makes Buddy names Room-unique.
+	 * @param {{buddiesOnly?: boolean}} [options]
 	 * @returns {string} e.g. "You, Bob, and 1 other"
 	 */
-	watchedByLabel(progress, videoId, myClientId, roster) {
+	watchedByLabel(progress, videoId, myClientId, roster, { buddiesOnly = false } = {}) {
 		const latest = new Map(); // clientId -> latest record (for its name)
 		for (const r of progress || []) {
 			if (!r || !r.clientId || r.videoId !== videoId) continue;
@@ -1022,7 +1026,7 @@ const YTB = {
 		}
 		const parts = [];
 		if (latest.has(myClientId)) {
-			parts.push('You');
+			if (!buddiesOnly) parts.push('You');
 			latest.delete(myClientId);
 		}
 		const buddies = [...latest.values()].sort((a, b) => b.updatedAt - a.updatedAt);

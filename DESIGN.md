@@ -5,9 +5,9 @@ Design system for **YouTube Buddy's own surfaces**: the action popup
 whole on-video Note UI — Video Timeline Note Previews, the Expanded Note, the Add
 Note composer, the @-mention popover, and Playback Notification cards — delivered
 via the namespaced injected tokens in `extension/theme.js` (see 1.5). The on-video
-progress-bar markers and feed thumbnail bars (`renderer.js`) remain **out of
-scope** and keep their player-native look, as does the Add Note button sitting
-inside YouTube's own control bar.
+progress-bar markers and feed thumbnail Watched-By Dots (`renderer.js`) remain
+**out of scope** and keep their player-native look (flat Buddy-colored dots, dark
+tooltip), as does the Add Note button sitting inside YouTube's own control bar.
 
 Personality: **soft, warm, friendly** without being childish. Cozy over corporate.
 Warmth comes from color, rounded shape, gentle-but-slightly-springy motion, and a
