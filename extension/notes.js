@@ -55,8 +55,10 @@
 	const DOT_LOCKED_CLASS = 'ytb-note-dot-locked';
 	const DOT_OPEN_CLASS = 'ytb-note-dot-open'; // suppresses the open Note's own preview
 	const DOT_UNSEEN_CLASS = 'ytb-note-dot-unseen'; // pulses the apricot halo (ADR-0010)
+	const DOT_PASSED_CLASS = 'ytb-note-dot-passed'; // dims a Note after the playhead crosses it
 	const CLUSTER_CLASS = 'ytb-dot-cluster'; // wrapper owning a Cluster's hover/fan (#123)
 	const CLUSTER_PINNED_CLASS = 'ytb-dot-cluster-pinned'; // stays fanned while its Note's panel is open
+	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
 	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
 	const CLUSTER_FAN_GAP = 14; // px between adjacent fanned dot centers (a covered dot becomes hoverable)
 	const PREVIEW_CLASS = 'ytb-note-preview';
@@ -370,6 +372,7 @@
 					// Spoiler state follows the viewer's playhead and can relock when
 					// the video is revisited from an earlier point.
 					locked: Boolean(note.spoiler) && playhead < timestamp,
+					passed: playhead >= timestamp,
 					// The dot's exact moment on the bar. Never displaced at rest:
 					// co-timed dots overlap and fan apart only on hover (truth of
 					// position beats legibility).
@@ -426,6 +429,12 @@
 				for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
 					wrapper.addEventListener(type, (e) => e.stopPropagation());
 				}
+				// YouTube may already have shown its storyboard while the pointer
+				// crossed the scrubber on the way to this wrapper. Hide that stale
+				// tooltip for the entire fanned hover band, then restore normal
+				// scrubbing the instant the pointer leaves it.
+				wrapper.addEventListener('mouseenter', () => setStoryboardSuppressed(wrapper, true));
+				wrapper.addEventListener('mouseleave', () => setStoryboardSuppressed(wrapper, false));
 				bar.appendChild(wrapper);
 			}
 			// The wrapper anchors at the Cluster centre as a percentage (resize-
@@ -460,6 +469,12 @@
 		}
 	}
 
+	/** Toggle YouTube's storyboard/time-pill visibility on this wrapper's player. */
+	function setStoryboardSuppressed(wrapper, suppressed) {
+		const player = wrapper.closest('#movie_player, .html5-video-player');
+		if (player) player.classList.toggle(TOOLTIP_SUPPRESSED_CLASS, suppressed);
+	}
+
 	/** One-time construction of a Note Dot button, its Preview, and listeners. */
 	function buildDot(id) {
 		const dot = document.createElement('button');
@@ -492,7 +507,7 @@
 	}
 
 	/** Reconcile one Note Dot's colour, state classes, label, and Preview. */
-	function updateDot(dot, id, { note, locked }) {
+	function updateDot(dot, id, { note, locked, passed }) {
 		const color = note.clientId === myClientId ? '#fff' : YTB.buddyColor(note.clientId);
 		dot.style.background = color;
 		// The open Note's own hover preview is redundant next to its panel.
@@ -500,13 +515,17 @@
 		// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
 		// construction: the halo is box-shadow only, so neighbouring dots — which
 		// sit at their true, possibly overlapping fractions — are never displaced.
-		dot.classList.toggle(DOT_UNSEEN_CLASS, unseenDotIds.has(id));
+		const unseen = unseenDotIds.has(id);
+		dot.classList.toggle(DOT_UNSEEN_CLASS, unseen);
+		// An Unseen pulse keeps its full-color eye-catch until Acknowledged. On
+		// that render, an already-crossed dot immediately adopts the passed paint.
+		dot.classList.toggle(DOT_PASSED_CLASS, passed && !unseen);
 
 		const count = replyCount(id);
 		// The resolved paint color is part of the signature: a Buddy Color
 		// re-assignment (issue #115) must rebuild the retained dot's Note Preview,
 		// whose author name carries the color inline.
-		const signature = JSON.stringify([locked, note.kind, note.clientId, note.name, note.body, count, color]);
+		const signature = JSON.stringify([locked, passed, unseen, note.kind, note.clientId, note.name, note.body, count, color]);
 		if (dot.dataset.ytbSig === signature) return;
 		dot.dataset.ytbSig = signature;
 
@@ -1661,6 +1680,12 @@
         outline: 2px solid var(--ytb-accent-500);
         outline-offset: 1px;
       }
+      .${DOT_PASSED_CLASS} { filter: saturate(.4) opacity(.55); }
+
+      /* Crossing the scrubber to reach a Note can leave YouTube's storyboard
+         frozen over the Note Preview. The Cluster wrapper toggles this class on
+         the player root for precisely the duration of its hover band. */
+      .${TOOLTIP_SUPPRESSED_CLASS} .ytp-tooltip { display: none !important; }
       /* Locked Spoilers stay visually obscured. The obscuring is a veil overlay
          rather than filter/opacity on the dot itself: a filter would gray out —
          and element opacity would fade — the apricot Unseen halo and the hover
