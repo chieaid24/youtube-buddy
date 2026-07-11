@@ -43,6 +43,14 @@
 // writes are Create/Join and their presence assert; a Dismiss or a close only
 // touches chrome.storage.local).
 //
+// Connection Lost (PRD #137): a failed Room read (`ok: false` on the
+// broadcast) retains the last-known Feed and Recommendations instead of
+// rebuilding them from the failure's empty arrays, and while the broadcast's
+// `connectionLost` flag is up (>= 2 consecutive failures) a quiet
+// "Can't reach your Room — retrying…" line sits under the header. The first
+// successful read clears the line and rebuilds as normal. Unpaired installs
+// are unaffected — the flag only rides broadcasts that carry a Room Code.
+//
 // Styling consumes theme.js's shared --ytb-* tokens (ADR-0009): this is a normal
 // on-page token surface with no private palette of its own, so it inherits the
 // apricot ramp, warm neutrals, motion, and the bundled 'YTB Rounded' font, and
@@ -55,7 +63,10 @@
 	const SECTION_ID = 'ytb-home-section';
 	const STYLE_ID = 'ytb-home-section-style';
 
-	let lastDetail = null; // most recent ytb:room-data payload
+	let lastDetail = null; // most recent RENDERABLE ytb:room-data payload (a failed
+	// Room read for the same Room retains the previous one — Connection Lost,
+	// PRD #137 — so the Feed and Recommendations never blank out on a blip)
+	let connectionLost = false; // >= 2 consecutive failed Room reads (broadcast flag)
 	let onHome = false;
 	let myClientId = null;
 	let pendingPair = false; // one Create/Join request at a time
@@ -166,6 +177,18 @@
 		}
 		head.append(buildCloseButton());
 
+		// Connection Lost (PRD #137): a quiet, deemphasized line under the header
+		// while the Room can't be read — the retained Feed and Recommendations
+		// keep rendering beneath it, and the first successful read clears it.
+		// Never shown while Unpaired (the flag is only set once there is a code).
+		let conn = null;
+		if (roomCode && connectionLost) {
+			conn = document.createElement('p');
+			conn.className = 'ytb-hs-conn';
+			conn.setAttribute('role', 'status');
+			conn.textContent = "Can't reach your Room — retrying…";
+		}
+
 		const body = document.createElement('div');
 		body.className = 'ytb-hs-body';
 		if (!roomCode) {
@@ -179,7 +202,8 @@
 			body.append(buildFeedColumn(detail, pinned), buildRecommendedColumn(detail));
 		}
 
-		section.replaceChildren(head, body);
+		if (conn) section.replaceChildren(head, conn, body);
+		else section.replaceChildren(head, body);
 
 		// Chat order: follow the newest item only while the viewer was already at
 		// the bottom; otherwise restore their exact scroll position — the window
@@ -633,8 +657,24 @@
 
 	document.addEventListener('ytb:room-data', async (event) => {
 		if (!YTB.isContextActive()) return;
-		lastDetail = (event && event.detail) || null;
-		myClientId = (lastDetail && lastDetail.myClientId) || myClientId;
+		const detail = (event && event.detail) || null;
+		myClientId = (detail && detail.myClientId) || myClientId;
+
+		// Connection Lost (PRD #137) only applies once there is a Room Code: an
+		// Unpaired broadcast never carries the flag, so the Create/Join prompt is
+		// untouched by an unreachable backend.
+		connectionLost = Boolean(detail && detail.roomCode && detail.connectionLost);
+
+		// A failed Room read is not truth: retain the last-known detail so the
+		// Feed and the Recommended-for-you grid stay exactly as last rendered
+		// instead of being rebuilt from the failure's empty arrays. Only a read
+		// for the SAME Room retains — pairing into a different Room mid-outage
+		// must not keep showing the old Room's content. (`locked` rides a
+		// successful read, so it always replaces.)
+		const failedRead = Boolean(detail && detail.roomCode && !detail.ok && !detail.locked);
+		if (!(failedRead && lastDetail && lastDetail.roomCode === detail.roomCode)) {
+			lastDetail = detail;
+		}
 
 		// Load this Room's persisted Dismissals before rendering the grid. On a
 		// Room switch start fresh; otherwise merge, so a just-clicked Dismiss
@@ -840,6 +880,9 @@
         white-space: nowrap;
       }
       #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 12px; color: var(--ytb-ink-muted); }
+      /* Connection Lost (PRD #137): quiet and deemphasized — the retained
+         content below stays the focus; this line just explains the staleness. */
+      #${SECTION_ID} .ytb-hs-conn { margin: -4px 0 8px; font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pl-row {
         display: flex; gap: 10px;
         overflow-x: auto;

@@ -810,6 +810,125 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 	}
 });
 
+test('Room Home Section keeps its Feed and Recommendations through Connection Lost and shows the retrying line', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	let backendUp = false; // unreachable from the start: the Unpaired phase below must not care
+
+	try {
+		await context.route('http://localhost:8787/**', (route) => {
+			const request = route.request();
+			if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			if (request.method() !== 'GET') {
+				return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
+			}
+			if (!backendUp) return route.abort('connectionrefused');
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({
+					progress: [],
+					presence: [],
+					notes: [],
+					replies: [],
+					playlist: [{ videoId: 'vid-live', title: 'Buddy Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 1000 }],
+					events: [{ id: 'e1', type: 'added', videoId: 'vid-live', title: 'Buddy Pick', actorClientId: 'buddy-1', at: 1000 }],
+				}),
+			});
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		// The grid card loads a real i.ytimg.com thumbnail URL; the fixture
+		// videoId would 404 there and fail the console-error gate.
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+
+		const section = page.locator('#ytb-home-section');
+		const feedRow = section.locator('.ytb-hs-system');
+		const card = section.locator('.ytb-hs-card');
+		const conn = section.locator('.ytb-hs-conn');
+
+		// Unpaired: the Create/Join prompt renders as normal with the backend
+		// unreachable, and never shows a Connection Lost line — the flag only
+		// applies once there is a Room Code.
+		await nudgeUntil(page, async () => {
+			await expect(section.locator('.ytb-hs-pair')).toHaveCount(1, { timeout: 700 });
+		});
+		await expect(conn).toHaveCount(0);
+		expect(errors, errors.join('\n')).toEqual([]);
+
+		const popup = await seedPairedRoom(context);
+		await popup.close(); // its own polling must not muddy the error ledger below
+
+		// Record the flags of every ytb:room-data broadcast from here on, so each
+		// driven read below is awaited deterministically. `paired` separates real
+		// Room reads from any straggling Unpaired broadcast (both carry ok=false).
+		await page.evaluate(() => {
+			(window as any).__broadcasts = [];
+			document.addEventListener('ytb:room-data', (e) => {
+				const d = (e as CustomEvent).detail || {};
+				(window as any).__broadcasts.push({ ok: d.ok, connectionLost: d.connectionLost, paired: Boolean(d.roomCode) });
+			});
+		});
+		const broadcasts = () =>
+			page.evaluate(() => (window as any).__broadcasts as { ok: boolean; connectionLost: boolean; paired: boolean }[]);
+		const driveRead = () => page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
+
+		// A successful read renders the paired section: one System Message in the
+		// Feed and one Recommendation card — and no Connection Lost line.
+		backendUp = true;
+		await driveRead();
+		await nudgeUntil(page, async () => {
+			await expect(feedRow).toHaveCount(1, { timeout: 700 });
+		});
+		await expect(feedRow).toContainText('Sam recommended Buddy Pick');
+		await expect(card).toHaveCount(1);
+		await expect(conn).toHaveCount(0);
+		errors.length = 0; // seeding raced the down backend; only refusals can be here
+
+		// First failed read: below the two-failure threshold — no line yet, and
+		// the Feed and Recommendations are retained, not blanked.
+		backendUp = false;
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).filter((b) => b.paired && !b.ok).length).toBe(1);
+		await expect(conn).toHaveCount(0);
+		await expect(feedRow).toHaveCount(1);
+		await expect(card).toHaveCount(1);
+
+		// The second failure trips Connection Lost: the quiet retrying line
+		// appears while the retained content keeps rendering beneath it.
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).filter((b) => b.paired && !b.ok).length).toBe(2);
+		await expect(conn).toHaveText("Can't reach your Room — retrying…");
+		await expect(feedRow).toContainText('Sam recommended Buddy Pick');
+		await expect(card).toHaveCount(1);
+
+		// Only the aborted GETs may have errored; nothing else.
+		expect(
+			errors.every((error) => error.includes('ERR_CONNECTION_REFUSED')),
+			errors.join('\n'),
+		).toBe(true);
+		errors.length = 0;
+
+		// Recovery: the first successful read clears the line and rebuilds the
+		// Feed and Recommendations as normal.
+		backendUp = true;
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false, paired: true });
+		await expect(conn).toHaveCount(0);
+		await expect(feedRow).toContainText('Sam recommended Buddy Pick');
+		await expect(card).toHaveCount(1);
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 // A playable fixture for dot-click behavior: the <video> carries a real silent
 // WAV as a data: URI (fully buffered, so the whole duration is seekable and
 // currentTime/play()/pause() behave like a real player — a route-fulfilled
