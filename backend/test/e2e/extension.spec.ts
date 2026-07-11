@@ -734,7 +734,10 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
 
 		// Only the aborted GETs may have errored; nothing else.
-		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED')), errors.join('\n')).toBe(true);
+		expect(
+			errors.every((error) => error.includes('ERR_CONNECTION_REFUSED')),
+			errors.join('\n'),
+		).toBe(true);
 		errors.length = 0;
 
 		// Recovery: the first successful read rebuilds the marker and clears
