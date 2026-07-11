@@ -191,7 +191,9 @@ const YTB = {
 	async setPendingArrival(videoId) {
 		const id = videoId ? String(videoId) : '';
 		if (!id) return false;
-		return await YTB._storageSet({ pendingArrival: { videoId: id, at: Date.now() } });
+		return await YTB._storageSet({
+			pendingArrival: { videoId: id, at: Date.now() },
+		});
 	},
 
 	/**
@@ -403,10 +405,11 @@ const YTB = {
 				body: JSON.stringify(payload),
 			});
 			const data = await res.json().catch(() => null);
+			if (!data || typeof data !== 'object') return { ok: false, category: 'unexpected' };
 			if (res.ok) return { ok: true, ...(data || {}) };
 			return { ok: false, category: (data && data.category) || 'unexpected' };
 		} catch {
-			return { ok: false, category: 'unexpected' };
+			return { ok: false, category: 'network' };
 		}
 	},
 
@@ -497,7 +500,7 @@ const YTB = {
 			const data = await res.json().catch(() => null);
 			return { ok: false, category: (data && data.category) || 'unexpected' };
 		} catch {
-			return { ok: false, category: 'unexpected' };
+			return { ok: false, category: 'network' };
 		}
 	},
 
@@ -574,6 +577,18 @@ const YTB = {
 	// --- utils ---
 
 	/**
+	 * Fold one Room-read outcome into a poller's consecutive-failure state.
+	 * Pollers own the counter; this helper only defines the shared threshold.
+	 * @param {number} prevFailures
+	 * @param {boolean} ok
+	 * @returns {{failures: number, lost: boolean}}
+	 */
+	connectionState(prevFailures, ok) {
+		const failures = ok ? 0 : Math.max(0, Math.floor(Number(prevFailures) || 0)) + 1;
+		return { failures, lost: failures >= 2 };
+	},
+
+	/**
 	 * Format seconds as "M:SS" (or "H:MM:SS" past an hour) for tooltips.
 	 * e.g. 412 -> "6:52".
 	 * @param {number} seconds
@@ -625,6 +640,7 @@ const YTB = {
 	 * @returns {string}
 	 */
 	errorCopy(category, action) {
+		if (category === 'network') return "Can't reach the backend. Check your connection and try again.";
 		if (category === 'reply_cap') return 'This note already has 10 replies.';
 		if (category === 'room_full') return "This Room is full, so you can't post here.";
 		if (category === 'missing_parent') return 'This note is no longer available.';

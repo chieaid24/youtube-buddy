@@ -167,6 +167,21 @@ describe('extension member API', () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network down')));
 		await expect(window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x' })).resolves.toEqual({
 			ok: false,
+			category: 'network',
+		});
+		await expect(window.YTB.deletePlaylistItem({ clientId: 'a', videoId: 'v' })).resolves.toEqual({
+			ok: false,
+			category: 'network',
+		});
+
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => Promise.reject(new SyntaxError('bad json')) }));
+		await expect(window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x' })).resolves.toEqual({
+			ok: false,
+			category: 'unexpected',
+		});
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => Promise.reject(new SyntaxError('bad json')) }));
+		await expect(window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x' })).resolves.toEqual({
+			ok: false,
 			category: 'unexpected',
 		});
 
@@ -239,12 +254,20 @@ describe('note presentation helpers', () => {
 	});
 
 	it('maps error categories to safe user copy', () => {
+		expect(window.YTB.errorCopy('network', 'note')).toBe("Can't reach the backend. Check your connection and try again.");
 		expect(window.YTB.errorCopy('reply_cap', 'reply')).toBe('This note already has 10 replies.');
 		expect(window.YTB.errorCopy('room_full', 'note')).toBe("This Room is full, so you can't post here.");
 		expect(window.YTB.errorCopy('missing_parent', 'reply')).toBe('This note is no longer available.');
 		expect(window.YTB.errorCopy('unexpected', 'note')).toBe("We couldn't post your note. Try again.");
 		expect(window.YTB.errorCopy('validation', 'reply')).toBe("We couldn't post your reply. Try again.");
 		expect(window.YTB.errorCopy('unexpected', 'reaction')).toBe("We couldn't post your reaction. Try again.");
+	});
+
+	it('tracks Connection Lost after exactly two consecutive failed reads', () => {
+		expect(window.YTB.connectionState(0, false)).toEqual({ failures: 1, lost: false });
+		expect(window.YTB.connectionState(1, false)).toEqual({ failures: 2, lost: true });
+		expect(window.YTB.connectionState(2, false)).toEqual({ failures: 3, lost: true });
+		expect(window.YTB.connectionState(9, true)).toEqual({ failures: 0, lost: false });
 	});
 
 	it('writes the delete confirmation with the exact Reply cascade count', () => {
@@ -1434,6 +1457,7 @@ declare global {
 			BUDDY_COLORS: string[];
 			relativeTime(thenMs: number, nowMs?: number): string;
 			errorCopy(category: string, action: 'note' | 'reply' | 'reaction'): string;
+			connectionState(prevFailures: number, ok: boolean): { failures: number; lost: boolean };
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];
 			dotActivation(note: { kind?: string; spoiler?: boolean; timestamp?: number }): { action: 'open' };
 			notePanelVariant(note: { kind?: string; spoiler?: boolean; timestamp?: number }, playhead: number): 'text' | 'reaction' | 'spoiler';

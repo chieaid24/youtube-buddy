@@ -607,6 +607,58 @@ test('opens the extension popup without runtime errors', async () => {
 	}
 });
 
+test('popup retains its roster through Connection Lost and recovers on the next successful read', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	let backendUp = true;
+
+	try {
+		await context.route('http://localhost:8787/**', (route) => {
+			if (route.request().method() !== 'GET') {
+				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+			}
+			if (!backendUp) return route.abort('connectionrefused');
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					progress: [],
+					presence: [{ clientId: 'buddy-1', name: 'Bob', updatedAt: Date.now() }],
+					notes: [],
+					replies: [],
+					playlist: [],
+					events: [],
+				}),
+			});
+		});
+
+		const popup = await seedPairedRoom(context);
+		await popup.reload();
+		await expect(popup.locator('#status-text')).toHaveText('Buddies');
+		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+
+		backendUp = false;
+		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
+		await expect(popup.locator('#status-text')).toHaveText('Connecting to Room');
+		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
+		await expect(popup.locator('#status-text')).toHaveText("Can't reach the backend");
+		await expect(popup.locator('#status-sub')).toHaveText('Retrying…');
+		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+		expect(errors).toHaveLength(2);
+		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
+		errors.length = 0;
+
+		backendUp = true;
+		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
+		await expect(popup.locator('#status-text')).toHaveText('Buddies');
+		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 // A playable fixture for dot-click behavior: the <video> carries a real silent
 // WAV as a data: URI (fully buffered, so the whole duration is seekable and
 // currentTime/play()/pause() behave like a real player — a route-fulfilled
