@@ -659,6 +659,100 @@ test('popup retains its roster through Connection Lost and recovers on the next 
 	}
 });
 
+test('Video Timeline retains its markers through Connection Lost and clears connectionLost on recovery', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	let backendUp = true;
+
+	try {
+		await context.route('http://localhost:8787/**', (route) => {
+			const request = route.request();
+			if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			if (request.method() !== 'GET') {
+				return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
+			}
+			if (!backendUp) return route.abort('connectionrefused');
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({
+					progress: [{ clientId: 'buddy-1', name: 'Bob', videoId: 'fixture-video', timestamp: 30, duration: 100, updatedAt: Date.now() }],
+					presence: [],
+					notes: [],
+					replies: [],
+					playlist: [],
+					events: [],
+				}),
+			});
+		});
+		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: fixture }));
+
+		const popup = await seedPairedRoom(context);
+		await popup.close(); // its own polling must not muddy the error ledger below
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+
+		// Record the flags of every ytb:room-data broadcast from here on (the
+		// initial on-load read may predate this listener; the test drives its own
+		// reads below via yt-navigate-finish, exactly what YouTube's SPA fires).
+		await page.evaluate(() => {
+			(window as any).__broadcasts = [];
+			document.addEventListener('ytb:room-data', (e) => {
+				const d = (e as CustomEvent).detail || {};
+				(window as any).__broadcasts.push({ ok: d.ok, connectionLost: d.connectionLost });
+			});
+		});
+		const broadcasts = () => page.evaluate(() => (window as any).__broadcasts as { ok: boolean; connectionLost: boolean }[]);
+		const driveRead = () => page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
+
+		// A successful read draws Bob's marker at 30/100 = 30%.
+		const marker = page.locator('.ytb-watch-marker');
+		await nudgeUntil(page, async () => {
+			await expect(marker).toHaveCount(1);
+		});
+		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).filter((b) => b.ok).length).toBeGreaterThanOrEqual(1);
+		expect((await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
+
+		// Two consecutive failed reads: the marker is retained as last seen (no
+		// blanking, no on-video indicator), and connectionLost turns true only on
+		// the second failure (the shared two-failure threshold).
+		backendUp = false;
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(1);
+		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: false });
+		await expect(marker).toHaveCount(1);
+		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(2);
+		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: true });
+		await expect(marker).toHaveCount(1);
+		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+
+		// Only the aborted GETs may have errored; nothing else.
+		expect(
+			errors.every((error) => error.includes('ERR_CONNECTION_REFUSED')),
+			errors.join('\n'),
+		).toBe(true);
+		errors.length = 0;
+
+		// Recovery: the first successful read rebuilds the marker and clears
+		// connectionLost on that same broadcast.
+		backendUp = true;
+		await driveRead();
+		await expect.poll(async () => (await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
+		await expect(marker).toHaveCount(1);
+		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 // A playable fixture for dot-click behavior: the <video> carries a real silent
 // WAV as a data: URI (fully buffered, so the whole duration is seekable and
 // currentTime/play()/pause() behave like a real player — a route-fulfilled
