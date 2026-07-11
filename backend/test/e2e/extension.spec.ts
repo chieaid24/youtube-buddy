@@ -1269,14 +1269,38 @@ test('an Unseen Mention pulses its Note Dot; hovering Acknowledges it and a relo
 		await nudgeUntil(page, () => expect(mentionDot).toHaveClass(/ytb-note-dot-unseen/, { timeout: 700 }));
 		await expect(plainDot).not.toHaveClass(/ytb-note-dot-unseen/);
 
+		// Once the playhead is beyond both Notes, the plain dot desaturates live,
+		// while the Unseen Mention remains full color so its pulse stays prominent.
+		await page.locator('video').evaluate((video: HTMLVideoElement) => {
+			video.currentTime = 15;
+			video.dispatchEvent(new Event('timeupdate'));
+		});
+		await expect(plainDot).toHaveClass(/ytb-note-dot-passed/);
+		await expect(plainDot).toHaveCSS('filter', 'saturate(0.4) opacity(0.55)');
+		await expect(mentionDot).not.toHaveClass(/ytb-note-dot-passed/);
+		await expect(mentionDot).toHaveCSS('filter', 'none');
+
 		// Hovering the dot Acknowledges it: the pulse stops...
 		await mentionDot.hover();
 		await expect(mentionDot).not.toHaveClass(/ytb-note-dot-unseen/);
+		// ...and, because the playhead already crossed it, passed paint takes over.
+		await expect(mentionDot).toHaveClass(/ytb-note-dot-passed/);
+		await expect(mentionDot).toHaveCSS('filter', 'saturate(0.4) opacity(0.55)');
 		// ...and the seen state lands in Room-scoped chrome.storage.local, never on
 		// the wire (the stub records every request; none may carry the seen ids).
 		await expect
 			.poll(async () => popup.evaluate(async () => (await chrome.storage.local.get('seenItems')).seenItems))
 			.toEqual({ roome2e: ['n-mention'] });
+
+		// Rewinding before both timestamps restores both dots to full color.
+		await page.locator('video').evaluate((video: HTMLVideoElement) => {
+			video.currentTime = 0;
+			video.dispatchEvent(new Event('timeupdate'));
+		});
+		await expect(mentionDot).not.toHaveClass(/ytb-note-dot-passed/);
+		await expect(plainDot).not.toHaveClass(/ytb-note-dot-passed/);
+		await expect(mentionDot).toHaveCSS('filter', 'none');
+		await expect(plainDot).toHaveCSS('filter', 'none');
 
 		// A reload re-reads the Room and the persisted seen set: Acknowledged stays
 		// silent, and nothing else has started pulsing.
@@ -1774,7 +1798,10 @@ test('a hovered Reaction preview renders at natural height with its corner times
 
 		const reactionDot = page.locator('.ytb-note-dot-reaction');
 		await nudgeUntil(page, () => expect(reactionDot).toHaveCount(1, { timeout: 700 }));
+		const tooltip = page.locator('.ytp-tooltip');
+		await expect(tooltip).toHaveCSS('display', 'block');
 		await reactionDot.hover();
+		await expect(tooltip).toHaveCSS('display', 'none');
 
 		const preview = page.locator('.ytb-note-dot-reaction .ytb-note-preview');
 		await expect.poll(() => preview.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
@@ -1793,6 +1820,17 @@ test('a hovered Reaction preview renders at natural height with its corner times
 			};
 		});
 		expect(state).toEqual({ uncapped: true, emojiInside: true, chipShown: true });
+
+		// Leaving the Dot Cluster restores YouTube's storyboard for normal
+		// scrubbing immediately.
+		await page.locator('video').hover({ position: { x: 10, y: 10 } });
+		await expect(tooltip).toHaveCSS('display', 'block');
+
+		// The later Spoiler remains locked and full color before its timestamp.
+		const lockedDot = page.locator('.ytb-note-dot-locked');
+		await expect(lockedDot).toHaveCount(1);
+		await expect(lockedDot).not.toHaveClass(/ytb-note-dot-passed/);
+		await expect(lockedDot).toHaveCSS('filter', 'none');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
