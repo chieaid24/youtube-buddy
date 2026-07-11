@@ -61,6 +61,8 @@
 	let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
 	let baselineReady = false; // skip toasts on the very first read (no false "joined")
 	let pollTimer = null;
+	let readFailures = 0; // consecutive failed Room reads, folded via YTB.connectionState
+	let connectionLost = false; // failures >= 2 — rides every ytb:room-data broadcast
 
 	// Buddy Progress Visibility (Settings): while hidden, draw neither markers
 	// nor thumbnail bars — but keep polling and rebroadcasting ytb:room-data
@@ -83,8 +85,10 @@
 	 * GET every record under the configured Room Code and index the Buddies'
 	 * (foreign clientId) by videoId — one latest record per Buddy per video. Bails
 	 * to an empty cache when there is no code (Unpaired) or when this install is
-	 * the locked-out 6th member (Room full — draw nothing). Server-side TTL
-	 * already drops records older than 14 days, so no age filter is needed here.
+	 * the locked-out 6th member (Room full — draw nothing). A FAILED read instead
+	 * retains the previous cache untouched (Connection Lost: markers stay as last
+	 * seen) while still broadcasting. Server-side TTL already drops records older
+	 * than 14 days, so no age filter is needed here.
 	 */
 	async function refresh() {
 		if (!YTB.isContextActive()) return;
@@ -94,6 +98,8 @@
 			buddyByVideoId = new Map();
 			roster = [];
 			activeRoomCode = '';
+			readFailures = 0; // Unpaired: nothing is polled, so nothing can be "lost"
+			connectionLost = false;
 			resetPresenceBaseline();
 			broadcastRoomData(null, false);
 			return;
@@ -102,7 +108,18 @@
 		if (!YTB.isContextActive()) return;
 		activeRoomCode = code;
 		const records = await YTB.getRecords(code);
-		roster = YTB.roomRoster(records);
+		const conn = YTB.connectionState(readFailures, records.ok);
+		readFailures = conn.failures;
+		connectionLost = conn.lost;
+		if (!records.ok) {
+			// A failed read is not truth: retain the previous cache, roster, and
+			// toast baseline exactly as last rendered — markers and thumbnail bars
+			// stay where they were through a blip or outage (no on-video indicator;
+			// see Connection Lost, PRD #137). Only the broadcast goes out, so
+			// consumers still hear about the failure and its connectionLost flag.
+			broadcastRoomData(records, false);
+			return;
+		}
 		const view = YTB.roomView(records, myClientId);
 		await YTB.syncBuddyColors(
 			code,
@@ -170,6 +187,10 @@
 					// they must not treat the emptiness as truth — notes.js only prunes
 					// the Unseen seen-set (ADR-0010) against an ok read.
 					ok: Boolean(r.ok),
+					// Connection Lost (>= 2 consecutive failed reads, YTB.connectionState):
+					// carried on EVERY broadcast so consumers track both onset and
+					// recovery without owning a failure counter of their own.
+					connectionLost,
 				},
 			}),
 		);
