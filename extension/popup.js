@@ -83,6 +83,10 @@ let currentRoster = [];
 let selectedBuddyId = '';
 let activeRoomCode = '';
 
+// Consecutive Room-read failures belong to this popup poller. A successful
+// read resets the count immediately through the shared Connection Lost rule.
+let connectionFailures = 0;
+
 // Roster ids from the previous render: lets a genuinely NEW Buddy row animate in
 // while the 5s poll re-render keeps existing rows perfectly still. null = no
 // render yet (the initial fill does not animate row-by-row).
@@ -619,9 +623,23 @@ async function refreshStatus(code) {
 	const { sharing } = await YTB.getConfig();
 	currentSharing = sharing;
 	const records = await YTB.getRecords(code);
+	const connection = YTB.connectionState(connectionFailures, records.ok);
+	connectionFailures = connection.failures;
+	activeRoomCode = code;
+
+	if (!records.ok) {
+		setStatus(
+			connection.lost ? 'connection-lost' : 'connecting',
+			connection.lost ? "Can't reach the backend" : 'Connecting to Room',
+			connection.lost ? 'Retrying…' : '',
+			true,
+		);
+		// Keep the last-known roster and its colors on screen during an outage.
+		return;
+	}
+
 	const { buddies, locked } = YTB.roomView(records, myClientId);
 	currentRoster = YTB.roomRoster(records);
-	activeRoomCode = code;
 	await YTB.syncBuddyColors(
 		code,
 		buddies.map((buddy) => buddy.clientId),
