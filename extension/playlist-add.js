@@ -28,6 +28,7 @@
 	const BUTTON_ID = 'ytb-playlist-add-button';
 	const KEBAB_ITEM_CLASS = 'ytb-kebab-add';
 	const STYLE_ID = 'ytb-playlist-add-style';
+	const FEEDBACK_ID = 'ytb-playlist-feedback';
 	const FEEDBACK_MS = 2000;
 
 	let currentVideoId = null;
@@ -45,6 +46,7 @@
 	injectStyle();
 
 	function errorLabel(category) {
+		if (category === 'network') return YTB.errorCopy(category, 'recommendation');
 		if (category === 'playlist_full') return 'Room list full';
 		if (category === 'room_full') return 'Room full';
 		return "Couldn't add";
@@ -95,7 +97,8 @@
 					if (result.ok) {
 						syncWatchButton(button);
 					} else {
-						flashButton(button, errorLabel(result.category));
+						const message = errorLabel(result.category);
+						flashButton(button, result.category === 'network' ? STATE_LABELS.idle : message, message);
 					}
 				} else if (state === 'recommended') {
 					// Un-recommend (ADR-0007): the author-only point delete that
@@ -109,7 +112,8 @@
 						recommenderByVideoId.delete(videoId);
 						syncWatchButton(button);
 					} else {
-						flashButton(button, "Couldn't unrecommend");
+						const message = result.category === 'network' ? errorLabel(result.category) : "Couldn't unrecommend";
+						flashButton(button, result.category === 'network' ? STATE_LABELS.recommended : message, message);
 					}
 				}
 			});
@@ -128,6 +132,7 @@
 	function setButtonState(button, state, label) {
 		button.dataset.ytbState = state;
 		button.textContent = label || STATE_LABELS[state] || STATE_LABELS.idle;
+		button.removeAttribute('aria-describedby');
 		button.disabled = state === 'busy';
 		button.classList.toggle('is-added', state === 'added');
 		button.classList.toggle('is-recommended', state === 'recommended');
@@ -144,11 +149,28 @@
 		setButtonState(button, pillState());
 	}
 
-	function flashButton(button, label) {
+	function flashButton(button, label, message = '') {
+		document.getElementById(FEEDBACK_ID)?.remove();
 		setButtonState(button, 'error', label);
+		if (message && message !== label) {
+			const feedback = document.createElement('span');
+			feedback.id = FEEDBACK_ID;
+			feedback.className = 'ytb-playlist-feedback';
+			feedback.setAttribute('role', 'status');
+			feedback.textContent = message;
+			(document.body || document.documentElement).append(feedback);
+			button.setAttribute('aria-describedby', FEEDBACK_ID);
+			const anchor = button.getBoundingClientRect();
+			const width = feedback.offsetWidth;
+			const height = feedback.offsetHeight;
+			feedback.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, anchor.right - width)) + 'px';
+			const below = anchor.bottom + 8;
+			feedback.style.top = (below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 8)) + 'px';
+		}
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = setTimeout(() => {
 			feedbackTimer = null;
+			document.getElementById(FEEDBACK_ID)?.remove();
 			if (button.isConnected) syncWatchButton(button);
 		}, FEEDBACK_MS);
 	}
@@ -265,6 +287,8 @@
 			label.textContent = 'Recommending...';
 			const result = await addToPlaylist(videoId, title);
 			label.textContent = result.ok ? 'Recommended' : errorLabel(result.category);
+			item.classList.toggle('is-network-error', !result.ok && result.category === 'network');
+			fitOpenMenu(item);
 			setTimeout(() => {
 				// Close the menu the way YouTube would.
 				const open = item.closest('tp-yt-iron-dropdown');
@@ -298,12 +322,15 @@
 		const dropdown = item.closest('tp-yt-iron-dropdown');
 		if (!dropdown) return;
 		const rowHeight = item.offsetHeight || 36;
+		const previousHeight = Number(item.dataset.ytbFittedHeight) || 0;
+		const growth = Math.max(0, rowHeight - previousHeight);
+		item.dataset.ytbFittedHeight = String(rowHeight);
 		let node = item.parentElement;
 		while (node) {
 			const inline = node.style ? node.style.maxHeight : '';
 			if (inline && inline.endsWith('px')) {
 				const current = parseFloat(inline);
-				if (Number.isFinite(current)) node.style.maxHeight = current + rowHeight + 'px';
+				if (Number.isFinite(current)) node.style.maxHeight = current + growth + 'px';
 			}
 			if (node === dropdown) break;
 			node = node.parentElement;
@@ -321,6 +348,9 @@
 
 	document.addEventListener('ytb:navigate', async (event) => {
 		if (!YTB.isContextActive()) return;
+		if (feedbackTimer) clearTimeout(feedbackTimer);
+		feedbackTimer = null;
+		document.getElementById(FEEDBACK_ID)?.remove();
 		currentVideoId = (event.detail && event.detail.videoId) || null;
 		pendingKebab = null;
 		const { code } = await YTB.getConfig();
@@ -348,6 +378,7 @@
 	YTB.onContextInvalidated(() => {
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = null;
+		document.getElementById(FEEDBACK_ID)?.remove();
 		document.getElementById(BUTTON_ID)?.remove();
 		for (const item of document.querySelectorAll('.' + KEBAB_ITEM_CLASS)) item.remove();
 	});
@@ -378,6 +409,21 @@
       #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; line-height: 34px; }
       #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
       #${BUTTON_ID}:disabled { opacity: 0.7; cursor: default; }
+	  #${FEEDBACK_ID} {
+		position: fixed;
+		z-index: 2147483647;
+		box-sizing: border-box;
+		width: 280px;
+		padding: 8px 10px;
+		border: 1px solid var(--ytb-line-strong, rgba(58, 46, 40, 0.2));
+		border-radius: var(--ytb-r-sm, 8px);
+		background: var(--ytb-surface, #fffaf6);
+		box-shadow: var(--ytb-shadow-float, 0 8px 24px rgba(30, 20, 14, 0.2));
+		color: var(--ytb-danger-text, #a53b20);
+		font: 600 12px/1.35 var(--ytb-font, Nunito, ui-rounded, Roboto, Arial, sans-serif);
+		white-space: normal;
+		pointer-events: none;
+	  }
       .${KEBAB_ITEM_CLASS} {
         display: flex;
         align-items: center;
@@ -393,6 +439,14 @@
         background: rgba(246, 169, 107, 0.14);
         outline: none;
       }
+	  .${KEBAB_ITEM_CLASS}.is-network-error {
+		box-sizing: border-box;
+		max-width: 320px;
+		padding-top: 8px;
+		padding-bottom: 8px;
+		line-height: 1.35;
+		white-space: normal;
+	  }
       .ytb-kebab-add-icon {
         width: 24px;
         text-align: center;

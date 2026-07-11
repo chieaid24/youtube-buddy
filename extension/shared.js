@@ -394,7 +394,8 @@ const YTB = {
 	/**
 	 * POST a JSON payload and normalize the outcome: `{ ok: true, ...body }` on
 	 * success, else `{ ok: false, category }` with the server's machine-readable
-	 * error category ('unexpected' for network failures / unparseable bodies).
+	 * error category (`network` when fetch throws; `unexpected` for an
+	 * unparseable response body).
 	 * Callers branch on `category`, never on prose.
 	 */
 	async _postJson(pathAndQuery, payload) {
@@ -636,7 +637,7 @@ const YTB = {
 	 * everything else gets the action's generic retry message. Never surfaces
 	 * backend prose.
 	 * @param {string} category
-	 * @param {'note'|'reply'|'reaction'} action
+	 * @param {'note'|'reply'|'reaction'|'recommendation'} action
 	 * @returns {string}
 	 */
 	errorCopy(category, action) {
