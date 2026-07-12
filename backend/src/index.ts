@@ -138,10 +138,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', 'missing or invalid field: clientId');
 		}
 
-		// A presence row reserves a Room slot just like a progress row — see the
-		// cap-check note in currentMembers.
-		const members = await currentMembers(env, prefix);
-		if (!members.has(body.clientId) && members.size >= MAX_MEMBERS) {
+		// A presence row reserves a Room slot just like a progress row.
+		if (!(await roomHasCapacityFor(env, prefix, body.clientId))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
@@ -178,8 +176,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', error);
 		}
 
-		const members = await currentMembers(env, prefix);
-		if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+		if (!(await roomHasCapacityFor(env, prefix, body.clientId!))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
@@ -220,8 +217,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', `missing ${!clientId ? 'clientId' : 'videoId'}`);
 		}
 
-		const members = await currentMembers(env, prefix);
-		if (!members.has(clientId) && members.size >= MAX_MEMBERS) {
+		if (!(await roomHasCapacityFor(env, prefix, clientId))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
@@ -237,8 +233,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', error);
 		}
 
-		const members = await currentMembers(env, prefix);
-		if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+		if (!(await roomHasCapacityFor(env, prefix, body.clientId!))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
@@ -312,8 +307,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', 'replies are only allowed on text notes', { noteId: body.noteId! });
 		}
 
-		const members = await currentMembers(env, prefix);
-		if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+		if (!(await roomHasCapacityFor(env, prefix, body.clientId!))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
@@ -373,9 +367,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		// Best-effort Room cap: a Room Code holds at most MAX_MEMBERS distinct
 		// Client IDs, counting both progress and presence rows. A brand-new
 		// Client ID is rejected once the Room is full; returning members — and
-		// their new videos — always go through. See currentMembers.
-		const members = await currentMembers(env, prefix);
-		if (!members.has(body.clientId!) && members.size >= MAX_MEMBERS) {
+		// their new videos — always go through.
+		if (!(await roomHasCapacityFor(env, prefix, body.clientId!))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
@@ -424,7 +417,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	return fail(log, 405, 'not_allowed', 'method not allowed');
 }
 
-// Derives the Room's current distinct Client IDs under the Code's prefix.
+// Reports whether a Client ID may write into the Room. Returning members keep
+// their slot; a brand-new member needs the current distinct count to be below
+// MAX_MEMBERS. Membership is derived under the Code's prefix.
 // Every key kind reserves a slot: progress keys are
 // `${code}:${clientId}:${videoId}` (member id is the first segment), presence
 // keys are `${code}:presence:${clientId}`, note keys are
@@ -438,7 +433,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 // chars). KV is eventually consistent with no transactions, so a
 // simultaneous-join race (or a >1000-key code whose listing truncates) can
 // momentarily admit a 6th member; acceptable for a friends-only weak-secret app.
-async function currentMembers(env: Env, prefix: string): Promise<Set<string>> {
+async function roomHasCapacityFor(env: Env, prefix: string, clientId: string): Promise<boolean> {
 	const existing = await env.PROGRESS.list({ prefix });
 	const members = new Set<string>();
 	const valueReads: string[] = [];
@@ -459,7 +454,7 @@ async function currentMembers(env: Env, prefix: string): Promise<Set<string>> {
 			if (typeof id === 'string' && id !== '') members.add(id);
 		}),
 	);
-	return members;
+	return members.has(clientId) || members.size < MAX_MEMBERS;
 }
 
 // One Playlist Event backs one System Message in the Room Feed. Only
