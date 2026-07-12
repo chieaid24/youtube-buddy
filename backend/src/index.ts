@@ -72,6 +72,12 @@ const MAX_PLAYLIST_ITEMS = 30;
 // older ones are pruned best-effort on each write. They also share TTL_SECONDS.
 const MAX_EVENTS = 50;
 
+// Every caller-controlled value embedded in a colon-delimited KV key must be a
+// single bounded segment. Client IDs also cannot equal a record-kind infix,
+// because progress/member operations place them in the first segment.
+const KEY_SEGMENT_MAX_CHARS = 128;
+const RESERVED_KEY_KINDS = new Set(['presence', 'note', 'reply', 'playlist', 'event']);
+
 // A video title is captured at write time — a Playlist Item's at add time, a
 // Note's at post time. YouTube titles top out around 100 chars, so this bound
 // only rejects abuse, never real titles.
@@ -126,6 +132,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	if (!code) {
 		return fail(log, 400, 'validation', 'missing code');
 	}
+	if (!isValidKeySegment(code)) {
+		return fail(log, 400, 'validation', 'missing or invalid field: code');
+	}
 
 	const prefix = `${code}:`;
 	const path = url.pathname;
@@ -134,7 +143,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	// whether they're watching anything. Stored under `${code}:presence:${id}`.
 	if (req.method === 'POST' && path === '/presence') {
 		const body = (await req.json()) as Partial<PresenceBody>;
-		if (typeof body.clientId !== 'string' || body.clientId === '') {
+		if (!isValidClientId(body.clientId)) {
 			return fail(log, 400, 'validation', 'missing or invalid field: clientId');
 		}
 
@@ -161,6 +170,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		const clientId = url.searchParams.get('clientId');
 		if (!clientId) {
 			return fail(log, 400, 'validation', 'missing clientId');
+		}
+		if (!isValidClientId(clientId)) {
+			return fail(log, 400, 'validation', 'missing or invalid field: clientId');
 		}
 		await deleteMember(env, prefix, clientId);
 		return json({ ok: true });
@@ -215,6 +227,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		const videoId = url.searchParams.get('videoId');
 		if (!clientId || !videoId) {
 			return fail(log, 400, 'validation', `missing ${!clientId ? 'clientId' : 'videoId'}`);
+		}
+		if (!isValidClientId(clientId) || !isValidKeySegment(videoId)) {
+			return fail(log, 400, 'validation', `missing or invalid field: ${!isValidClientId(clientId) ? 'clientId' : 'videoId'}`);
 		}
 
 		if (!(await roomHasCapacityFor(env, prefix, clientId))) {
@@ -271,6 +286,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		const id = url.searchParams.get('id');
 		if (!clientId || !id) {
 			return fail(log, 400, 'validation', `missing ${!clientId ? 'clientId' : 'id'}`);
+		}
+		if (!isValidClientId(clientId) || !isValidKeySegment(id)) {
+			return fail(log, 400, 'validation', `missing or invalid field: ${!isValidClientId(clientId) ? 'clientId' : 'id'}`);
 		}
 
 		const key = await findNoteKey(env, prefix, id);
@@ -349,6 +367,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		if (!noteId) {
 			return fail(log, 400, 'validation', 'missing noteId');
 		}
+		if (!isValidKeySegment(noteId)) {
+			return fail(log, 400, 'validation', 'missing or invalid field: noteId');
+		}
 		const noteKey = await findNoteKey(env, prefix, noteId);
 		const noteRaw = noteKey ? await env.PROGRESS.get(noteKey) : null;
 		if (noteRaw === null) {
@@ -425,12 +446,13 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 // keys are `${code}:presence:${clientId}`, note keys are
 // `${code}:note:${clientId}:${videoId}:${id}`, and reply keys are
 // `${code}:reply:${noteId}:${clientId}:${id}` (member id is the third segment)
-// — all readable from the key name alone. Playlist keys
+// — all readable from the key name alone. Caller input validation guarantees
+// these segments contain no delimiter and Client IDs cannot equal an infix.
+// Playlist keys
 // (`${code}:playlist:${videoId}`) and event keys (`${code}:event:${ts}:${id}`)
 // carry no member id, so those few values (<= 30 + ~50, both capped) are read
 // for their `addedBy` / `actorClientId` — keeping a locked-out 6th person from
-// curating the list. The infixes can never collide with a Client ID (8 hex
-// chars). KV is eventually consistent with no transactions, so a
+// curating the list. KV is eventually consistent with no transactions, so a
 // simultaneous-join race (or a >1000-key code whose listing truncates) can
 // momentarily admit a 6th member; acceptable for a friends-only weak-secret app.
 async function roomHasCapacityFor(env: Env, prefix: string, clientId: string): Promise<boolean> {
@@ -572,11 +594,8 @@ async function listReplies(env: Env, prefix: string, noteId: string): Promise<Ar
 // from clientId — see YTB.buddyName). Missing/empty name is coerced to "" on
 // store.
 function validate(body: Partial<ProgressBody>): string | null {
-	for (const field of ['clientId', 'videoId'] as const) {
-		if (typeof body[field] !== 'string' || body[field] === '') {
-			return `missing or invalid field: ${field}`;
-		}
-	}
+	if (!isValidClientId(body.clientId)) return 'missing or invalid field: clientId';
+	if (!isValidKeySegment(body.videoId)) return 'missing or invalid field: videoId';
 	for (const field of ['timestamp', 'duration'] as const) {
 		if (typeof body[field] !== 'number' || !Number.isFinite(body[field])) {
 			return `missing or invalid field: ${field}`;
@@ -586,11 +605,8 @@ function validate(body: Partial<ProgressBody>): string | null {
 }
 
 function validateNote(body: Partial<NoteBody>): string | null {
-	for (const field of ['clientId', 'videoId'] as const) {
-		if (typeof body[field] !== 'string' || body[field] === '') {
-			return `missing or invalid field: ${field}`;
-		}
-	}
+	if (!isValidClientId(body.clientId)) return 'missing or invalid field: clientId';
+	if (!isValidKeySegment(body.videoId)) return 'missing or invalid field: videoId';
 	// Checked through a local: iterating over field names cannot narrow
 	// `body.body` for the length and emoji tests below.
 	const text = body.body;
@@ -621,11 +637,8 @@ function validateNote(body: Partial<NoteBody>): string | null {
 }
 
 function validateReply(body: Partial<ReplyBody>): string | null {
-	for (const field of ['clientId', 'noteId'] as const) {
-		if (typeof body[field] !== 'string' || body[field] === '') {
-			return `missing or invalid field: ${field}`;
-		}
-	}
+	if (!isValidClientId(body.clientId)) return 'missing or invalid field: clientId';
+	if (!isValidKeySegment(body.noteId)) return 'missing or invalid field: noteId';
 	const text = body.body;
 	if (typeof text !== 'string' || text === '') {
 		return 'missing or invalid field: body';
@@ -642,10 +655,18 @@ function validateReply(body: Partial<ReplyBody>): string | null {
 // holds (ADR-0006).
 function validateMentions(mentions: unknown): string | null {
 	if (mentions === undefined) return null;
-	if (!Array.isArray(mentions) || mentions.length > MAX_MEMBERS || mentions.some((m) => typeof m !== 'string' || m === '')) {
+	if (!Array.isArray(mentions) || mentions.length > MAX_MEMBERS || mentions.some((m) => !isValidClientId(m))) {
 		return 'missing or invalid field: mentions';
 	}
 	return null;
+}
+
+function isValidKeySegment(value: unknown): value is string {
+	return typeof value === 'string' && value !== '' && value.length <= KEY_SEGMENT_MAX_CHARS && !value.includes(':');
+}
+
+function isValidClientId(value: unknown): value is string {
+	return isValidKeySegment(value) && !RESERVED_KEY_KINDS.has(value);
 }
 
 // A Note's `videoTitle` is OPTIONAL context, never a reason to lose a Note: a
@@ -662,11 +683,9 @@ function sanitizeVideoTitle(value: unknown): string | undefined {
 }
 
 function validatePlaylist(body: Partial<PlaylistBody>): string | null {
-	for (const field of ['clientId', 'videoId', 'title'] as const) {
-		if (typeof body[field] !== 'string' || body[field] === '') {
-			return `missing or invalid field: ${field}`;
-		}
-	}
+	if (!isValidClientId(body.clientId)) return 'missing or invalid field: clientId';
+	if (!isValidKeySegment(body.videoId)) return 'missing or invalid field: videoId';
+	if (typeof body.title !== 'string' || body.title === '') return 'missing or invalid field: title';
 	if (body.title!.length > TITLE_MAX_CHARS) {
 		return `title exceeds ${TITLE_MAX_CHARS} characters`;
 	}
