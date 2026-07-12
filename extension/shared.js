@@ -15,6 +15,36 @@
 // Room Codes are stored already-normalized (popup calls normalizeCode before
 // setConfig), so the API client passes the code through verbatim.
 
+// Private Room-scoped local-list persistence. Dismissals and seen ids have the
+// same chrome.storage.local shape: { [storageKey]: { [roomCode]: string[] } }.
+// Keep that representation, context lifecycle, Room isolation, and no-op write
+// behavior in one Module; the public YTB functions below remain the domain
+// Interfaces and own their input filtering.
+const roomScopedLocalLists = {
+	async read(storageKey, code) {
+		if (!code) return [];
+		const stored = await YTB._storageGet(storageKey);
+		if (!YTB.isContextActive()) return [];
+		const value = stored && stored[storageKey];
+		if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+		return Array.isArray(value[code]) ? value[code] : [];
+	},
+
+	async update(storageKey, code, transform) {
+		if (!code) return [];
+		const stored = await YTB._storageGet(storageKey);
+		if (!YTB.isContextActive()) return [];
+		const value = stored && stored[storageKey];
+		const all = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+		const current = Array.isArray(all[code]) ? all[code] : [];
+		const next = transform(current);
+		const unchanged = next.length === current.length && next.every((item, index) => item === current[index]);
+		if (unchanged) return current;
+		await YTB._storageSet({ [storageKey]: { ...all, [code]: next } });
+		return next;
+	},
+};
+
 const YTB = {
 	// A Chrome extension reload/update leaves already-injected content scripts in
 	// the page, but revokes their access to extension APIs. Treat that one error
@@ -1071,10 +1101,7 @@ const YTB = {
 	 * @returns {Promise<Array<string>>}
 	 */
 	async dismissedVideoIds(code) {
-		if (!code) return [];
-		const stored = await YTB._storageGet('dismissedVideos');
-		const all = (stored && stored.dismissedVideos) || {};
-		return Array.isArray(all[code]) ? all[code] : [];
+		return roomScopedLocalLists.read('dismissedVideos', code);
 	},
 
 	/**
@@ -1086,14 +1113,7 @@ const YTB = {
 	 */
 	async dismissVideo(code, videoId) {
 		if (!code || !videoId) return YTB.dismissedVideoIds(code);
-		const stored = await YTB._storageGet('dismissedVideos');
-		if (!YTB.isContextActive()) return [];
-		const all = (stored && stored.dismissedVideos) || {};
-		const room = Array.isArray(all[code]) ? all[code] : [];
-		if (room.includes(videoId)) return room;
-		all[code] = [...room, videoId];
-		await YTB._storageSet({ dismissedVideos: all });
-		return all[code];
+		return roomScopedLocalLists.update('dismissedVideos', code, (room) => (room.includes(videoId) ? room : [...room, videoId]));
 	},
 
 	// --- Unseen Mentions & Replies (ADR-0010) ---
@@ -1165,10 +1185,7 @@ const YTB = {
 	 * @returns {Promise<Array<string>>}
 	 */
 	async seenIds(code) {
-		if (!code) return [];
-		const stored = await YTB._storageGet('seenItems');
-		const all = (stored && stored.seenItems) || {};
-		return Array.isArray(all[code]) ? all[code] : [];
+		return roomScopedLocalLists.read('seenItems', code);
 	},
 
 	/**
@@ -1182,16 +1199,11 @@ const YTB = {
 	async markSeen(code, ids) {
 		const additions = [...(ids || [])].filter((id) => typeof id === 'string' && id !== '');
 		if (!code || additions.length === 0) return YTB.seenIds(code);
-		const stored = await YTB._storageGet('seenItems');
-		if (!YTB.isContextActive()) return [];
-		const all = (stored && stored.seenItems) || {};
-		const room = Array.isArray(all[code]) ? all[code] : [];
-		const merged = new Set(room);
-		for (const id of additions) merged.add(id);
-		if (merged.size === room.length) return room;
-		all[code] = [...merged];
-		await YTB._storageSet({ seenItems: all });
-		return all[code];
+		return roomScopedLocalLists.update('seenItems', code, (room) => {
+			const merged = new Set(room);
+			for (const id of additions) merged.add(id);
+			return merged.size === room.length ? room : [...merged];
+		});
 	},
 
 	/**
@@ -1205,16 +1217,8 @@ const YTB = {
 	 */
 	async pruneSeen(code, liveIds) {
 		if (!code) return [];
-		const stored = await YTB._storageGet('seenItems');
-		if (!YTB.isContextActive()) return [];
-		const all = (stored && stored.seenItems) || {};
-		const room = Array.isArray(all[code]) ? all[code] : [];
 		const live = new Set(liveIds || []);
-		const kept = room.filter((id) => live.has(id));
-		if (kept.length === room.length) return room;
-		all[code] = kept;
-		await YTB._storageSet({ seenItems: all });
-		return kept;
+		return roomScopedLocalLists.update('seenItems', code, (room) => room.filter((id) => live.has(id)));
 	},
 
 	/** Local calendar day of an epoch-ms instant, e.g. "2026-07-05". */
