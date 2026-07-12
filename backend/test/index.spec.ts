@@ -326,6 +326,43 @@ describe('DELETE /member?code=', () => {
 		});
 		expect(res.status).toBe(405);
 	});
+
+	it('rejects reserved key namespaces instead of deleting Room data', async () => {
+		const code = 'member-reserved-prefix';
+		const note = await createNote(code);
+
+		const res = await deleteMember(code, 'note');
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'missing or invalid field: clientId', category: 'validation' });
+
+		const records = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as { notes: Array<{ id: string }> };
+		expect(records.notes.map(({ id }) => id)).toContain(note.id);
+	});
+});
+
+describe('KV key-segment validation', () => {
+	it('rejects a nested Room Code instead of making it readable through its parent prefix', async () => {
+		const nestedCode = 'parent-room:child-room';
+		const res = await post(nestedCode, body());
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'missing or invalid field: code', category: 'validation' });
+
+		const parent = (await (await SELF.fetch('https://example.com/?code=parent-room')).json()) as { progress: unknown[] };
+		expect(parent.progress).toEqual([]);
+	});
+
+	it('rejects delimiters and reserved names in caller-controlled KV key components', async () => {
+		expect((await postPresence('key-components', { clientId: 'presence' })).status).toBe(400);
+		expect((await post('key-components', body({ clientId: 'note' }))).status).toBe(400);
+		expect((await post('key-components', body({ clientId: 'member:other' }))).status).toBe(400);
+		expect((await post('key-components', body({ videoId: 'video:other' }))).status).toBe(400);
+		expect((await postNote('key-components', noteBody({ clientId: 'note:other' }))).status).toBe(400);
+		expect((await postReply('key-components', replyBody('note:other'))).status).toBe(400);
+		expect((await postPlaylist('key-components', playlistBody({ videoId: 'video:other' }))).status).toBe(400);
+		expect((await deletePlaylist('key-components', 'a1b2c3d4', 'video:other')).status).toBe(400);
+		expect((await getConversation('key-components', 'note:other')).status).toBe(400);
+		expect((await post('key-components', body({ videoId: 'x'.repeat(129) }))).status).toBe(400);
+	});
 });
 
 describe('POST /notes?code=', () => {
