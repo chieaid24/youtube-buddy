@@ -1137,6 +1137,21 @@ describe('recommended for you helpers (ADR-0007)', () => {
 		expect(storage.dismissedVideos).toEqual({ 'room-a': ['v1', 'v2'], 'room-b': ['v9'] });
 	});
 
+	it('defaults malformed Dismissal storage and skips an idempotent write', async () => {
+		storage = { dismissedVideos: 'junk' };
+		await expect(window.YTB.dismissedVideoIds('room')).resolves.toEqual([]);
+
+		storage = { dismissedVideos: { room: 'junk', other: ['kept'] } };
+		vi.mocked(chrome.storage.local.set).mockClear();
+		await expect(window.YTB.dismissVideo('room', 'v2')).resolves.toEqual(['v2']);
+		expect(storage.dismissedVideos).toEqual({ room: ['v2'], other: ['kept'] });
+		expect(chrome.storage.local.set).toHaveBeenCalledOnce();
+
+		vi.mocked(chrome.storage.local.set).mockClear();
+		await expect(window.YTB.dismissVideo('room', 'v2')).resolves.toEqual(['v2']);
+		expect(chrome.storage.local.set).not.toHaveBeenCalled();
+	});
+
 	it('hides a Dismissed videoId even after a later re-recommend (keyed by videoId)', async () => {
 		storage = { dismissedVideos: { room: ['v2'] } };
 		const dismissed = await window.YTB.dismissedVideoIds('room');
@@ -1318,6 +1333,21 @@ describe('Unseen Mentions & Replies (ADR-0010)', () => {
 		expect(storage.seenItems).toEqual({ 'room-a': ['n1', 'r1', 'r2'], 'room-b': ['n9'] });
 	});
 
+	it('defaults malformed seen storage while preserving order, other Rooms, and no-op writes', async () => {
+		storage = { seenItems: 'junk' };
+		await expect(window.YTB.seenIds('room')).resolves.toEqual([]);
+
+		storage = { seenItems: { room: 'junk', other: ['kept'] } };
+		vi.mocked(chrome.storage.local.set).mockClear();
+		await expect(window.YTB.markSeen('room', ['n2', '', 123 as unknown as string, 'n1', 'n2'])).resolves.toEqual(['n2', 'n1']);
+		expect(storage.seenItems).toEqual({ room: ['n2', 'n1'], other: ['kept'] });
+		expect(chrome.storage.local.set).toHaveBeenCalledOnce();
+
+		vi.mocked(chrome.storage.local.set).mockClear();
+		await expect(window.YTB.markSeen('room', ['n1', 'n2'])).resolves.toEqual(['n2', 'n1']);
+		expect(chrome.storage.local.set).not.toHaveBeenCalled();
+	});
+
 	it('prunes the seen set against a Room read, keeping other Rooms intact', async () => {
 		storage = { seenItems: { room: ['n1', 'r1', 'r-deleted'], other: ['n9'] } };
 		await expect(window.YTB.pruneSeen('room', ['n1', 'r1', 'n-new'])).resolves.toEqual(['n1', 'r1']);
@@ -1386,6 +1416,15 @@ describe('extension context lifecycle', () => {
 		const callsAfterInvalidation = vi.mocked(chrome.storage.local.get).mock.calls.length;
 		await expect(window.YTB.getConfig()).resolves.toEqual({ name: '', code: '', clientId: '', sharing: true });
 		expect(chrome.storage.local.get).toHaveBeenCalledTimes(callsAfterInvalidation);
+
+		vi.mocked(chrome.storage.local.set).mockClear();
+		await expect(window.YTB.dismissedVideoIds('room')).resolves.toEqual([]);
+		await expect(window.YTB.dismissVideo('room', 'v1')).resolves.toEqual([]);
+		await expect(window.YTB.seenIds('room')).resolves.toEqual([]);
+		await expect(window.YTB.markSeen('room', ['n1'])).resolves.toEqual([]);
+		await expect(window.YTB.pruneSeen('room', ['n1'])).resolves.toEqual([]);
+		expect(chrome.storage.local.get).toHaveBeenCalledTimes(callsAfterInvalidation);
+		expect(chrome.storage.local.set).not.toHaveBeenCalled();
 	});
 });
 
