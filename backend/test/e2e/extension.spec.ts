@@ -575,7 +575,7 @@ test('Room Home Toggle and the header close control both hide the Room Home Sect
 		await expect(toggle).toHaveAttribute('aria-checked', 'true');
 		await expect(page.locator('ytd-guide-renderer #items #ytb-home-toggle')).toHaveCount(1);
 		await expect(toggle.locator('.ytb-ht-track')).toHaveCount(0);
-		await expect(icon).toHaveCSS('color', 'rgb(246, 169, 107)');
+		await expect(icon).toHaveCSS('color', 'rgb(199, 113, 47)');
 		await expect(section).toHaveCount(1);
 
 		// Off: the section is removed completely, and mutation churn must not
