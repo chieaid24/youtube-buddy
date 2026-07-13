@@ -219,9 +219,17 @@ Never animate layout properties (width/height/top/left) for choreography — use
   loop, `--ease-out` in and out). Paused under reduced-motion.
 - **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
   (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ease-out`),
-  until the Mention or Reply is Acknowledged. The 10px dot itself never moves, resizes, or
+  until the Mention or Reply is Acknowledged. The 6px dot itself never moves, resizes, or
   recolors — the timeline is dense and a neighbouring dot may sit only 11px away. Under
-  reduced-motion the halo becomes a static 2px accent ring, no animation.
+  reduced-motion the halo becomes a **static gap ring**, no animation: a 1px `#0f0f0f`
+  separator against the fill, then a 2px accent ring outside it
+  (`box-shadow: 0 0 0 1px #0f0f0f, 0 0 0 3px var(--ytb-accent-500)`). The gap is what makes
+  the ring legible and is not optional: the dot is filled with a Buddy Color, and an accent
+  ring laid flush against one scores 1.01-2.51:1 on **every** color in the palette (1.06:1
+  on `#f0a500`), so the two merge into a single fatter dot. The separator carries the
+  contrast instead — >= 3.69:1 against every Buddy Color, 8.7:1 against the ring — and a
+  reduced-motion viewer, who has no pulse to fall back on, keeps an Unseen cue they can
+  actually see. Any future restyle of this ring must hold both edges at >= 3:1.
 
 These two are the **only** looping animations, and they deliberately share the ~1.6s
 breathing rhythm: both mean "something is waiting on you".
