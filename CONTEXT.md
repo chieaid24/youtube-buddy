@@ -112,6 +112,18 @@ _Avoid_: toast, confirmation, self-notification, Buddy Arrival Toast
 The player-bound, pause-aware surface for authoring a Note at the current playhead moment — titled "Add a Note", it posts either a text Note or a Reaction (from the curated set), enforces the 100-char cap, and hands the posted server record straight to the Video Timeline. Opened from the "+" add-note control on the player; hosts the Mention Picker for @-mentions. It is an authoring surface, unlike the read-only Note Preview and the Expanded Note conversation panel.
 _Avoid_: popup, editor, composer (alone, in docs), Note Preview, Expanded Note
 
+**Video Picture**:
+The rendered video surface inside the player -- the picture the viewer watches -- as distinct from the player's chrome: the control bar, the progress bar/scrubber, the settings/captions/chapter menus, the end-screen cards, and YTB's own on-video surfaces. A click on the Video Picture is a click on the video itself; a click on chrome is the viewer operating a control.
+_Avoid_: player, video element, screen
+
+**Pause Hold**:
+The pause an on-video overlay (the Expanded Note or the Note Composer) takes when it opens over a PLAYING video, released when the overlay closes. A video that was already paused when the overlay opened is under no Pause Hold: closing the overlay leaves it paused. The Pause Hold is what makes an overlay a transient interruption -- closing it away from the video restores exactly the pre-open playback state.
+_Avoid_: pause lease, auto-pause, freeze
+
+**Picture Click**:
+A click on the Video Picture while an Expanded Note or Note Composer is open. It closes the overlay and ALWAYS plays -- whatever the video was doing before the overlay opened, and regardless of any Pause Hold. It is never a play/pause toggle: YouTube's native click-to-toggle never sees the click (YTB swallows it, ADR-0011), so a Picture Click cannot land the viewer back in a paused video. Clicking player chrome instead closes the overlay and leaves playback entirely to YouTube's control; clicking off the player altogether (comments, sidebar, page background) or pressing Escape closes it under Pause Hold semantics.
+_Avoid_: dismiss (reserved for hiding a Recommendation), outside click, toggle
+
 **Arrival Toast**:
 The transient corner notification shown when a new Buddy first appears in the Room (a fresh Progress Record or presence row). Purely informational and player-native. Distinct from a Playback Notification, which fires when playback crosses a Note or Reaction.
 _Avoid_: Playback Notification, popup, alert
