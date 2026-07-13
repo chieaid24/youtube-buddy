@@ -62,6 +62,7 @@
 	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
 	const CLUSTER_FAN_GAP = 14; // px between adjacent fanned dot centers (a covered dot becomes hoverable)
 	const DOT_HIT_DIAMETER = 24; // px — min hit target (DESIGN.md 1.3); granted only to dots with that much clearance
+	const UNSEEN_RING_GAP = '#0f0f0f'; // separates the reduced-motion Unseen ring from the Buddy-colored fill (UA-026)
 	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible 24px hit extender (UA-004)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
@@ -2131,10 +2132,19 @@
           transform: translateX(-50%);
           transition: opacity var(--ytb-dur-quick) linear;
         }
-        /* Unseen: a static 2px accent ring replaces the looping halo. */
+        /* Unseen: a static ring replaces the looping halo — and it is held off
+           the dot by a 1px near-black gap (UA-026). Flush against the fill, an
+           apricot ring scores 1.01-2.51:1 on EVERY Buddy Color (1.06:1 on
+           #f0a500) and the two read as one fatter dot; the gap carries the
+           separation instead, at >= 3.69:1 against every palette color and
+           8.7:1 against the ring. Reduced-motion viewers have no pulse to fall
+           back on, so this ring is their only Unseen cue. Still box-shadow
+           only: nothing moves, resizes, or recolors. */
         .${DOT_UNSEEN_CLASS} {
           animation: none;
-          box-shadow: 0 0 0 2px var(--ytb-accent-500);
+          box-shadow:
+            0 0 0 1px ${UNSEEN_RING_GAP},
+            0 0 0 3px var(--ytb-accent-500);
         }
         .ytb-panel-send, .ytb-alert-card {
           transform: none;
