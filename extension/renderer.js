@@ -273,7 +273,7 @@
 			marker.style.left = (fraction * 100).toFixed(3) + '%';
 			marker.style.background = YTB.buddyColor(cid);
 			const who = YTB.buddyName(record.clientId, record.name, roster);
-			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' · @' + YTB.formatTime(record.timestamp);
+			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' @' + YTB.formatTime(record.timestamp);
 		}
 	}
 

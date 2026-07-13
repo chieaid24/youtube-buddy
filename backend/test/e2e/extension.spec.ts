@@ -700,7 +700,7 @@ test('popup retains its roster through Connection Lost and recovers on the next 
 		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
 		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
 		await expect(popup.locator('#status-text')).toHaveText("Can't reach the backend");
-		await expect(popup.locator('#status-sub')).toHaveText('Retrying…');
+		await expect(popup.locator('#status-sub')).toHaveText('Retrying...');
 		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
 		expect(errors).toHaveLength(2);
 		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
@@ -904,7 +904,7 @@ test('Room Home Section keeps its Feed and Recommendations through Connection Lo
 		// appears while the retained content keeps rendering beneath it.
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => b.paired && !b.ok).length).toBe(2);
-		await expect(conn).toHaveText("Can't reach your Room — retrying…");
+		await expect(conn).toHaveText("Can't reach your Room. Retrying...");
 		await expect(feedRow).toContainText('Sam recommended Buddy Pick');
 		await expect(card).toHaveCount(1);
 

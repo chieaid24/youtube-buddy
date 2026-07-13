@@ -186,7 +186,7 @@
 			conn = document.createElement('p');
 			conn.className = 'ytb-hs-conn';
 			conn.setAttribute('role', 'status');
-			conn.textContent = "Can't reach your Room — retrying…";
+			conn.textContent = "Can't reach your Room. Retrying...";
 		}
 
 		const body = document.createElement('div');
@@ -506,7 +506,7 @@
 		const dismiss = document.createElement('button');
 		dismiss.type = 'button';
 		dismiss.className = 'ytb-hs-remove';
-		dismiss.textContent = '×';
+		dismiss.append(YTBTheme.icon('close'));
 		dismiss.title = 'Dismiss';
 		dismiss.setAttribute('aria-label', 'Dismiss "' + item.title + '" from your Recommended for you');
 		dismiss.addEventListener('click', (event) => {
@@ -909,13 +909,14 @@
       #${SECTION_ID} .ytb-hs-remove {
         position: absolute; top: 1px; right: 1px;
         width: 24px; height: 24px;
+        display: inline-flex; align-items: center; justify-content: center;
         padding: 0; border: 2px solid transparent; border-radius: 12px;
         background: rgba(0, 0, 0, 0.65); background-clip: padding-box; color: #fff;
-        font: 14px/1 Arial, sans-serif;
         cursor: pointer;
         opacity: 0;
         transition: opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
       }
+      #${SECTION_ID} .ytb-hs-remove svg { width: 14px; height: 14px; }
       #${SECTION_ID} .ytb-hs-card:hover .ytb-hs-remove,
       #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; }
       #${SECTION_ID} .ytb-hs-remove:disabled { opacity: 0.4; cursor: default; }
