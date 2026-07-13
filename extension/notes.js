@@ -753,6 +753,12 @@
 		const panel = buildPanel(note, config, playhead, variant);
 		host.appendChild(panel);
 		positionPanel(panel);
+		// The reply list seeded while the panel was detached (zero heights), so
+		// renderReplies' bottom-pin could not engage. Pin once now that the panel
+		// is laid out: the panel opens showing the newest reply, matching the
+		// post-reply behavior (UA-008).
+		const seededReplies = panel.querySelector('.ytb-panel-replies');
+		if (seededReplies) seededReplies.scrollTop = seededReplies.scrollHeight;
 		panel.focus();
 		const anchorDot = dotFor(note.id);
 		anchorDot?.classList.add(DOT_OPEN_CLASS); // hides its preview on the first FLIP frame
