@@ -922,27 +922,31 @@
       #${SECTION_ID} .ytb-hs-pair { display: flex; flex-direction: column; gap: 8px; }
       #${SECTION_ID} .ytb-hs-pitch { margin: 0; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pair-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      /* One control height across the Create / input / Join row (UA-009): a
+         shared line-height and a transparent border on the primary keep the
+         three boxes equal; borders and the input well use the documented
+         roles (line-strong borders, surface-sunk well). */
       #${SECTION_ID} .ytb-hs-btn {
         padding: 7px 14px;
-        border: 1px solid var(--ytb-line);
+        border: 1px solid var(--ytb-line-strong);
         border-radius: 12px;
         background: var(--ytb-surface-tint);
         color: var(--ytb-ink);
         font-family: inherit;
         font-size: 13px;
         font-weight: 600;
-        line-height: 1;
+        line-height: 1.2;
         cursor: pointer;
         transition: transform 140ms cubic-bezier(0.34, 1.3, 0.64, 1), background 140ms;
       }
       #${SECTION_ID} .ytb-hs-btn:active { transform: scale(0.97); }
-      #${SECTION_ID} .ytb-hs-btn-primary { border: 0; background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
+      #${SECTION_ID} .ytb-hs-btn-primary { border-color: transparent; background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
       #${SECTION_ID} .ytb-hs-input {
         min-width: 190px;
         padding: 7px 10px;
-        border: 1px solid var(--ytb-line);
+        border: 1px solid var(--ytb-line-strong);
         border-radius: 8px;
-        background: var(--ytb-surface);
+        background: var(--ytb-surface-sunk);
         color: var(--ytb-ink);
         font-family: inherit;
         font-size: 13px;
