@@ -1727,6 +1727,7 @@
          preview, both rendered on/inside this same element. (The preview child
          carries its own z-index, so it paints above the veil.) */
       .${DOT_LOCKED_CLASS} { cursor: pointer; }
+      .${DOT_REACTION_CLASS} { cursor: pointer; }   /* opens its panel like every dot (UA-025) */
       .${DOT_LOCKED_CLASS}::before {
         content: '';
         position: absolute;
@@ -1846,7 +1847,7 @@
       .ytb-preview-time {
         position: absolute;
         top: 7px;
-        right: 9px;
+        right: 11px;   /* matches the preview's content inset (UA-024) */
         color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
@@ -1896,7 +1897,7 @@
       .ytb-panel-time {
         position: absolute;
         top: 12px;
-        right: 14px;
+        right: 16px;   /* matches the panel's content inset (UA-024) */
         color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
