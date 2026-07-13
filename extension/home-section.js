@@ -830,7 +830,7 @@
         transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
       #${SECTION_ID} .ytb-hs-more:hover { background: var(--ytb-accent-100); }
-      #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-item { margin: 3px 0; overflow-wrap: anywhere; }
       /* Only the quoted body is the link; hover/focus affordances live on it. */
       #${SECTION_ID} a.ytb-hs-text-link {
@@ -847,7 +847,7 @@
       #${SECTION_ID} a.ytb-hs-text-link:focus-visible {
         outline: none;
         background: var(--ytb-accent-050);
-        box-shadow: 0 0 0 2px var(--ytb-ring);
+        box-shadow: 0 0 0 3px var(--ytb-ring);
         text-decoration: underline;
       }
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
@@ -861,7 +861,7 @@
         text-decoration: none;
       }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover,
-      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; }
+      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       /* A struck System Message (superseded or un-recommended; per-Event —
          ADR-0007): strike the whole sentence, leaving the timestamp legible.
          The title inside is plain text (no anchor is rendered on a struck
@@ -890,6 +890,7 @@
       }
       #${SECTION_ID} .ytb-hs-card { position: relative; flex: 0 0 132px; width: 132px; }
       #${SECTION_ID} .ytb-hs-thumb { display: block; border-radius: 10px; overflow: hidden; }
+      #${SECTION_ID} .ytb-hs-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-thumb img { display: block; width: 132px; height: 74px; object-fit: cover; }
       #${SECTION_ID} .ytb-hs-card-title {
         margin-top: 3px;
@@ -898,7 +899,7 @@
         color: inherit; text-decoration: none;
       }
       #${SECTION_ID} .ytb-hs-card-title:hover,
-      #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; }
+      #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-watched { margin-top: 1px; font-size: 10px; color: var(--ytb-ink-muted); }
       /* Dismiss control: a dark scrim + light glyph over the thumbnail image,
          kept theme-independent on purpose (like the Note UI's over-video
@@ -918,7 +919,7 @@
       }
       #${SECTION_ID} .ytb-hs-remove svg { width: 14px; height: 14px; }
       #${SECTION_ID} .ytb-hs-card:hover .ytb-hs-remove,
-      #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; }
+      #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-remove:disabled { opacity: 0.4; cursor: default; }
       #${SECTION_ID} .ytb-hs-pair { display: flex; flex-direction: column; gap: 8px; }
       #${SECTION_ID} .ytb-hs-pitch { margin: 0; color: var(--ytb-ink-muted); }
