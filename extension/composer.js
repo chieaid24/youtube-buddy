@@ -64,7 +64,7 @@
         position: absolute;
         z-index: 2100;
         box-sizing: border-box;
-        padding: 14px 16px;
+        padding: 16px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -77,9 +77,9 @@
       @keyframes ytb-composer-in {
         from { opacity: 0; transform: scale(0.96) translateY(4px); }
       }
-      #${COMPOSER_ID} .ytb-note-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+      #${COMPOSER_ID} .ytb-note-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
       #${COMPOSER_ID} .ytb-note-title { font-weight: 800; font-size: 15px; }
-      #${COMPOSER_ID} .ytb-note-time { margin-left: auto; color: var(--ytb-ink-muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #${COMPOSER_ID} .ytb-note-time { margin-left: auto; color: var(--ytb-ink-muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
       #${COMPOSER_ID} .ytb-note-close {
         display: inline-flex;
         align-items: center;
@@ -99,7 +99,7 @@
       #${COMPOSER_ID} .ytb-note-close:hover, #${COMPOSER_ID} .ytb-note-close:focus-visible { background: var(--ytb-accent-050); color: var(--ytb-ink); outline: none; }
       #${COMPOSER_ID} .ytb-note-close:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${COMPOSER_ID} .ytb-note-close svg { width: 14px; height: 14px; }
-      #${COMPOSER_ID} .ytb-note-emojis { display: flex; gap: 6px; margin: 0 0 10px; }
+      #${COMPOSER_ID} .ytb-note-emojis { display: flex; gap: 8px; margin: 0 0 8px; }
       #${COMPOSER_ID} .ytb-note-emoji {
         flex: 1 1 0;
         height: 42px;
@@ -120,7 +120,7 @@
         display: block;
         width: 100%;
         box-sizing: border-box;
-        padding: 8px 10px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line-strong);
         border-radius: var(--ytb-r-sm);
         background: var(--ytb-surface-sunk);
@@ -134,14 +134,14 @@
       }
       #${COMPOSER_ID} textarea::placeholder { color: var(--ytb-ink-faint); }
       #${COMPOSER_ID} textarea:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
-      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 2px; text-align: right; color: var(--ytb-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-      #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 4px; text-align: right; color: var(--ytb-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       /* min-height keeps the Spoiler toggle's whole label a 24px hit target
          (UA-006); the footer's own height already absorbs it. */
-      #${COMPOSER_ID} label { display: flex; align-items: center; gap: 6px; min-height: 24px; font-size: 12px; font-weight: 600; color: var(--ytb-ink-muted); }
+      #${COMPOSER_ID} label { display: flex; align-items: center; gap: 4px; min-height: 24px; font-size: 13px; font-weight: 600; color: var(--ytb-ink-muted); }
       #${COMPOSER_ID} input[type='checkbox'] { accent-color: var(--ytb-accent-600); }
       #${COMPOSER_ID} .ytb-note-post {
-        padding: 7px 16px;
+        padding: 8px 16px;
         border: 0;
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-accent-500);
@@ -156,8 +156,8 @@
       #${COMPOSER_ID} .ytb-note-post:active:not(:disabled) { transform: scale(0.97); }
       #${COMPOSER_ID} .ytb-note-post:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${COMPOSER_ID} .ytb-note-post:disabled { background: var(--ytb-surface-sunk); color: var(--ytb-ink-faint); cursor: default; }
-      #${COMPOSER_ID} .ytb-note-message { margin: 0 0 10px; color: var(--ytb-accent-800); font-weight: 600; }
-      #${COMPOSER_ID} .ytb-note-error { min-height: 18px; margin-top: 7px; color: var(--ytb-danger-text); font-size: 12px; font-weight: 600; }
+      #${COMPOSER_ID} .ytb-note-message { margin: 0 0 8px; color: var(--ytb-accent-800); font-weight: 600; }
+      #${COMPOSER_ID} .ytb-note-error { min-height: 18px; margin-top: 8px; color: var(--ytb-danger-text); font-size: 11px; font-weight: 600; }
       @media (prefers-reduced-motion: reduce) {
         #${COMPOSER_ID} { animation: none; }
       }

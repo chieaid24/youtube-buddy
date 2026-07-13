@@ -1776,13 +1776,13 @@
         transform: translateX(-50%) scale(0.6);
         width: max-content;
         max-width: 240px;
-        padding: 9px 11px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface);
         color: var(--ytb-ink);
         box-shadow: var(--ytb-e-pop);
-        font: 12px/1.4 var(--ytb-font);
+        font: 13px/1.4 var(--ytb-font);
         text-align: left;
         opacity: 0;
         pointer-events: none;
@@ -1846,8 +1846,8 @@
          text card and the transparent Reaction preview. */
       .ytb-preview-time {
         position: absolute;
-        top: 7px;
-        right: 11px;   /* matches the preview's content inset (UA-024) */
+        top: 8px;
+        right: 12px;   /* matches the preview's content inset (UA-024) */
         color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
@@ -1879,7 +1879,7 @@
         position: absolute;
         z-index: 2100;
         box-sizing: border-box;
-        padding: 14px 16px;
+        padding: 16px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -1908,7 +1908,7 @@
       .ytb-panel-spoiler { margin: 0; padding-right: 42px; font-size: 15px; line-height: 1.4; font-weight: 600; font-style: italic; color: var(--ytb-ink-muted); }
       /* Reaction variant: the large emoji with its author directly beneath, mirroring the Note Preview. */
       .ytb-panel-emoji { font-size: 32px; line-height: 1.15; padding-right: 42px; }
-      .ytb-panel-emoji-author { margin-top: 2px; font-size: 12px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-panel-emoji-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-byline {
         display: flex;
         align-items: baseline;
@@ -1923,19 +1923,19 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        margin-top: 10px;
+        margin-top: 12px;
       }
       /* Go here: the one apricot primary in the panel. */
       .ytb-panel-gohere {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
+        gap: 4px;
+        padding: 8px 12px;
         border: 0;
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-accent-500);
         color: var(--ytb-on-accent);
-        font: 700 12px/1 var(--ytb-font);
+        font: 700 13px/1 var(--ytb-font);
         cursor: pointer;
         transition:
           background var(--ytb-dur-quick) var(--ytb-ease-out),
@@ -1951,7 +1951,7 @@
         border-radius: var(--ytb-r-sm);
         background: transparent;
         color: var(--ytb-ink-muted);
-        font: 600 12px/1 var(--ytb-font);
+        font: 600 13px/1 var(--ytb-font);
         cursor: pointer;
         transition: color var(--ytb-dur-quick) var(--ytb-ease-out);
       }
@@ -1960,23 +1960,23 @@
       .ytb-panel-replies {
         max-height: 180px;
         overflow-y: auto;
-        margin-top: 10px;
+        margin-top: 12px;
         border-top: 1px solid var(--ytb-line);
       }
       .ytb-panel-replies:empty { margin-top: 0; border-top: 0; }
-      .ytb-panel-reply { padding: 8px 0 2px; }
+      .ytb-panel-reply { padding: 8px 0 4px; }
       .ytb-panel-reply.ytb-new { animation: ytb-pop-in var(--ytb-dur-slow) var(--ytb-ease-spring); }
       .ytb-panel-reply-body { margin: 0; overflow-wrap: anywhere; }
       .ytb-panel-reply-byline { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
       .ytb-panel-reply-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-reply-time { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
-      .ytb-panel-reply-area { margin-top: 10px; }
-      .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 6px; }
+      .ytb-panel-reply-area { margin-top: 12px; }
+      .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 8px; }
       .ytb-panel-reply-input {
         flex: 1 1 auto;
         min-width: 0;
         box-sizing: border-box;
-        padding: 8px 10px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line-strong);
         border-radius: var(--ytb-r-sm);
         background: var(--ytb-surface-sunk);
@@ -2016,12 +2016,12 @@
       .ytb-panel-send:hover { background: var(--ytb-accent-600); }
       .ytb-panel-send:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       .ytb-panel-send svg { width: 15px; height: 15px; }
-      .ytb-panel-reply-note { margin: 4px 0 0; color: var(--ytb-ink-muted); font-size: 12px; }
-      .ytb-panel-error { min-height: 16px; margin-top: 6px; color: var(--ytb-danger-text); font-size: 12px; font-weight: 600; }
+      .ytb-panel-reply-note { margin: 4px 0 0; color: var(--ytb-ink-muted); font-size: 11px; }
+      .ytb-panel-error { min-height: 16px; margin-top: 8px; color: var(--ytb-danger-text); font-size: 11px; font-weight: 600; }
       /* Delete confirmation: cream sub-panel with the danger-button treatment. */
       .ytb-panel-confirm {
-        margin-top: 10px;
-        padding: 10px 12px;
+        margin-top: 12px;
+        padding: 12px;
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface-tint);
         animation: ytb-pop-in var(--ytb-dur-base) var(--ytb-ease-spring);
@@ -2034,7 +2034,7 @@
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-danger);
         color: var(--ytb-on-fill);
-        font: 700 12px/1.3 var(--ytb-font);
+        font: 700 13px/1.3 var(--ytb-font);
         cursor: pointer;
         transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
@@ -2045,7 +2045,7 @@
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-surface-tint);
         color: var(--ytb-ink);
-        font: 600 12px/1.3 var(--ytb-font);
+        font: 600 13px/1.3 var(--ytb-font);
         cursor: pointer;
         transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
@@ -2069,12 +2069,12 @@
         width: max-content;
         max-width: 200px;
         box-sizing: border-box;
-        padding: 9px 12px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface);
         color: var(--ytb-ink);
-        font: 12px/1.4 var(--ytb-font);
+        font: 13px/1.4 var(--ytb-font);
         text-align: left;
         box-shadow: var(--ytb-e-pop);
         cursor: pointer;

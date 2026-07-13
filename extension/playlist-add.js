@@ -396,7 +396,7 @@
        * row on purpose. */
       #${BUTTON_ID} {
         margin-left: 8px;
-        padding: 0 15px;
+        padding: 0 16px;
         height: 36px;
         border: 1px solid transparent;
         border-radius: var(--ytb-r-pill, 999px);
@@ -422,7 +422,7 @@
 		z-index: 2147483647;
 		box-sizing: border-box;
 		width: 280px;
-		padding: 8px 10px;
+		padding: 8px 12px;
 		border: 1px solid var(--ytb-line-strong, rgba(58, 46, 40, 0.2));
 		border-radius: var(--ytb-r-sm, 8px);
 		background: var(--ytb-surface, #fffaf6);
