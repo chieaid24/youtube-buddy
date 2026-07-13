@@ -413,6 +413,8 @@
 				cursor: pointer;
 				border-radius: var(--r-sm);
 				white-space: normal;
+				/* 24px hit minimum (UA-007) without changing the text's weight. */
+				min-height: 24px;
 			}
 			.link:hover {
 				text-decoration: underline;
