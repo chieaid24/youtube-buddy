@@ -320,7 +320,7 @@
 		const panel = document.getElementById(PANEL_ID);
 		if (!panel) return;
 		for (const span of panel.querySelectorAll('[data-ytb-color-cid]')) {
-			span.style.color = YTB.buddyColor(span.dataset.ytbColorCid);
+			span.style.color = YTB.buddyTextColor(span.dataset.ytbColorCid);
 		}
 	});
 
@@ -610,7 +610,7 @@
 		const author = document.createElement('div');
 		author.className = 'ytb-preview-author';
 		author.textContent = who;
-		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyTextColor(note.clientId);
 		preview.append(body, author);
 		if (!locked && count > 0) {
 			const replies = document.createElement('div');
@@ -791,7 +791,7 @@
 			emojiAuthor.className = 'ytb-panel-emoji-author';
 			emojiAuthor.textContent = who;
 			if (note.clientId !== myClientId) {
-				emojiAuthor.style.color = YTB.buddyColor(note.clientId);
+				emojiAuthor.style.color = YTB.buddyTextColor(note.clientId);
 				emojiAuthor.dataset.ytbColorCid = note.clientId; // live repaint hook (issue #115)
 			}
 			panel.append(emoji, emojiAuthor, buildByline(note, who, false));
@@ -861,7 +861,7 @@
 			author.className = 'ytb-panel-author';
 			author.textContent = who;
 			if (note.clientId !== myClientId) {
-				author.style.color = YTB.buddyColor(note.clientId);
+				author.style.color = YTB.buddyTextColor(note.clientId);
 				author.dataset.ytbColorCid = note.clientId; // live repaint hook (issue #115)
 			}
 			byline.append(author);
@@ -1010,7 +1010,7 @@
 			author.className = 'ytb-panel-reply-author';
 			author.textContent = reply.clientId === myClientId ? 'You' : YTB.buddyName(reply.clientId, reply.name, roster);
 			if (reply.clientId !== myClientId) {
-				author.style.color = YTB.buddyColor(reply.clientId);
+				author.style.color = YTB.buddyTextColor(reply.clientId);
 				author.dataset.ytbColorCid = reply.clientId; // live repaint hook (issue #115)
 			}
 			const when = document.createElement('span');
@@ -1445,7 +1445,7 @@
 		const author = document.createElement('div');
 		author.className = 'ytb-alert-author';
 		author.textContent = who;
-		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyTextColor(note.clientId);
 		// Author beneath the content, matching the Note Preview (no timestamp here —
 		// a Playback Notification fires exactly as playback crosses the moment).
 		card.append(body, author);

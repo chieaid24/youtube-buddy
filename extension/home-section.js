@@ -341,7 +341,7 @@
 		const author = document.createElement('span');
 		author.className = 'ytb-hs-author';
 		author.textContent = YTB.buddyName(record.clientId, record.name, roster);
-		author.style.color = YTB.buddyColor(record.clientId);
+		author.style.color = YTB.buddyTextColor(record.clientId);
 		author.dataset.ytbColorCid = record.clientId; // live repaint hook (issue #115)
 
 		const action = document.createElement('span');
@@ -721,7 +721,7 @@
 		const section = document.getElementById(SECTION_ID);
 		if (!section) return;
 		for (const span of section.querySelectorAll('[data-ytb-color-cid]')) {
-			span.style.color = YTB.buddyColor(span.dataset.ytbColorCid);
+			span.style.color = YTB.buddyTextColor(span.dataset.ytbColorCid);
 		}
 	});
 

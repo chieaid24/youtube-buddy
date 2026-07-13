@@ -1535,6 +1535,23 @@ const YTB = {
 	},
 
 	/**
+	 * The Buddy Color as TEXT ink on an opaque card surface (Note Preview and
+	 * Expanded Note bylines, Playback Notification cards, Room Feed authors).
+	 * The raw fills are picked for dots and markers and miss WCAG AA as small
+	 * text — most of the palette lands under 4.5:1 on the cream surface, and
+	 * some under it on espresso — so blend the identity color toward the theme
+	 * ink, which the --ytb-ink token flips per theme. Over-video text (reaction
+	 * bursts, transparent previews), dots, markers, and swatches keep the raw
+	 * buddyColor.
+	 * @param {string} clientId
+	 * @param {string} [code]
+	 * @returns {string} a CSS color-mix() expression
+	 */
+	buddyTextColor(clientId, code = YTB._activeRoomCode) {
+		return `color-mix(in oklab, ${YTB.buddyColor(clientId, code)} 50%, var(--ytb-ink))`;
+	},
+
+	/**
 	 * Base display label for a Buddy WITHOUT Room context: their trimmed Display
 	 * Name when set, else a stable "<Adjective> Buddy" derived from their Client
 	 * ID (same adjective on every surface and for every viewer). Two members can

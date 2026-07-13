@@ -2296,11 +2296,22 @@ test('re-assigning a Buddy Color repaints the Note Dot, the open Expanded Note, 
 		// seam. No navigation and no reload follow; the repaint must be live.
 		await popup.evaluate((hex) => chrome.storage.local.set({ buddyColors: { roome2e: { 'buddy-1': hex } } }), target.hex);
 
-		// Every surface repaints in place, across both open tabs.
+		// Every surface repaints in place, across both open tabs. Dots keep the
+		// raw fill; author TEXT on card surfaces renders the ink-blended
+		// text-safe variant (UA-001), so resolve the expected blend in-page.
 		await expect(buddyDot).toHaveCSS('background-color', target.rgb);
-		await expect(byline).toHaveCSS('color', target.rgb);
+		const blended = (page: Page, hex: string) =>
+			page.evaluate((h) => {
+				const probe = document.createElement('span');
+				probe.style.color = `color-mix(in oklab, ${h} 50%, var(--ytb-ink))`;
+				document.getElementById('ytb-note-panel')?.appendChild(probe) ?? document.body.appendChild(probe);
+				const resolved = getComputedStyle(probe).color;
+				probe.remove();
+				return resolved;
+			}, hex);
+		await expect(byline).toHaveCSS('color', await blended(watch, target.hex));
 		await expect(panel).toBeVisible(); // stayed open through the repaint
-		await expect(author).toHaveCSS('color', target.rgb);
+		await expect(author).toHaveCSS('color', await blended(home, target.hex));
 		// The viewer's own dot is never tinted with a Buddy Color.
 		await expect(ownDot).toHaveCSS('background-color', 'rgb(255, 255, 255)');
 
