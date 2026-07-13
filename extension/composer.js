@@ -134,7 +134,7 @@
       }
       #${COMPOSER_ID} textarea::placeholder { color: var(--ytb-ink-faint); }
       #${COMPOSER_ID} textarea:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
-      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 2px; text-align: right; color: var(--ytb-ink-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 2px; text-align: right; color: var(--ytb-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
       #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       #${COMPOSER_ID} label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ytb-ink-muted); }
       #${COMPOSER_ID} input[type='checkbox'] { accent-color: var(--ytb-accent-600); }

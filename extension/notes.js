@@ -1812,7 +1812,7 @@
         position: absolute;
         top: 7px;
         right: 9px;
-        color: var(--ytb-ink-faint);
+        color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
@@ -1862,7 +1862,7 @@
         position: absolute;
         top: 12px;
         right: 14px;
-        color: var(--ytb-ink-faint);
+        color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
@@ -1881,7 +1881,7 @@
         margin-top: 4px;
       }
       .ytb-panel-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
-      .ytb-panel-posted { color: var(--ytb-ink-faint); font-size: 11px; white-space: nowrap; }
+      .ytb-panel-posted { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
       .ytb-panel-actions {
         display: flex;
         align-items: center;
@@ -1914,7 +1914,7 @@
         border: 0;
         border-radius: var(--ytb-r-sm);
         background: transparent;
-        color: var(--ytb-ink-faint);
+        color: var(--ytb-ink-muted);
         font: 600 12px/1 var(--ytb-font);
         cursor: pointer;
         transition: color var(--ytb-dur-quick) var(--ytb-ease-out);
@@ -1933,7 +1933,7 @@
       .ytb-panel-reply-body { margin: 0; overflow-wrap: anywhere; }
       .ytb-panel-reply-byline { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
       .ytb-panel-reply-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
-      .ytb-panel-reply-time { color: var(--ytb-ink-faint); font-size: 11px; white-space: nowrap; }
+      .ytb-panel-reply-time { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
       .ytb-panel-reply-area { margin-top: 10px; }
       .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 6px; }
       .ytb-panel-reply-input {
