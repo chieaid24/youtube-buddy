@@ -405,8 +405,11 @@
       #${BUTTON_ID}:hover { background: #e88b45; }
       #${BUTTON_ID}:active { transform: scale(0.97); }
       #${BUTTON_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(246, 169, 107, 0.55); }
-      #${BUTTON_ID}.is-added { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; cursor: default; line-height: 34px; }
-      #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; line-height: 34px; }
+      /* Outline states read as text on the page itself: the raw apricot fill
+       * misses AA there (1.94:1 on a light page), so they use the deep
+       * accent-800 text role, which flips bright on the dark theme (UA-002). */
+      #${BUTTON_ID}.is-added { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); cursor: default; line-height: 34px; }
+      #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); line-height: 34px; }
       #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
       #${BUTTON_ID}:disabled { opacity: 0.7; cursor: default; }
 	  #${FEEDBACK_ID} {
