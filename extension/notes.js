@@ -61,6 +61,8 @@
 	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
 	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
 	const CLUSTER_FAN_GAP = 14; // px between adjacent fanned dot centers (a covered dot becomes hoverable)
+	const DOT_HIT_DIAMETER = 24; // px — min hit target (DESIGN.md 1.3); granted only to dots with that much clearance
+	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible 24px hit extender (UA-004)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -403,6 +405,18 @@
 		const barWidth = bar.getBoundingClientRect().width || 0;
 		const clusters = YTB.clusterDots(fractions, barWidth, DOT_DIAMETER);
 
+		// Nearest-neighbour clearance per dot (at-rest px, across ALL dots): a
+		// dot earns the 24px hit extender only when no other dot's glyph could
+		// fall inside it (UA-004).
+		const px = fractions.map((fraction) => fraction * barWidth);
+		const clearanceByIndex = px.map((value, i) => {
+			let nearest = Infinity;
+			for (let j = 0; j < px.length; j++) {
+				if (j !== i) nearest = Math.min(nearest, Math.abs(px[j] - value));
+			}
+			return nearest;
+		});
+
 		// Reconcile Cluster wrappers keyed by their exact membership. A steady poll
 		// (unchanged membership) reuses each wrapper and never re-parents a dot,
 		// which would restart its Unseen pulse; a Note added or removed rebuilds
@@ -449,6 +463,7 @@
 				const basePx = (memberFractions[k] - center) * barWidth;
 				const dot = existing.get(id) || buildDot(id);
 				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
+				dot.classList.toggle(DOT_ROOMY_CLASS, clearanceByIndex[cluster[k]] >= DOT_HIT_DIAMETER);
 				dot.style.left = basePx.toFixed(2) + 'px';
 				dot.style.setProperty('--ytb-fan', offsets[k].toFixed(2) + 'px');
 				updateDot(dot, id, desired.get(id));
@@ -1674,6 +1689,20 @@
         pointer-events: auto;
         transform: translateX(0);
         transition: transform var(--ytb-dur-base) var(--ytb-ease-spring);
+      }
+      /* Invisible hit extender (UA-004): the painted circle stays 6px, but
+         the interactive target reaches 24x24 (DESIGN.md 1.3). Dots already
+         swallow presses and hovers from the player by design, so the larger
+         box widens that established behavior, not a new one. Only dots with
+         24px of clearance get it (renderDots toggles the class): closer
+         neighbours would shadow each other's glyphs, and those dense dots
+         keep the Cluster fan as their reach affordance — their exact
+         timestamp position is essential and never displaced at rest. */
+      .${DOT_ROOMY_CLASS}::after {
+        content: '';
+        position: absolute;
+        inset: -9px;
+        border-radius: 50%;
       }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {
