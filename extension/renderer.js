@@ -543,16 +543,23 @@
         display: flex;
         align-items: center;
         gap: ${DOT_GAP}px;
-        padding: 4px;
-        margin: -4px;
+        /* 8px padding (cancelled by the margin, so the dots keep their
+           ${DOTS_INSET}px visual inset) grows the focus/hover target to the
+           24px minimum even for a single dot (UA-012). */
+        padding: 8px;
+        margin: -8px;
         border-radius: 999px;
         z-index: 600;
         pointer-events: auto;
         cursor: default;
       }
+      /* Two-tone focus ring (UA-013): the dark inner layer keeps the
+         indicator visible over bright thumbnails, the white outline over
+         dark ones. */
       .${THUMB_DOTS_CLASS}:focus-visible {
         outline: 2px solid rgba(255, 255, 255, 0.9);
         outline-offset: 1px;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
       }
       .${THUMB_DOT_CLASS} {
         width: ${DOT_SIZE}px;
@@ -564,9 +571,9 @@
          (the box clips at overflow: hidden, so it must open inward), wrapping
          instead of clipping when the name list runs long. */
       .${THUMB_DOTS_CLASS} > .${TOOLTIP_CLASS} {
-        top: calc(100% + 4px);
+        top: 100%;
         bottom: auto;
-        left: 4px;
+        left: 8px;
         transform: none;
         white-space: normal;
         width: max-content;
