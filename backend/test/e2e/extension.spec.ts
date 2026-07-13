@@ -575,7 +575,7 @@ test('Room Home Toggle and the header close control both hide the Room Home Sect
 		await expect(toggle).toHaveAttribute('aria-checked', 'true');
 		await expect(page.locator('ytd-guide-renderer #items #ytb-home-toggle')).toHaveCount(1);
 		await expect(toggle.locator('.ytb-ht-track')).toHaveCount(0);
-		await expect(icon).toHaveCSS('color', 'rgb(246, 169, 107)');
+		await expect(icon).toHaveCSS('color', 'rgb(199, 113, 47)');
 		await expect(section).toHaveCount(1);
 
 		// Off: the section is removed completely, and mutation churn must not
@@ -700,7 +700,7 @@ test('popup retains its roster through Connection Lost and recovers on the next 
 		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
 		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
 		await expect(popup.locator('#status-text')).toHaveText("Can't reach the backend");
-		await expect(popup.locator('#status-sub')).toHaveText('Retrying…');
+		await expect(popup.locator('#status-sub')).toHaveText('Retrying...');
 		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
 		expect(errors).toHaveLength(2);
 		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
@@ -904,7 +904,7 @@ test('Room Home Section keeps its Feed and Recommendations through Connection Lo
 		// appears while the retained content keeps rendering beneath it.
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => b.paired && !b.ok).length).toBe(2);
-		await expect(conn).toHaveText("Can't reach your Room — retrying…");
+		await expect(conn).toHaveText("Can't reach your Room. Retrying...");
 		await expect(feedRow).toContainText('Sam recommended Buddy Pick');
 		await expect(card).toHaveCount(1);
 
@@ -2296,11 +2296,22 @@ test('re-assigning a Buddy Color repaints the Note Dot, the open Expanded Note, 
 		// seam. No navigation and no reload follow; the repaint must be live.
 		await popup.evaluate((hex) => chrome.storage.local.set({ buddyColors: { roome2e: { 'buddy-1': hex } } }), target.hex);
 
-		// Every surface repaints in place, across both open tabs.
+		// Every surface repaints in place, across both open tabs. Dots keep the
+		// raw fill; author TEXT on card surfaces renders the ink-blended
+		// text-safe variant (UA-001), so resolve the expected blend in-page.
 		await expect(buddyDot).toHaveCSS('background-color', target.rgb);
-		await expect(byline).toHaveCSS('color', target.rgb);
+		const blended = (page: Page, hex: string) =>
+			page.evaluate((h) => {
+				const probe = document.createElement('span');
+				probe.style.color = `color-mix(in oklab, ${h} 50%, var(--ytb-ink))`;
+				document.getElementById('ytb-note-panel')?.appendChild(probe) ?? document.body.appendChild(probe);
+				const resolved = getComputedStyle(probe).color;
+				probe.remove();
+				return resolved;
+			}, hex);
+		await expect(byline).toHaveCSS('color', await blended(watch, target.hex));
 		await expect(panel).toBeVisible(); // stayed open through the repaint
-		await expect(author).toHaveCSS('color', target.rgb);
+		await expect(author).toHaveCSS('color', await blended(home, target.hex));
 		// The viewer's own dot is never tinted with a Buddy Color.
 		await expect(ownDot).toHaveCSS('background-color', 'rgb(255, 255, 255)');
 

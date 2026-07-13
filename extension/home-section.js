@@ -186,7 +186,7 @@
 			conn = document.createElement('p');
 			conn.className = 'ytb-hs-conn';
 			conn.setAttribute('role', 'status');
-			conn.textContent = "Can't reach your Room — retrying…";
+			conn.textContent = "Can't reach your Room. Retrying...";
 		}
 
 		const body = document.createElement('div');
@@ -341,7 +341,7 @@
 		const author = document.createElement('span');
 		author.className = 'ytb-hs-author';
 		author.textContent = YTB.buddyName(record.clientId, record.name, roster);
-		author.style.color = YTB.buddyColor(record.clientId);
+		author.style.color = YTB.buddyTextColor(record.clientId);
 		author.dataset.ytbColorCid = record.clientId; // live repaint hook (issue #115)
 
 		const action = document.createElement('span');
@@ -506,7 +506,7 @@
 		const dismiss = document.createElement('button');
 		dismiss.type = 'button';
 		dismiss.className = 'ytb-hs-remove';
-		dismiss.textContent = '×';
+		dismiss.append(YTBTheme.icon('close'));
 		dismiss.title = 'Dismiss';
 		dismiss.setAttribute('aria-label', 'Dismiss "' + item.title + '" from your Recommended for you');
 		dismiss.addEventListener('click', (event) => {
@@ -721,7 +721,7 @@
 		const section = document.getElementById(SECTION_ID);
 		if (!section) return;
 		for (const span of section.querySelectorAll('[data-ytb-color-cid]')) {
-			span.style.color = YTB.buddyColor(span.dataset.ytbColorCid);
+			span.style.color = YTB.buddyTextColor(span.dataset.ytbColorCid);
 		}
 	});
 
@@ -745,7 +745,7 @@
       #${SECTION_ID} {
         box-sizing: border-box;
         margin: 12px 8px 4px;
-        padding: 10px 14px 12px;
+        padding: 12px 16px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -799,14 +799,14 @@
       #${SECTION_ID} .ytb-hs-feed-scroll {
         max-height: 148px;
         overflow-y: auto;
-        padding: 6px 8px;
+        padding: 8px;
         border-radius: 12px;
         background: var(--ytb-surface-tint);
       }
       #${SECTION_ID} .ytb-hs-day {
-        margin: 6px 0 2px;
+        margin: 8px 0 4px;
         text-align: center;
-        font-size: 10px; font-weight: 600;
+        font-size: 11px; font-weight: 600;
         color: var(--ytb-ink-muted);
       }
       #${SECTION_ID} .ytb-hs-day:first-child { margin-top: 0; }
@@ -817,7 +817,7 @@
         display: block;
         width: 100%;
         margin: 0 0 4px;
-        padding: 5px 8px;
+        padding: 4px 8px;
         border: 0;
         border-radius: var(--ytb-r-sm);
         background: var(--ytb-accent-050);
@@ -830,8 +830,8 @@
         transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
       #${SECTION_ID} .ytb-hs-more:hover { background: var(--ytb-accent-100); }
-      #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytb-ring); }
-      #${SECTION_ID} .ytb-hs-item { margin: 3px 0; overflow-wrap: anywhere; }
+      #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-item { margin: 4px 0; overflow-wrap: anywhere; }
       /* Only the quoted body is the link; hover/focus affordances live on it. */
       #${SECTION_ID} a.ytb-hs-text-link {
         color: inherit;
@@ -847,13 +847,13 @@
       #${SECTION_ID} a.ytb-hs-text-link:focus-visible {
         outline: none;
         background: var(--ytb-accent-050);
-        box-shadow: 0 0 0 2px var(--ytb-ring);
+        box-shadow: 0 0 0 3px var(--ytb-ring);
         text-decoration: underline;
       }
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
       #${SECTION_ID} .ytb-hs-action { color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-context { color: var(--ytb-ink-muted); }
-      #${SECTION_ID} .ytb-hs-when { margin-left: 6px; font-size: 10px; color: var(--ytb-ink-muted); white-space: nowrap; }
+      #${SECTION_ID} .ytb-hs-when { margin-left: 8px; font-size: 11px; color: var(--ytb-ink-muted); white-space: nowrap; }
       #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link {
         color: var(--ytb-accent-800);
@@ -861,7 +861,7 @@
         text-decoration: none;
       }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover,
-      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; }
+      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       /* A struck System Message (superseded or un-recommended; per-Event —
          ADR-0007): strike the whole sentence, leaving the timestamp legible.
          The title inside is plain text (no anchor is rendered on a struck
@@ -879,67 +879,76 @@
         overflow: hidden;
         white-space: nowrap;
       }
-      #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 12px; color: var(--ytb-ink-muted); }
+      #${SECTION_ID} .ytb-hs-empty { margin: 4px 0; font-size: 13px; color: var(--ytb-ink-muted); }
       /* Connection Lost (PRD #137): quiet and deemphasized — the retained
          content below stays the focus; this line just explains the staleness. */
       #${SECTION_ID} .ytb-hs-conn { margin: -4px 0 8px; font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pl-row {
-        display: flex; gap: 10px;
+        display: flex; gap: 12px;
         overflow-x: auto;
         padding-bottom: 4px;
       }
       #${SECTION_ID} .ytb-hs-card { position: relative; flex: 0 0 132px; width: 132px; }
-      #${SECTION_ID} .ytb-hs-thumb { display: block; border-radius: 10px; overflow: hidden; }
+      #${SECTION_ID} .ytb-hs-thumb { display: block; border-radius: 12px; overflow: hidden; }
+      #${SECTION_ID} .ytb-hs-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-thumb img { display: block; width: 132px; height: 74px; object-fit: cover; }
       #${SECTION_ID} .ytb-hs-card-title {
-        margin-top: 3px;
+        margin-top: 4px;
         font-size: 11px; font-weight: 600; line-height: 1.3;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         color: inherit; text-decoration: none;
       }
       #${SECTION_ID} .ytb-hs-card-title:hover,
-      #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; }
-      #${SECTION_ID} .ytb-hs-watched { margin-top: 1px; font-size: 10px; color: var(--ytb-ink-muted); }
+      #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-watched { margin-top: 0; font-size: 11px; color: var(--ytb-ink-muted); }
       /* Dismiss control: a dark scrim + light glyph over the thumbnail image,
          kept theme-independent on purpose (like the Note UI's over-video
          treatments) so it stays legible on any frame — not a palette color. */
+      /* 24x24 hit target around a 20px visual scrim (UA-005): the transparent
+         border widens the button's box while background-clip keeps the dark
+         circle at 20px, visually inset 3px from the corner as before. */
       #${SECTION_ID} .ytb-hs-remove {
-        position: absolute; top: 3px; right: 3px;
-        width: 20px; height: 20px;
-        padding: 0; border: 0; border-radius: 10px;
-        background: rgba(0, 0, 0, 0.65); color: #fff;
-        font: 14px/1 Arial, sans-serif;
+        position: absolute; top: 1px; right: 1px;
+        width: 24px; height: 24px;
+        display: inline-flex; align-items: center; justify-content: center;
+        padding: 0; border: 2px solid transparent; border-radius: 12px;
+        background: rgba(0, 0, 0, 0.65); background-clip: padding-box; color: #fff;
         cursor: pointer;
         opacity: 0;
         transition: opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
       }
+      #${SECTION_ID} .ytb-hs-remove svg { width: 14px; height: 14px; }
       #${SECTION_ID} .ytb-hs-card:hover .ytb-hs-remove,
-      #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; }
+      #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-remove:disabled { opacity: 0.4; cursor: default; }
       #${SECTION_ID} .ytb-hs-pair { display: flex; flex-direction: column; gap: 8px; }
       #${SECTION_ID} .ytb-hs-pitch { margin: 0; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pair-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      /* One control height across the Create / input / Join row (UA-009): a
+         shared line-height and a transparent border on the primary keep the
+         three boxes equal; borders and the input well use the documented
+         roles (line-strong borders, surface-sunk well). */
       #${SECTION_ID} .ytb-hs-btn {
-        padding: 7px 14px;
-        border: 1px solid var(--ytb-line);
+        padding: 8px 12px;
+        border: 1px solid var(--ytb-line-strong);
         border-radius: 12px;
         background: var(--ytb-surface-tint);
         color: var(--ytb-ink);
         font-family: inherit;
         font-size: 13px;
         font-weight: 600;
-        line-height: 1;
+        line-height: 1.2;
         cursor: pointer;
         transition: transform 140ms cubic-bezier(0.34, 1.3, 0.64, 1), background 140ms;
       }
       #${SECTION_ID} .ytb-hs-btn:active { transform: scale(0.97); }
-      #${SECTION_ID} .ytb-hs-btn-primary { border: 0; background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
+      #${SECTION_ID} .ytb-hs-btn-primary { border-color: transparent; background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
       #${SECTION_ID} .ytb-hs-input {
         min-width: 190px;
-        padding: 7px 10px;
-        border: 1px solid var(--ytb-line);
+        padding: 8px 12px;
+        border: 1px solid var(--ytb-line-strong);
         border-radius: 8px;
-        background: var(--ytb-surface);
+        background: var(--ytb-surface-sunk);
         color: var(--ytb-ink);
         font-family: inherit;
         font-size: 13px;
@@ -947,7 +956,7 @@
       }
       #${SECTION_ID} .ytb-hs-input:focus { outline: none; border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
-      #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 12px; color: var(--ytb-danger-text); }
+      #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 11px; color: var(--ytb-danger-text); }
       @media (prefers-reduced-motion: reduce) {
         #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-more { transition: none; }
       }

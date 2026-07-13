@@ -389,24 +389,32 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
+      /* The pill consumes the shared --ytb-* tokens like every sibling YTB
+       * surface (UA-010): the design face, theme-aware accent roles, and the
+       * r-pill radius. A transparent border keeps the label inset identical
+       * across the filled and outline states. 14px matches YouTube's actions
+       * row on purpose. */
       #${BUTTON_ID} {
         margin-left: 8px;
-        padding: 0 15px;
+        padding: 0 16px;
         height: 36px;
-        border: 0;
-        border-radius: 18px;
-        background: #f6a96b;
-        color: #3a2e28;
-        font: 500 14px/36px Nunito, ui-rounded, Roboto, Arial, sans-serif;
+        border: 1px solid transparent;
+        border-radius: var(--ytb-r-pill, 999px);
+        background: var(--ytb-accent-500, #f6a96b);
+        color: var(--ytb-on-accent, #3a2e28);
+        font: 500 14px/34px var(--ytb-font, ui-rounded, Roboto, Arial, sans-serif);
         cursor: pointer;
         white-space: nowrap;
-        transition: transform 140ms cubic-bezier(0.34, 1.3, 0.64, 1), background 140ms;
+        transition: transform var(--ytb-dur-quick, 140ms) var(--ytb-ease-spring, cubic-bezier(0.34, 1.3, 0.64, 1)), background var(--ytb-dur-quick, 140ms);
       }
-      #${BUTTON_ID}:hover { background: #e88b45; }
+      #${BUTTON_ID}:hover { background: var(--ytb-accent-600, #e88b45); }
       #${BUTTON_ID}:active { transform: scale(0.97); }
-      #${BUTTON_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(246, 169, 107, 0.55); }
-      #${BUTTON_ID}.is-added { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; cursor: default; line-height: 34px; }
-      #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid #f6a96b; color: #f6a96b; line-height: 34px; }
+      #${BUTTON_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring, rgba(246, 169, 107, 0.55)); }
+      /* Outline states read as text on the page itself: the raw apricot fill
+       * misses AA there (1.94:1 on a light page), so they use the deep
+       * accent-800 text role, which flips bright on the dark theme (UA-002). */
+      #${BUTTON_ID}.is-added { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); cursor: default; line-height: 34px; }
+      #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); line-height: 34px; }
       #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
       #${BUTTON_ID}:disabled { opacity: 0.7; cursor: default; }
 	  #${FEEDBACK_ID} {
@@ -414,11 +422,11 @@
 		z-index: 2147483647;
 		box-sizing: border-box;
 		width: 280px;
-		padding: 8px 10px;
+		padding: 8px 12px;
 		border: 1px solid var(--ytb-line-strong, rgba(58, 46, 40, 0.2));
 		border-radius: var(--ytb-r-sm, 8px);
 		background: var(--ytb-surface, #fffaf6);
-		box-shadow: var(--ytb-shadow-float, 0 8px 24px rgba(30, 20, 14, 0.2));
+		box-shadow: var(--ytb-e-pop, 0 8px 24px rgba(30, 20, 14, 0.2));
 		color: var(--ytb-danger-text, #a53b20);
 		font: 600 12px/1.35 var(--ytb-font, Nunito, ui-rounded, Roboto, Arial, sans-serif);
 		white-space: normal;

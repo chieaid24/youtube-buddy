@@ -325,7 +325,10 @@
 		style.id = STYLE_ID;
 		style.textContent = `
       #${ROW_ID} {
-        --ytbht-accent: #f6a96b;
+        /* The icon color is the row's only ON/OFF signal (UA-015): deep
+           apricot reads at 3:1+ on the white light guide; html[dark] lifts
+           it back to the bright apricot, which reads on the dark guide. */
+        --ytbht-accent: #c7712f;
         box-sizing: border-box;
         display: flex;
         align-items: center;
@@ -345,7 +348,7 @@
         cursor: pointer;
         -webkit-font-smoothing: antialiased;
       }
-      html[dark] #${ROW_ID} { color: #f1f1f1; }
+      html[dark] #${ROW_ID} { color: #f1f1f1; --ytbht-accent: #f6a96b; }
       #${ROW_ID}:hover { background: rgba(0, 0, 0, 0.05); }              /* native hover */
       html[dark] #${ROW_ID}:hover { background: rgba(255, 255, 255, 0.1); }
       #${ROW_ID}:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytbht-accent); }

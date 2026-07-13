@@ -631,7 +631,7 @@ async function refreshStatus(code) {
 		setStatus(
 			connection.lost ? 'connection-lost' : 'connecting',
 			connection.lost ? "Can't reach the backend" : 'Connecting to Room',
-			connection.lost ? 'Retrying…' : '',
+			connection.lost ? 'Retrying...' : '',
 			true,
 		);
 		// Keep the last-known roster and its colors on screen during an outage.

@@ -61,6 +61,8 @@
 	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
 	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
 	const CLUSTER_FAN_GAP = 14; // px between adjacent fanned dot centers (a covered dot becomes hoverable)
+	const DOT_HIT_DIAMETER = 24; // px — min hit target (DESIGN.md 1.3); granted only to dots with that much clearance
+	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible 24px hit extender (UA-004)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -320,7 +322,7 @@
 		const panel = document.getElementById(PANEL_ID);
 		if (!panel) return;
 		for (const span of panel.querySelectorAll('[data-ytb-color-cid]')) {
-			span.style.color = YTB.buddyColor(span.dataset.ytbColorCid);
+			span.style.color = YTB.buddyTextColor(span.dataset.ytbColorCid);
 		}
 	});
 
@@ -403,6 +405,18 @@
 		const barWidth = bar.getBoundingClientRect().width || 0;
 		const clusters = YTB.clusterDots(fractions, barWidth, DOT_DIAMETER);
 
+		// Nearest-neighbour clearance per dot (at-rest px, across ALL dots): a
+		// dot earns the 24px hit extender only when no other dot's glyph could
+		// fall inside it (UA-004).
+		const px = fractions.map((fraction) => fraction * barWidth);
+		const clearanceByIndex = px.map((value, i) => {
+			let nearest = Infinity;
+			for (let j = 0; j < px.length; j++) {
+				if (j !== i) nearest = Math.min(nearest, Math.abs(px[j] - value));
+			}
+			return nearest;
+		});
+
 		// Reconcile Cluster wrappers keyed by their exact membership. A steady poll
 		// (unchanged membership) reuses each wrapper and never re-parents a dot,
 		// which would restart its Unseen pulse; a Note added or removed rebuilds
@@ -449,6 +463,7 @@
 				const basePx = (memberFractions[k] - center) * barWidth;
 				const dot = existing.get(id) || buildDot(id);
 				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
+				dot.classList.toggle(DOT_ROOMY_CLASS, clearanceByIndex[cluster[k]] >= DOT_HIT_DIAMETER);
 				dot.style.left = basePx.toFixed(2) + 'px';
 				dot.style.setProperty('--ytb-fan', offsets[k].toFixed(2) + 'px');
 				updateDot(dot, id, desired.get(id));
@@ -610,7 +625,7 @@
 		const author = document.createElement('div');
 		author.className = 'ytb-preview-author';
 		author.textContent = who;
-		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyTextColor(note.clientId);
 		preview.append(body, author);
 		if (!locked && count > 0) {
 			const replies = document.createElement('div');
@@ -738,6 +753,12 @@
 		const panel = buildPanel(note, config, playhead, variant);
 		host.appendChild(panel);
 		positionPanel(panel);
+		// The reply list seeded while the panel was detached (zero heights), so
+		// renderReplies' bottom-pin could not engage. Pin once now that the panel
+		// is laid out: the panel opens showing the newest reply, matching the
+		// post-reply behavior (UA-008).
+		const seededReplies = panel.querySelector('.ytb-panel-replies');
+		if (seededReplies) seededReplies.scrollTop = seededReplies.scrollHeight;
 		panel.focus();
 		const anchorDot = dotFor(note.id);
 		anchorDot?.classList.add(DOT_OPEN_CLASS); // hides its preview on the first FLIP frame
@@ -791,7 +812,7 @@
 			emojiAuthor.className = 'ytb-panel-emoji-author';
 			emojiAuthor.textContent = who;
 			if (note.clientId !== myClientId) {
-				emojiAuthor.style.color = YTB.buddyColor(note.clientId);
+				emojiAuthor.style.color = YTB.buddyTextColor(note.clientId);
 				emojiAuthor.dataset.ytbColorCid = note.clientId; // live repaint hook (issue #115)
 			}
 			panel.append(emoji, emojiAuthor, buildByline(note, who, false));
@@ -861,7 +882,7 @@
 			author.className = 'ytb-panel-author';
 			author.textContent = who;
 			if (note.clientId !== myClientId) {
-				author.style.color = YTB.buddyColor(note.clientId);
+				author.style.color = YTB.buddyTextColor(note.clientId);
 				author.dataset.ytbColorCid = note.clientId; // live repaint hook (issue #115)
 			}
 			byline.append(author);
@@ -1010,7 +1031,7 @@
 			author.className = 'ytb-panel-reply-author';
 			author.textContent = reply.clientId === myClientId ? 'You' : YTB.buddyName(reply.clientId, reply.name, roster);
 			if (reply.clientId !== myClientId) {
-				author.style.color = YTB.buddyColor(reply.clientId);
+				author.style.color = YTB.buddyTextColor(reply.clientId);
 				author.dataset.ytbColorCid = reply.clientId; // live repaint hook (issue #115)
 			}
 			const when = document.createElement('span');
@@ -1445,7 +1466,7 @@
 		const author = document.createElement('div');
 		author.className = 'ytb-alert-author';
 		author.textContent = who;
-		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
+		if (note.clientId !== myClientId) author.style.color = YTB.buddyTextColor(note.clientId);
 		// Author beneath the content, matching the Note Preview (no timestamp here —
 		// a Playback Notification fires exactly as playback crosses the moment).
 		card.append(body, author);
@@ -1675,6 +1696,20 @@
         transform: translateX(0);
         transition: transform var(--ytb-dur-base) var(--ytb-ease-spring);
       }
+      /* Invisible hit extender (UA-004): the painted circle stays 6px, but
+         the interactive target reaches 24x24 (DESIGN.md 1.3). Dots already
+         swallow presses and hovers from the player by design, so the larger
+         box widens that established behavior, not a new one. Only dots with
+         24px of clearance get it (renderDots toggles the class): closer
+         neighbours would shadow each other's glyphs, and those dense dots
+         keep the Cluster fan as their reach affordance — their exact
+         timestamp position is essential and never displaced at rest. */
+      .${DOT_ROOMY_CLASS}::after {
+        content: '';
+        position: absolute;
+        inset: -9px;
+        border-radius: 50%;
+      }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {
         outline: 2px solid var(--ytb-accent-500);
@@ -1692,6 +1727,7 @@
          preview, both rendered on/inside this same element. (The preview child
          carries its own z-index, so it paints above the veil.) */
       .${DOT_LOCKED_CLASS} { cursor: pointer; }
+      .${DOT_REACTION_CLASS} { cursor: pointer; }   /* opens its panel like every dot (UA-025) */
       .${DOT_LOCKED_CLASS}::before {
         content: '';
         position: absolute;
@@ -1740,13 +1776,13 @@
         transform: translateX(-50%) scale(0.6);
         width: max-content;
         max-width: 240px;
-        padding: 9px 11px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface);
         color: var(--ytb-ink);
         box-shadow: var(--ytb-e-pop);
-        font: 12px/1.4 var(--ytb-font);
+        font: 13px/1.4 var(--ytb-font);
         text-align: left;
         opacity: 0;
         pointer-events: none;
@@ -1810,9 +1846,9 @@
          text card and the transparent Reaction preview. */
       .ytb-preview-time {
         position: absolute;
-        top: 7px;
-        right: 9px;
-        color: var(--ytb-ink-faint);
+        top: 8px;
+        right: 12px;   /* matches the preview's content inset (UA-024) */
+        color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
@@ -1843,7 +1879,7 @@
         position: absolute;
         z-index: 2100;
         box-sizing: border-box;
-        padding: 14px 16px;
+        padding: 16px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -1861,8 +1897,8 @@
       .ytb-panel-time {
         position: absolute;
         top: 12px;
-        right: 14px;
-        color: var(--ytb-ink-faint);
+        right: 16px;   /* matches the panel's content inset (UA-024) */
+        color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
@@ -1872,7 +1908,7 @@
       .ytb-panel-spoiler { margin: 0; padding-right: 42px; font-size: 15px; line-height: 1.4; font-weight: 600; font-style: italic; color: var(--ytb-ink-muted); }
       /* Reaction variant: the large emoji with its author directly beneath, mirroring the Note Preview. */
       .ytb-panel-emoji { font-size: 32px; line-height: 1.15; padding-right: 42px; }
-      .ytb-panel-emoji-author { margin-top: 2px; font-size: 12px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-panel-emoji-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-byline {
         display: flex;
         align-items: baseline;
@@ -1881,25 +1917,25 @@
         margin-top: 4px;
       }
       .ytb-panel-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
-      .ytb-panel-posted { color: var(--ytb-ink-faint); font-size: 11px; white-space: nowrap; }
+      .ytb-panel-posted { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
       .ytb-panel-actions {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        margin-top: 10px;
+        margin-top: 12px;
       }
       /* Go here: the one apricot primary in the panel. */
       .ytb-panel-gohere {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
+        gap: 4px;
+        padding: 8px 12px;
         border: 0;
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-accent-500);
         color: var(--ytb-on-accent);
-        font: 700 12px/1 var(--ytb-font);
+        font: 700 13px/1 var(--ytb-font);
         cursor: pointer;
         transition:
           background var(--ytb-dur-quick) var(--ytb-ease-out),
@@ -1914,8 +1950,8 @@
         border: 0;
         border-radius: var(--ytb-r-sm);
         background: transparent;
-        color: var(--ytb-ink-faint);
-        font: 600 12px/1 var(--ytb-font);
+        color: var(--ytb-ink-muted);
+        font: 600 13px/1 var(--ytb-font);
         cursor: pointer;
         transition: color var(--ytb-dur-quick) var(--ytb-ease-out);
       }
@@ -1924,23 +1960,23 @@
       .ytb-panel-replies {
         max-height: 180px;
         overflow-y: auto;
-        margin-top: 10px;
+        margin-top: 12px;
         border-top: 1px solid var(--ytb-line);
       }
       .ytb-panel-replies:empty { margin-top: 0; border-top: 0; }
-      .ytb-panel-reply { padding: 8px 0 2px; }
+      .ytb-panel-reply { padding: 8px 0 4px; }
       .ytb-panel-reply.ytb-new { animation: ytb-pop-in var(--ytb-dur-slow) var(--ytb-ease-spring); }
       .ytb-panel-reply-body { margin: 0; overflow-wrap: anywhere; }
       .ytb-panel-reply-byline { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
       .ytb-panel-reply-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
-      .ytb-panel-reply-time { color: var(--ytb-ink-faint); font-size: 11px; white-space: nowrap; }
-      .ytb-panel-reply-area { margin-top: 10px; }
-      .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 6px; }
+      .ytb-panel-reply-time { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
+      .ytb-panel-reply-area { margin-top: 12px; }
+      .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 8px; }
       .ytb-panel-reply-input {
         flex: 1 1 auto;
         min-width: 0;
         box-sizing: border-box;
-        padding: 8px 10px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line-strong);
         border-radius: var(--ytb-r-sm);
         background: var(--ytb-surface-sunk);
@@ -1980,12 +2016,12 @@
       .ytb-panel-send:hover { background: var(--ytb-accent-600); }
       .ytb-panel-send:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       .ytb-panel-send svg { width: 15px; height: 15px; }
-      .ytb-panel-reply-note { margin: 4px 0 0; color: var(--ytb-ink-muted); font-size: 12px; }
-      .ytb-panel-error { min-height: 16px; margin-top: 6px; color: var(--ytb-danger-text); font-size: 12px; font-weight: 600; }
+      .ytb-panel-reply-note { margin: 4px 0 0; color: var(--ytb-ink-muted); font-size: 11px; }
+      .ytb-panel-error { min-height: 16px; margin-top: 8px; color: var(--ytb-danger-text); font-size: 11px; font-weight: 600; }
       /* Delete confirmation: cream sub-panel with the danger-button treatment. */
       .ytb-panel-confirm {
-        margin-top: 10px;
-        padding: 10px 12px;
+        margin-top: 12px;
+        padding: 12px;
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface-tint);
         animation: ytb-pop-in var(--ytb-dur-base) var(--ytb-ease-spring);
@@ -1998,7 +2034,7 @@
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-danger);
         color: var(--ytb-on-fill);
-        font: 700 12px/1.3 var(--ytb-font);
+        font: 700 13px/1.3 var(--ytb-font);
         cursor: pointer;
         transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
@@ -2009,7 +2045,7 @@
         border-radius: var(--ytb-r-pill);
         background: var(--ytb-surface-tint);
         color: var(--ytb-ink);
-        font: 600 12px/1.3 var(--ytb-font);
+        font: 600 13px/1.3 var(--ytb-font);
         cursor: pointer;
         transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
       }
@@ -2033,12 +2069,12 @@
         width: max-content;
         max-width: 200px;
         box-sizing: border-box;
-        padding: 9px 12px;
+        padding: 8px 12px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface);
         color: var(--ytb-ink);
-        font: 12px/1.4 var(--ytb-font);
+        font: 13px/1.4 var(--ytb-font);
         text-align: left;
         box-shadow: var(--ytb-e-pop);
         cursor: pointer;

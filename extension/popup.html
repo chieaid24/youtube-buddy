@@ -409,10 +409,12 @@
 				border: none;
 				background: none;
 				color: var(--c-accent-800);
-				font: 600 12px/1.3 var(--font);
+				font: 600 13px/1.3 var(--font);
 				cursor: pointer;
 				border-radius: var(--r-sm);
 				white-space: normal;
+				/* 24px hit minimum (UA-007) without changing the text's weight. */
+				min-height: 24px;
 			}
 			.link:hover {
 				text-decoration: underline;
@@ -589,13 +591,13 @@
 			}
 			#status-sub {
 				margin: var(--sp-1) 0 0 2px;
-			}
-			.status-panel[data-state='full'] #status-sub {
-				margin-left: 22px;
 				font-size: 11px;
 				line-height: 1.3;
 				font-weight: 500;
 				color: var(--c-ink-muted);
+			}
+			.status-panel[data-state='full'] #status-sub {
+				margin-left: 22px;
 			}
 
 			/* Sharing state on the main view: a muted read-only line while Sharing
@@ -618,7 +620,7 @@
 			.btn-compact {
 				flex: none;
 				padding: 6px 11px;
-				font-size: 12px;
+				font-size: 13px;
 			}
 
 			/* ---------- roster ---------- */
@@ -721,7 +723,7 @@
 			}
 			.settings-title {
 				margin: 0;
-				font-size: 14px;
+				font-size: 15px;
 				line-height: 1.2;
 				font-weight: 800;
 			}
@@ -755,7 +757,7 @@
 				border: none;
 				border-radius: var(--r-sm);
 				background: transparent;
-				font: 600 12px/1.3 var(--font);
+				font: 600 13px/1.3 var(--font);
 				color: var(--c-ink-muted);
 				cursor: pointer;
 				transition:
@@ -794,7 +796,7 @@
 			.edge-cell {
 				padding: 0;
 				border: 1px solid var(--c-line-strong);
-				border-radius: 4px;
+				border-radius: var(--r-sm);
 				background: var(--c-surface);
 				cursor: pointer;
 				transition:
@@ -820,7 +822,7 @@
 			}
 			.edge-cell:focus-visible {
 				outline: none;
-				box-shadow: 0 0 0 2px var(--c-ring);
+				box-shadow: 0 0 0 3px var(--c-ring);
 			}
 			.edge-cell[aria-checked='true'] {
 				background: var(--c-accent-500);
@@ -839,8 +841,8 @@
 				display: flex;
 				align-items: center;
 				gap: var(--sp-2);
-				width: 100%;
-				margin: 0;
+				width: calc(100% + 12px);
+				margin: 0 -6px;
 				padding: 7px 6px;
 				border: none;
 				border-radius: var(--r-sm);
@@ -889,7 +891,7 @@
 				height: 12px;
 				border-radius: 50%;
 				background: var(--c-surface);
-				box-shadow: 0 1px 2px oklch(0% 0 0 / 0.25);
+				box-shadow: 0 1px 2px oklch(45% 0.06 52 / 0.25);
 				transition: transform var(--dur-base) var(--ease-spring);
 			}
 			.set-row[aria-checked='true'] .switch-knob {
@@ -1008,12 +1010,12 @@
 			}
 			.confirm-title {
 				margin: 0 0 var(--sp-1);
-				font-size: 14px;
+				font-size: 15px;
 				font-weight: 800;
 			}
 			.confirm-body {
 				margin: 0 0 var(--sp-4);
-				font-size: 12px;
+				font-size: 13px;
 				color: var(--c-ink-muted);
 			}
 			.confirm-actions {
@@ -1239,7 +1241,7 @@
 				<button id="set-progress" type="button" class="set-row" role="switch" aria-checked="true">
 					<span class="set-row-text">
 						Buddy progress
-						<span class="set-sub">Timeline markers and thumbnail bars</span>
+						<span class="set-sub">Timeline markers and thumbnail dots</span>
 					</span>
 					<span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
 				</button>

@@ -224,7 +224,7 @@
         color: var(--ytb-ink);
       }
       .${OPTION_CLASS} {
-        padding: 6px 9px;
+        padding: 8px;
         border-left: 3px solid transparent;
         border-radius: var(--ytb-r-sm);
         font-weight: 600;
