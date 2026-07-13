@@ -903,11 +903,14 @@
       /* Dismiss control: a dark scrim + light glyph over the thumbnail image,
          kept theme-independent on purpose (like the Note UI's over-video
          treatments) so it stays legible on any frame — not a palette color. */
+      /* 24x24 hit target around a 20px visual scrim (UA-005): the transparent
+         border widens the button's box while background-clip keeps the dark
+         circle at 20px, visually inset 3px from the corner as before. */
       #${SECTION_ID} .ytb-hs-remove {
-        position: absolute; top: 3px; right: 3px;
-        width: 20px; height: 20px;
-        padding: 0; border: 0; border-radius: 10px;
-        background: rgba(0, 0, 0, 0.65); color: #fff;
+        position: absolute; top: 1px; right: 1px;
+        width: 24px; height: 24px;
+        padding: 0; border: 2px solid transparent; border-radius: 12px;
+        background: rgba(0, 0, 0, 0.65); background-clip: padding-box; color: #fff;
         font: 14px/1 Arial, sans-serif;
         cursor: pointer;
         opacity: 0;
