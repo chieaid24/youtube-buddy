@@ -1677,7 +1677,13 @@
          pointer-events:none at rest — only the member dots catch the pointer, so
          it never blocks the scrubber — but while hovered a ::before keeper spans
          the fanned band so the pointer can cross the gaps the fan opens (and
-         travel between members) without the fan collapsing. */
+         travel between members) without the fan collapsing.
+
+         EVERY interactive surface we own on the player lives STRICTLY ABOVE the
+         progress bar's top edge (#158), so the bar stays seekable under a Note —
+         at a Note's exact timestamp included. The wrapper's bottom edge is that
+         boundary (3px above the bar), and the keeper below, the dots' hit
+         extender, and the preview's hover bridge all stop at or before it. */
       .${CLUSTER_CLASS} {
         position: absolute;
         bottom: calc(100% + 3px);
@@ -1686,6 +1692,8 @@
         z-index: 41;
         pointer-events: none;
       }
+      /* Hover keeper: bottom-anchored to the wrapper (the bar's top edge less the
+         3px gap), so it never reaches at or below the bar. */
       .${CLUSTER_CLASS}::before {
         content: '';
         position: absolute;
@@ -1693,7 +1701,7 @@
         transform: translateX(-50%);
         width: var(--ytb-fan-extent, 0px);
         top: -4px;
-        bottom: -6px;
+        bottom: 0;
         pointer-events: none;
       }
       .${CLUSTER_CLASS}:hover::before { pointer-events: auto; }
@@ -1735,12 +1743,22 @@
          24px of clearance get it (renderDots toggles the class): closer
          neighbours would shadow each other's glyphs, and those dense dots
          keep the Cluster fan as their reach affordance — their exact
-         timestamp position is essential and never displaced at rest. */
+         timestamp position is essential and never displaced at rest.
+
+         It grows UPWARD off the dot's bottom edge (#158) rather than centring
+         on the glyph: a centred box (inset: -9px) hung 9px below the dot, which
+         is 6px INTO the 6px bar — it covered the whole bar and stole every press
+         near a Note's timestamp. Bottom-anchored, the 24px target keeps its full
+         size while ending exactly where the dot does, 3px clear of the bar. What
+         it claims instead is 24px of the band above the bar (YouTube's 10px grab
+         pad included) — the accepted trade for dots that keep hugging the bar. */
       .${DOT_ROOMY_CLASS}::after {
         content: '';
         position: absolute;
-        inset: -9px;
-        border-radius: 50%;
+        left: -9px;
+        right: -9px;
+        bottom: 0;
+        height: ${DOT_HIT_DIAMETER}px;
       }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {
@@ -1806,6 +1824,16 @@
         left: 50%;
         transform-origin: 50% calc(100% + 15px);
         transform: translateX(-50%) scale(0.6);
+        /* Two auto columns — content, then the corner timestamp (#158). The
+           timestamp is a real grid item, not an absolute overlay, so it CONTRIBUTES
+           intrinsic width: a max-content card always widens to fit body + time, at
+           any timestamp length and any body length, and nothing reserves room by a
+           hardcoded gutter. Past the 240px cap the auto tracks shrink — the time
+           column is nowrap, so the body is what wraps (and line-clamps), never the
+           timestamp. */
+        display: grid;
+        grid-template-columns: auto auto;
+        column-gap: 10px;
         width: max-content;
         max-width: 240px;
         padding: 8px 12px;
@@ -1826,7 +1854,11 @@
          without dropping :hover. Kept narrow (not full preview width) so sliding
          horizontally along the progress bar off the dot drops the preview. It is
          interactive only while the dot is hovered, so it never blocks the
-         scrubber; hovering it (a dot descendant) keeps .${DOT_CLASS}:hover alive. */
+         scrubber; hovering it (a dot descendant) keeps .${DOT_CLASS}:hover alive.
+         Its height is exactly the preview's 18px bottom offset less the dot's 6px
+         glyph, so it lands ON the dot's top edge and stops (#158): at 22px it ran
+         past the dot and 1px into the bar, and — being a live hover target once
+         the dot is hovered — swallowed presses meant for the bar beneath it. */
       .${PREVIEW_CLASS}::before {
         content: '';
         position: absolute;
@@ -1834,7 +1866,7 @@
         transform: translateX(-50%);
         width: 16px;
         top: 100%;
-        height: 22px;
+        height: 12px;
         pointer-events: none;
       }
       .${DOT_CLASS}:hover .${PREVIEW_CLASS},
@@ -1859,27 +1891,32 @@
         cursor: pointer;
       }
       /* Reactions keep the transparent over-video treatment (not a card),
-         always at natural height. */
+         always at natural height. They share the grid above; the emoji simply
+         takes a full-width row of its own BENEATH the timestamp's row, which is
+         what keeps it centred over the dot while the corner timestamp stays
+         clear of it (#158) — the old flex column had to hold the emoji off an
+         absolute timestamp with an 18px top pad, and a short emoji still
+         collided with a long time. */
       .${PREVIEW_CLASS}.ytb-preview-reaction {
         border: 0;
         background: transparent;
         box-shadow: none;
         color: #fff;
         box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-        padding-top: 18px;
         min-width: 52px;
         text-align: center;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
       /* The Note's video timestamp, pinned in the top-right corner of both the
-         text card and the transparent Reaction preview. */
+         text card and the transparent Reaction preview — now by grid placement
+         (row 1, right-hand column) rather than by absolute positioning, so it
+         reserves its own width. */
       .ytb-preview-time {
-        position: absolute;
-        top: 8px;
-        right: 12px;   /* matches the preview's content inset (UA-024) */
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        align-self: start;
+        white-space: nowrap;
         color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
@@ -1887,20 +1924,34 @@
       }
       .ytb-preview-reaction .ytb-preview-time { color: #eee; }
       /* Content is the hero; the author sits small beneath it (own authorship
-         stays the muted neutral "You"; Buddies get their Buddy Color inline). */
+         stays the muted neutral "You"; Buddies get their Buddy Color inline).
+         The body shares row 1 with the timestamp and owns the left column. */
+      .ytb-preview-body,
+      .ytb-preview-spoiler {
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+      }
       .ytb-preview-body {
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        padding-right: 34px;
         font-weight: 600;
         overflow-wrap: anywhere;
       }
+      /* Everything under row 1 spans the full card, so the timestamp column
+         constrains the body only — never the author or the Reply count. */
+      .ytb-preview-author,
+      .ytb-preview-replies,
+      .ytb-preview-emoji,
+      .ytb-preview-emoji-author {
+        grid-column: 1 / -1;
+      }
       .ytb-preview-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-preview-replies { margin-top: 4px; color: var(--ytb-accent-800); font-size: 11px; font-weight: 700; }
-      .ytb-preview-spoiler { padding-right: 34px; color: var(--ytb-ink-muted); font-style: italic; font-weight: 600; }
-      .ytb-preview-emoji { font-size: 26px; line-height: 1.1; }
+      .ytb-preview-spoiler { color: var(--ytb-ink-muted); font-style: italic; font-weight: 600; }
+      .ytb-preview-emoji { grid-row: 2; font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
 
       /* --- the Expanded Note: opaque warm surface (cream / espresso) ---

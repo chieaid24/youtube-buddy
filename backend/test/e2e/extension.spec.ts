@@ -543,6 +543,284 @@ test('Note Dots float above the bar at their true timestamps and swallow hover f
 	}
 });
 
+// A player with room ABOVE the bar (the band our dots and previews live in) and
+// room to the RIGHT of it (a dot clamped to the bar's end still gets its whole
+// preview measured inside the viewport).
+const roomyBarFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube roomy-bar fixture</title></head>
+  <body style="margin: 0">
+    <main id="movie_player" class="html5-video-player" style="position: relative; width: 900px; height: 400px; background: #000">
+      <video style="width: 900px; height: 400px"></video>
+      <div class="ytp-chrome-bottom" style="position: absolute; left: 0; right: 0; bottom: 0; height: 40px">
+        <div class="ytp-progress-bar" style="position: relative; width: 400px; height: 6px; background: #444"></div>
+        <div class="ytp-left-controls"></div>
+      </div>
+    </main>
+  </body>
+</html>`;
+
+/** Push one Room read into the page, exactly as renderer.js rebroadcasts one. */
+async function pushNotes(page: Page, notes: unknown[]) {
+	await page.evaluate((payload) => {
+		document.dispatchEvent(
+			new CustomEvent('ytb:room-data', {
+				detail: { myClientId: 'me-client', roomCode: 'silly-otters', notes: payload, replies: [] },
+			}),
+		);
+	}, notes);
+}
+
+/** Give the fixture's <video> real, seekable media so notes.js sees a duration. */
+async function loadMedia(page: Page, dataUri: string) {
+	await page.evaluate(async (src) => {
+		const video = document.querySelector('video') as HTMLVideoElement;
+		const loaded = new Promise((resolve) => video.addEventListener('loadedmetadata', resolve, { once: true }));
+		video.src = src;
+		await loaded;
+	}, dataUri);
+}
+
+test('the progress bar stays seekable directly beneath a Note Dot: every surface we own clears its top edge', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: sizedBarFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+
+		// Count the press/hover family the page world sees on the bar — the events
+		// YouTube's own seek and storyboard logic run on.
+		await page.evaluate(() => {
+			const bar = document.querySelector('.ytp-progress-bar') as HTMLElement;
+			for (const type of ['mousedown', 'mousemove', 'mouseup']) {
+				bar.dataset[type] = '0';
+				bar.addEventListener(type, () => {
+					bar.dataset[type] = String(Number(bar.dataset[type]) + 1);
+				});
+			}
+		});
+		await loadMedia(page, silentWavDataUri(40));
+		// One roomy dot at 10s (x = 100 on the 400px bar) and a co-timed pair at
+		// 30s (x = 300), which cluster and fan.
+		await pushNotes(page, [
+			{ id: 'iso', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 10, kind: 'text', body: 'here', createdAt: 1 },
+			{ id: 'co-a', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 30, kind: 'text', body: 'a', createdAt: 2 },
+			{ id: 'co-b', clientId: 'buddy-2', name: 'Kim', videoId: 'fixture-video', timestamp: 30.2, kind: 'text', body: 'b', createdAt: 3 },
+		]);
+		await expect(page.locator('.ytb-note-dot')).toHaveCount(3);
+		await expect(page.locator('.ytb-note-dot-roomy')).toHaveCount(1); // only the isolated dot earns the hit extender
+
+		// Hit-test the bar under a dot: sweep its full 6px height across the dot's
+		// whole 24px hit width. Nothing of ours may answer — elementFromPoint is
+		// the same hit test the browser runs to route a press, and it skips our
+		// pointer-events:none layers exactly as a real click would.
+		const sweepUnder = (id: string) =>
+			page.evaluate((noteId) => {
+				const dot = document.querySelector(`[data-ytb-note-id="${noteId}"]`) as HTMLElement;
+				const bar = (document.querySelector('.ytp-progress-bar') as HTMLElement).getBoundingClientRect();
+				const box = dot.getBoundingClientRect();
+				const cx = box.left + box.width / 2;
+				const ours: string[] = [];
+				for (const dx of [-11, -6, 0, 6, 11]) {
+					for (const y of [bar.top + 0.5, bar.top + 3, bar.bottom - 0.5]) {
+						const hit = document.elementFromPoint(cx + dx, y) as HTMLElement | null;
+						if (hit?.closest('.ytb-note-dot, .ytb-dot-cluster, .ytb-note-preview')) {
+							ours.push(`${noteId} @${dx},${(y - bar.top).toFixed(1)} -> ${hit.className}`);
+						}
+					}
+				}
+				return ours;
+			}, id);
+
+		expect(await sweepUnder('iso')).toEqual([]);
+		expect(await sweepUnder('co-a')).toEqual([]);
+
+		// ... and still nothing while the dot is hovered, when its Note Preview,
+		// the preview's hover bridge, and (for a Cluster) the hover keeper are all
+		// live. This is the state that used to blanket the bar.
+		await page.locator('[data-ytb-note-id="iso"]').hover();
+		await expect
+			.poll(() => page.locator('[data-ytb-note-id="iso"] .ytb-note-preview').evaluate((el) => getComputedStyle(el).opacity))
+			.toBe('1');
+		expect(await sweepUnder('iso')).toEqual([]);
+
+		// The co-timed pair overlaps at rest — one dot literally covers the other —
+		// so drive the pointer to the Cluster instead of asking Playwright to hover
+		// a covered element. Whichever member is on top takes the hover; the
+		// Cluster fans, and the keeper holds the fan open across the gaps.
+		const clusterAt = await page.evaluate(() => {
+			const dot = document.querySelector('[data-ytb-note-id="co-a"]')!.getBoundingClientRect();
+			return { x: dot.left + dot.width / 2, y: dot.top + dot.height / 2 };
+		});
+		await page.mouse.move(clusterAt.x, clusterAt.y);
+
+		const centres = () =>
+			page.evaluate(() => {
+				const centre = (id: string) => {
+					const r = document.querySelector(`[data-ytb-note-id="${id}"]`)!.getBoundingClientRect();
+					return r.left + r.width / 2;
+				};
+				return Math.abs(centre('co-b') - centre('co-a'));
+			});
+		await expect.poll(centres).toBeGreaterThan(6); // fanned apart by more than a dot's own width
+
+		expect(await sweepUnder('co-a')).toEqual([]);
+		expect(await sweepUnder('co-b')).toEqual([]);
+
+		// A fanned member is still reachable — the pointer never left the Cluster's
+		// keeper, and the far dot answers the hit test at its fanned position.
+		const reachable = await page.evaluate(() => {
+			const b = document.querySelector('[data-ytb-note-id="co-b"]')!.getBoundingClientRect();
+			const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) as HTMLElement | null;
+			return hit?.dataset.ytbNoteId === 'co-b';
+		});
+		expect(reachable).toBe(true);
+
+		// A real press-and-drag on the bar AT the isolated Note's exact timestamp
+		// reaches the bar, and opens no Note.
+		const barY = await page.evaluate(() => {
+			const bar = (document.querySelector('.ytp-progress-bar') as HTMLElement).getBoundingClientRect();
+			return bar.top + bar.height / 2;
+		});
+		const dotX = await page
+			.locator('[data-ytb-note-id="iso"]')
+			.evaluate((el) => el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2);
+		await page.mouse.move(dotX, barY);
+		await page.mouse.down();
+		await page.mouse.move(dotX + 40, barY, { steps: 4 });
+		await page.mouse.up();
+
+		const seen = await page.evaluate(() => {
+			const bar = document.querySelector('.ytp-progress-bar') as HTMLElement;
+			return {
+				down: Number(bar.dataset.mousedown),
+				move: Number(bar.dataset.mousemove),
+				up: Number(bar.dataset.mouseup),
+				// Our storyboard suppression is scoped to the band above the bar, so
+				// hovering the bar leaves YouTube's own tooltip alone.
+				suppressed: document.querySelector('#movie_player')!.classList.contains('ytb-note-tooltip-suppressed'),
+			};
+		});
+		expect(seen.down).toBeGreaterThan(0);
+		expect(seen.move).toBeGreaterThan(0);
+		expect(seen.up).toBeGreaterThan(0);
+		expect(seen.suppressed).toBe(false);
+		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+
+		// The band ABOVE the bar still belongs to the dot: a click 20px up — inside
+		// its 24px hit target, nowhere near the glyph — opens the Expanded Note.
+		await page.mouse.click(dotX, barY - 23);
+		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('the Note Preview widens for its corner timestamp: body and time never overlap', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: roomyBarFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		await loadMedia(page, silentWavDataUri(40));
+
+		// The timestamp is rendered from the Note, so a moment past the fixture's
+		// duration (clamped onto the bar's end) is how we exercise a long
+		// "@10:02:33" against the short "@0:07" — same card, same layout.
+		const LONG = 36153; // 10:02:33
+		const SHORT = 7; // 0:07
+		const long100 = 'x'.repeat(100);
+		const cases: { id: string; at: number; kind: string; body: string; spoiler?: boolean; content: string }[] = [
+			{ id: 'short-time-short-body', at: SHORT, kind: 'text', body: 'x', content: '.ytb-preview-body' },
+			{ id: 'long-time-short-body', at: LONG, kind: 'text', body: 'x', content: '.ytb-preview-body' },
+			{ id: 'long-time-long-body', at: LONG, kind: 'text', body: long100, content: '.ytb-preview-body' },
+			{ id: 'short-time-long-body', at: SHORT, kind: 'text', body: long100, content: '.ytb-preview-body' },
+			{ id: 'long-time-reaction', at: LONG, kind: 'emoji', body: '\u{1F525}', content: '.ytb-preview-emoji' },
+			{ id: 'long-time-spoiler', at: LONG, kind: 'text', body: 'secret', spoiler: true, content: '.ytb-preview-spoiler' },
+		];
+
+		for (const kase of cases) {
+			// One Note at a time: each dot is alone on the bar, so it is measured at
+			// its natural hover size with no Cluster fan in play.
+			await pushNotes(page, [
+				{
+					id: kase.id,
+					clientId: 'buddy-1',
+					name: 'Sam',
+					videoId: 'fixture-video',
+					timestamp: kase.at,
+					kind: kase.kind,
+					body: kase.body,
+					spoiler: Boolean(kase.spoiler),
+					createdAt: 1,
+				},
+			]);
+			const dot = page.locator(`[data-ytb-note-id="${kase.id}"]`);
+			await nudgeUntil(page, () => expect(dot).toHaveCount(1, { timeout: 700 }));
+			await dot.hover();
+			const preview = dot.locator('.ytb-note-preview');
+			await expect.poll(() => preview.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+
+			const measured = await page.evaluate(
+				({ id, content }) => {
+					const cardEl = document.querySelector(`[data-ytb-note-id="${id}"] .ytb-note-preview`)!;
+					const time = document.querySelector(`[data-ytb-note-id="${id}"] .ytb-preview-time`)!;
+					const body = document.querySelector(`[data-ytb-note-id="${id}"] ${content}`)!;
+					const card = cardEl.getBoundingClientRect();
+					const cs = getComputedStyle(cardEl);
+					const px = (v: string) => parseFloat(v) || 0;
+					const insetTop = px(cs.borderTopWidth) + px(cs.paddingTop);
+					const insetRight = px(cs.borderRightWidth) + px(cs.paddingRight);
+					const insetLeft = px(cs.borderLeftWidth) + px(cs.paddingLeft);
+					const t = time.getBoundingClientRect();
+					const b = body.getBoundingClientRect();
+					const overlapX = Math.max(0, Math.min(t.right, b.right) - Math.max(t.left, b.left));
+					const overlapY = Math.max(0, Math.min(t.bottom, b.bottom) - Math.max(t.top, b.top));
+					return {
+						label: time.textContent,
+						intersection: overlapX * overlapY,
+						contentWidth: card.width - insetLeft - insetRight,
+						bodyHeight: b.height,
+						// Pinned to the card's top-right content corner.
+						cornerTop: t.top - card.top - insetTop,
+						cornerRight: card.right - insetRight - t.right,
+						timeInsideCard: t.left >= card.left - 0.5 && t.right <= card.right + 0.5,
+					};
+				},
+				{ id: kase.id, content: kase.content },
+			);
+
+			expect(measured.label, kase.id).toBe(kase.at === LONG ? '@10:02:33' : '@0:07');
+			// The one invariant this slice buys: the timestamp reserves real width,
+			// so nothing ever renders under it.
+			expect(measured.intersection, kase.id).toBe(0);
+			expect(measured.timeInsideCard, kase.id).toBe(true);
+			expect(measured.cornerTop, kase.id).toBeCloseTo(0, 0);
+			expect(measured.cornerRight, kase.id).toBeCloseTo(0, 0);
+			// The card still honours its 240px cap, and a long body still clamps to
+			// two lines (13px/1.4 => ~18.2px a line) instead of growing the card.
+			expect(measured.contentWidth, kase.id).toBeLessThanOrEqual(240.5);
+			if (kase.body === long100) expect(measured.bodyHeight, kase.id).toBeLessThan(40);
+		}
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 // The YouTube HOME page, reduced to what the Room Home surfaces target: the
 // left guide (where home-toggle.js appends the Room Home Toggle row) and the
 // home browse grid (above which home-section.js injects the Room Home
