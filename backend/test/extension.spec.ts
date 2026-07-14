@@ -28,6 +28,17 @@ const buildFeed = (records: object, viewer: string): FeedGroup[] => window.YTB.b
 // `window.YTB.tailFeed` likewise: the wrapper pins the reveal window's shape.
 const tailFeed = (groups: FeedGroup[], limit: number): { groups: FeedGroup[]; hidden: number } => window.YTB.tailFeed(groups, limit);
 
+// `window.YTB.solveDotFan` likewise (#162). The wrapper also pins the standing
+// geometry — a 14px ideal Fan Gap, a 6px dot, a 1000px bar — so each case below
+// states only what it varies from it.
+type FanSolution = { clusters: number[][]; offsets: number[]; gap: number };
+type FanOptions = { idealGap?: number; barWidth?: number; dotDiameter?: number };
+const solveFan = (xs: number[], options: FanOptions = {}): FanSolution =>
+	window.YTB.solveDotFan(xs, { idealGap: 14, barWidth: 1000, dotDiameter: 6, ...options });
+/** Where the solve actually lands each dot's center, float dust rounded off. */
+const fanned = (xs: number[], options: FanOptions = {}): number[] =>
+	solveFan(xs, options).offsets.map((offset, i) => Number((xs[i] + offset).toFixed(3)));
+
 // Every describe in this file reads `window.YTB`, so the extension globals are
 // installed once per FILE rather than inside one describe's beforeAll — that way
 // a filtered run (`npx vitest run -t "..."`) of any single test still has them.
@@ -383,55 +394,170 @@ describe('note presentation helpers', () => {
 		expect(x(segs, Number.NaN, 100)).toBe(0);
 	});
 
-	it('groups overlapping Note Dots into transitive Dot Clusters', () => {
-		const cluster = (xs: number[], diameter: number): number[][] => window.YTB.clusterDots(xs, diameter);
-		// A lone dot is a Cluster of one; two dots well over a diameter apart do NOT
-		// overlap (dot 6px: 300px apart).
-		expect(cluster([200], 6)).toEqual([[0]]);
-		expect(cluster([200, 500], 6)).toEqual([[0], [1]]);
-		// Touching boundary is inclusive (<=): centres exactly one diameter apart merge.
-		expect(cluster([512, 520], 8)).toEqual([[0, 1]]);
-		// Overlapping pair (5px apart) merges; clusters return left to right,
-		// members by x (the later-listed earlier dot leads the group).
-		expect(cluster([505, 500], 6)).toEqual([[1, 0]]);
-		// Transitive chain: three dots each 4px from the NEXT are one Cluster even
-		// though the outer two (8px apart, over a diameter) do not touch.
-		expect(cluster([500, 504, 508], 6)).toEqual([[0, 1, 2]]);
-		// Identical timestamps overlap (zero distance) — one Cluster.
-		expect(cluster([400, 400], 6)).toEqual([[0, 1]]);
-		// A separate far dot stays its own Cluster.
-		expect(cluster([500, 504, 900], 6)).toEqual([[0, 1], [2]]);
-		// Degenerate inputs.
-		expect(cluster([], 6)).toEqual([]);
+	it('solves the Dot Cluster fan by minimum displacement, chaining what it touches', () => {
+		// A dot with room to breathe does not move; a Cluster is exactly what the
+		// separation constraint chains together (#162).
+		// A lone dot is a Cluster of one and never moves — not even one hanging off
+		// the bar's left edge at rest: the bar's edges exist to keep a FAN on the
+		// bar, and there is no fan here to keep.
+		expect(solveFan([500])).toEqual({ clusters: [[0]], offsets: [0], gap: 14 });
+		expect(solveFan([1]).offsets).toEqual([0]);
+		// Two dots a comfortable distance apart: neither moves, and each is its own
+		// Cluster (the constraint chains nothing).
+		expect(solveFan([200, 500])).toEqual({ clusters: [[0], [1]], offsets: [0, 0], gap: 14 });
+
+		// A co-timed pair separates symmetrically about its own centre — the minimum
+		// displacement that opens the Fan Gap between them. Offsets come back in
+		// INPUT order while the Cluster is ordered left to right, so the later-listed
+		// earlier dot leads the group and still takes the left half of the fan.
+		expect(solveFan([500, 500])).toEqual({ clusters: [[0, 1]], offsets: [-7, 7], gap: 14 });
+		// A near-timed pair (5px apart) opens the Fan Gap between them by moving each
+		// 4.5px — half the shortfall apiece, which is the least either can move.
+		expect(solveFan([505, 500])).toEqual({ clusters: [[1, 0]], offsets: [4.5, -4.5], gap: 14 });
+
+		// THE OVERLAP BUG (#162, 1): the old rank fan spread a co-timed pair by 14px
+		// about its centroid and left a dot 10px away at rest — landing the fanned
+		// dot 3px from it, re-creating the overlap the fan exists to resolve. The
+		// constraint is global now, so that third dot is chained IN and the solve
+		// separates all three: no dot is ever "outside" the fan.
+		const chained = solveFan([500, 500, 510]);
+		expect(chained.clusters).toEqual([[0, 1, 2]]);
+		expect(chained.offsets.map((o: number) => Number(o.toFixed(3)))).toEqual([-10.667, 3.333, 7.333]);
+		// Every separation is exactly the Fan Gap: minimum displacement, no cover.
+		expect(fanned([500, 500, 510])).toEqual([489.333, 503.333, 517.333]);
+
+		// THE EVEN-SPACING LIE (#162, 2): true spacing survives wherever the Fan Gap
+		// allows. A dot 30px clear of a co-timed pair keeps its distance instead of
+		// being re-slotted 14px beside them — it does not move at all, and it stays
+		// its own Cluster.
+		const roomy = solveFan([500, 500, 530]);
+		expect(roomy.clusters).toEqual([[0, 1], [2]]);
+		expect(roomy.offsets).toEqual([-7, 7, 0]);
+
+		// Degenerate input.
+		expect(solveFan([])).toEqual({ clusters: [], offsets: [], gap: 14 });
 	});
 
-	it('fans a Dot Cluster evenly about its centroid, clamped to the bar', () => {
-		const fan = (xs: number[], gap: number, barWidth: number, diameter: number): number[] =>
-			window.YTB.fanOffsets(xs, gap, barWidth, diameter);
-		// A lone dot never moves.
-		expect(fan([500], 14, 1000, 6)).toEqual([0]);
-		// A co-timed pair separates symmetrically by the gap about the centroid.
-		expect(fan([500, 500], 14, 1000, 6)).toEqual([-7, 7]);
-		// Offsets return in INPUT order but slots go by timestamp: the earlier dot
-		// takes the left slot regardless of input order.
-		expect(fan([500, 500], 14, 1000, 6)).toEqual([-7, 7]);
-		// A tight triple centred at 500px fans to 500 +/- gap.
-		const triple = fan([500, 500, 500], 20, 1000, 6);
-		expect(triple).toEqual([-20, 0, 20]);
-		// Edge clamp: a pair hard against the right edge slides left so no circle
-		// (radius 3) is pushed past 1000. Fanned centres would be 998+/-7 = [991,1005];
-		// the whole fan shifts by -8 so the rightmost centre lands at 997 = 1000-3.
-		const right = fan([998, 998], 14, 1000, 6);
-		// original centre px = 998; offsets = clampedCentre - 998.
-		expect(right[0]).toBeCloseTo(991 - 8 - 998, 5); // -15
-		expect(right[1]).toBeCloseTo(1005 - 8 - 998, 5); // -1
-		// Left-edge clamp mirrors it: fanned centres [-5, 9] shift +8 so the left
-		// circle sits at 3 = radius.
-		const left = fan([2, 2], 14, 1000, 6);
-		expect(left[0]).toBeCloseTo(-5 + 8 - 2, 5); // 1
-		expect(left[1]).toBeCloseTo(9 + 8 - 2, 5); // 15
-		// Degenerate input.
-		expect(fan([], 14, 1000, 6)).toEqual([]);
+	it('holds the Dot Cluster fan on the bar, shrinking the Fan Gap toward the dot diameter', () => {
+		// Edge clamp: a co-timed pair hard against the right edge slides left as one
+		// so no circle (radius 3) is pushed past 1000. Unclamped the fan would sit at
+		// [991, 1005]; the solve holds the rightmost centre at 997 = 1000 - radius.
+		expect(fanned([998, 998])).toEqual([983, 997]);
+		expect(solveFan([998, 998]).offsets).toEqual([-15, -1]);
+		// The left edge mirrors it: the leftmost circle lands exactly on radius.
+		expect(fanned([2, 2])).toEqual([3, 17]);
+
+		// A crowded bar shrinks the Fan Gap rather than running off the end: ten
+		// co-timed dots on a 100px bar cannot hold the 14px ideal (9 gaps * 14 =
+		// 126 > 94px of room), so the gap opens only as far as the bar allows and the
+		// fan spans it exactly, edge circle to edge circle.
+		const crowded = solveFan(
+			Array.from({ length: 10 }, () => 50),
+			{ barWidth: 100 },
+		);
+		expect(crowded.gap).toBeCloseTo(94 / 9, 6); // ~10.44px, under the 14px ideal
+		const spread = fanned(
+			Array.from({ length: 10 }, () => 50),
+			{ barWidth: 100 },
+		);
+		expect(spread[0]).toBeCloseTo(3, 6); // the left circle sits on the bar's edge
+		expect(spread[9]).toBeCloseTo(97, 6); // and the right circle on the other
+		expect(crowded.clusters).toEqual([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]);
+
+		// The Fan Gap floors at one dot diameter: fanned dots may TOUCH, never cover.
+		// Ten dots on a 30px bar cannot even be laid out 6px apart, so separation
+		// wins over containment (a fan that covers its own dots is not an affordance)
+		// and the chain keeps its floor gap, centred on the bar.
+		const floored = fanned(
+			Array.from({ length: 10 }, () => 15),
+			{ barWidth: 30 },
+		);
+		expect(
+			solveFan(
+				Array.from({ length: 10 }, () => 15),
+				{ barWidth: 30 },
+			).gap,
+		).toBe(6);
+		for (let i = 1; i < floored.length; i++) expect(floored[i] - floored[i - 1]).toBeCloseTo(6, 6);
+		expect((floored[0] + floored[9]) / 2).toBeCloseTo(15, 6); // centred on the bar
+
+		// An unmeasured bar (the player has not laid out the progress bar yet) imposes
+		// no edge at all: the fan still separates at the ideal gap.
+		expect(fanned([500, 500], { barWidth: 0 })).toEqual([493, 507]);
+	});
+
+	it('never lets a fanned Note Dot overlap another dot, over randomized bars', () => {
+		// The property the whole solve exists for (#162), over generated layouts
+		// rather than fixed cases: fan ANY one Cluster and every other dot on the bar
+		// stays where it is — no fanned dot may come within the Fan Gap of a fellow
+		// member OR of a dot at rest elsewhere. Deterministic PRNG (mulberry32) so a
+		// failure is reproducible.
+		let seed = 0x9e3779b9;
+		const random = () => {
+			seed |= 0;
+			seed = (seed + 0x6d2b79f5) | 0;
+			let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		};
+		const DIAMETER = 6;
+		const EPS = 1e-6;
+
+		for (let trial = 0; trial < 300; trial++) {
+			const barWidth = [180, 420, 640, 1280][Math.floor(random() * 4)];
+			const count = 1 + Math.floor(random() * 24);
+			// Dots land anywhere on the bar, in clumps as tight as co-timed Notes and
+			// as loose as a sparse timeline — and a few just off each end, where the
+			// edge clamp bites.
+			const xs = Array.from({ length: count }, () => {
+				const clump = random() < 0.5 ? Math.round(random() * barWidth) : Math.round(random() * barWidth * 0.1);
+				return clump + Math.round((random() - 0.5) * 12);
+			});
+			const { clusters, offsets, gap } = window.YTB.solveDotFan(xs, {
+				idealGap: 14,
+				barWidth,
+				dotDiameter: DIAMETER,
+			});
+			const layout = { xs, barWidth, gap, clusters, offsets };
+
+			// Structural: the clusters partition every dot, exactly once.
+			expect(
+				clusters
+					.flat()
+					.slice()
+					.sort((a: number, b: number) => a - b),
+			).toEqual(xs.map((_, i) => i));
+			// The Fan Gap never floors below the dot diameter — touching, never covering.
+			expect(gap).toBeGreaterThanOrEqual(DIAMETER - EPS);
+			expect(gap).toBeLessThanOrEqual(14 + EPS);
+
+			for (const cluster of clusters) {
+				// Hovering THIS Cluster fans its members; every other dot on the bar
+				// stays at its exact at-rest position.
+				const member = new Set<number>(cluster);
+				const rendered = xs.map((x, i) => (member.has(i) ? x + offsets[i] : x));
+				const where = (i: number, j: number) => `${JSON.stringify(layout)} dots ${i},${j}`;
+				for (const i of cluster) {
+					for (let j = 0; j < xs.length; j++) {
+						// A pair at rest OUTSIDE the fanned Cluster may of course still
+						// overlap — dots tell the truth about their moments at rest. The
+						// claim is only about the dots the fan MOVES: against each other,
+						// and against every dot left standing elsewhere on the bar.
+						if (i === j || (member.has(j) && j < i)) continue;
+						expect(Math.abs(rendered[i] - rendered[j]), where(i, j)).toBeGreaterThanOrEqual(gap - EPS);
+					}
+				}
+				// A lone dot never moves; a fanned Cluster never runs off a bar with
+				// the room to hold it.
+				if (cluster.length === 1) expect(offsets[cluster[0]], JSON.stringify(layout)).toBe(0);
+				else if ((xs.length - 1) * gap <= barWidth - DIAMETER + EPS) {
+					for (const i of cluster) {
+						expect(rendered[i], JSON.stringify(layout)).toBeGreaterThanOrEqual(DIAMETER / 2 - EPS);
+						expect(rendered[i], JSON.stringify(layout)).toBeLessThanOrEqual(barWidth - DIAMETER / 2 + EPS);
+					}
+				}
+			}
+		}
 	});
 
 	it('routes a video play: the arrival grace holds, later plays dismiss an open panel', () => {
