@@ -87,12 +87,17 @@ const CORS = {
  * built from `read`; writes are acknowledged with `{ ok: true }`. Records each
  * request as "METHOD url body" into `calls` so tests can assert what hit the
  * wire (the body part is omitted for body-less requests).
+ *
+ * `POST /notes` answers like the real route does — with the complete server
+ * record (`{ ok, id, note }`) — because the extension reconciles the Video
+ * Timeline and fires the Post Echo off that record, not off a bare ack.
  */
 function stubRoomBackend(
 	context: BrowserContext,
 	read: { notes?: object[]; replies?: object[]; playlist?: object[]; progress?: object[]; events?: object[] },
 	calls: string[] = [],
 ) {
+	let posted = 0;
 	return context.route('http://localhost:8787/**', (route) => {
 		const request = route.request();
 		const body = request.postData();
@@ -111,6 +116,16 @@ function stubRoomBackend(
 					playlist: read.playlist ?? [],
 					events: read.events ?? [],
 				}),
+			});
+		}
+		if (request.method() === 'POST' && new URL(request.url()).pathname === '/notes') {
+			const id = `posted-${++posted}`;
+			const note = { id, spoiler: false, ...JSON.parse(body ?? '{}'), createdAt: Date.now() };
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({ ok: true, id, note }),
 			});
 		}
 		return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
@@ -1566,6 +1581,153 @@ test('six concurrent Reaction bursts lay out in the row without overlapping (no 
 			.evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect()).map((r) => ({ left: r.left, right: r.right })));
 		const byLeft = [...rects].sort((p, q) => p.left - q.left);
 		for (let i = 1; i < byLeft.length; i++) expect(byLeft[i].left).toBeGreaterThanOrEqual(byLeft[i - 1].right - 0.5);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test("a Post Echo fires the author's own Playback Notification on posting — paused, exactly once, still crossable later", async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(context, {}, calls);
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true })); // posting a Note requires Sharing
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+
+		// Log every notification the moment it enters: cards expire after ~4s, so
+		// counting live nodes could never prove a notification fired EXACTLY once.
+		await page.evaluate(() => {
+			const fired: string[] = [];
+			(window as unknown as { ytbFired: string[] }).ytbFired = fired;
+			new MutationObserver((records) => {
+				for (const record of records) {
+					for (const node of record.addedNodes) {
+						if (!(node instanceof HTMLElement)) continue;
+						if (node.classList.contains('ytb-alert-card')) fired.push(`card:${node.querySelector('.ytb-alert-body')?.textContent}`);
+						if (node.classList.contains('ytb-alert-burst'))
+							fired.push(`burst:${node.querySelector('.ytb-alert-burst-emoji')?.textContent}`);
+					}
+				}
+			}).observe(document.body, { childList: true, subtree: true });
+		});
+		const fired = () => page.evaluate(() => (window as unknown as { ytbFired: string[] }).ytbFired);
+		const postNote = async (body: string) => {
+			await page.locator('#ytb-note-button').click();
+			await page.locator('#ytb-note-composer textarea').fill(body);
+			await page.keyboard.press('Enter');
+			await expect(page.locator('#ytb-note-composer')).toHaveCount(0);
+		};
+
+		// 1. A text Note posted from a PAUSED player echoes immediately — the card
+		//    a Buddy would get, byline "You", with no playback whatsoever.
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.pause();
+			v.currentTime = 4;
+		});
+		await postNote('echo me');
+		const card = page.locator('.ytb-alert-card');
+		await expect(card).toHaveCount(1);
+		await expect(card.locator('.ytb-alert-body')).toHaveText('echo me');
+		await expect(card.locator('.ytb-alert-author')).toHaveText('You');
+		expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+
+		// The echoed card is a crossing card in every respect: clicking it opens
+		// that Note's Expanded Note.
+		await card.click();
+		const panel = page.locator('#ytb-note-panel');
+		await expect(panel).toHaveCount(1);
+		await expect(panel).toContainText('echo me');
+		await page.keyboard.press('Escape');
+		await expect(panel).toHaveCount(0);
+
+		// 2. A Reaction posted from a paused player echoes as the burst.
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.pause();
+			v.currentTime = 8;
+		});
+		await page.locator('#ytb-note-button').click();
+		await page.locator('#ytb-note-composer .ytb-note-emoji').first().click();
+		await expect(page.locator('#ytb-note-composer')).toHaveCount(0);
+		await expect(page.locator('.ytb-alert-burst')).toHaveCount(1);
+		expect(await fired()).toEqual(['card:echo me', `burst:${'\u{1F44D}'}`]);
+
+		// 3. Posting WHILE PLAYING: the composer's lease pauses on open and resumes
+		//    on close, so playback runs right through the Note's timestamp a beat
+		//    later. The echo already fired, and the crossing window was rebased past
+		//    it — so it notifies exactly once, not twice.
+		await video.evaluate((v: HTMLVideoElement) => v.play());
+		await page.waitForFunction(() => (document.querySelector('video')?.currentTime ?? 0) > 9);
+		await postNote('posted mid-playback');
+		await expect(page.locator('.ytb-alert-card', { hasText: 'posted mid-playback' })).toHaveCount(1);
+		const posted = JSON.parse(
+			calls
+				.filter((call) => call.startsWith('POST') && call.includes('/notes'))
+				.pop()!
+				.split(' ')
+				.slice(2)
+				.join(' '),
+		);
+		expect(posted.timestamp).toBeGreaterThan(9);
+
+		// Playback resumed (the lease) and carries well past the Note's moment.
+		expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
+		await page.waitForFunction((ts) => (document.querySelector('video')?.currentTime ?? 0) > ts + 1.5, posted.timestamp as number);
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+		expect(await fired()).toEqual(['card:echo me', `burst:${'\u{1F44D}'}`, 'card:posted mid-playback']);
+
+		// 4. Ordinary crossing behavior is otherwise untouched: rewind and replay
+		//    across that same moment and it notifies again, like any other Note.
+		await video.evaluate((v: HTMLVideoElement, ts) => {
+			v.currentTime = ts - 0.5;
+			return v.play();
+		}, posted.timestamp as number);
+		await expect.poll(fired).toEqual([
+			'card:echo me',
+			`burst:${'\u{1F44D}'}`,
+			'card:posted mid-playback',
+			'card:posted mid-playback', // the replay crossing — a second, LATER notification
+		]);
+		await video.evaluate((v: HTMLVideoElement) => v.pause());
+
+		// 5. Notes Visibility off renders nothing, the echo included.
+		await popup.evaluate(() => chrome.storage.local.set({ notesHidden: true }));
+		await expect(page.locator('#ytb-note-button')).toHaveCount(0); // no + button: the guard's path is unreachable
+		await page.evaluate(() =>
+			document.dispatchEvent(
+				new CustomEvent('ytb:note-posted', {
+					detail: {
+						note: {
+							id: 'hidden-1',
+							clientId: 'viewer-e2e',
+							videoId: 'fixture-video',
+							timestamp: 12,
+							kind: 'text',
+							body: 'never rendered',
+							spoiler: false,
+						},
+					},
+				}),
+			),
+		);
+		await expect(page.locator('.ytb-alert-card')).toHaveCount(0);
+		expect((await fired()).filter((entry) => entry.includes('never rendered'))).toEqual([]);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

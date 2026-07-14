@@ -18,10 +18,12 @@
 //     one "Go here" seek-and-play control — omitted when the paused playhead is
 //     already within ~2s of the moment;
 //   - Playback Notifications: note cards (~4s, clickable) and animated
-//     Reaction bursts (~2s, non-interactive) on every NATURAL forward
-//     crossing — rewind-and-replay triggers again, direct seeks stay silent.
-//     They render at the viewer's Notification Position (one of four player
-//     edges, default bottom; live via chrome.storage.onChanged).
+//     Reaction bursts (~2s, non-interactive), fired by TWO triggers — a NATURAL
+//     forward crossing (rewind-and-replay triggers again, direct seeks stay
+//     silent) and a Post Echo (the author's own record, the instant they post
+//     it, with no playback required). They render at the viewer's Notification
+//     Position (one of four player edges, default bottom; live via
+//     chrome.storage.onChanged).
 //   - Unseen pulses (ADR-0010): a Note Dot carrying an Unseen Mention or
 //     Reply pulses an apricot halo until Acknowledged — by hovering the dot,
 //     opening its Expanded Note, or a natural forward crossing. The derivation
@@ -328,7 +330,8 @@
 	});
 
 	// composer.js posted a Note/Reaction: insert the complete server record into
-	// the active Video Timeline immediately — no waiting for the 60s Room poll.
+	// the active Video Timeline immediately — no waiting for the 60s Room poll —
+	// then fire its Post Echo.
 	document.addEventListener('ytb:note-posted', (event) => {
 		const note = event.detail && event.detail.note;
 		if (!note || !note.id || !note.videoId) return;
@@ -337,7 +340,34 @@
 		if (!list.some((existing) => existing.id === note.id)) list.push(note);
 		notesByVideoId.set(note.videoId, list);
 		renderDots();
+		postEcho(note);
 	});
+
+	/**
+	 * Post Echo: the author fires their own record's Playback Notification the
+	 * instant it is posted — the same card or burst a Buddy gets, in the same
+	 * container and stagger. A write receipt, and a preview of what the Room will
+	 * see. It is the SECOND Playback Notification trigger (the first is a natural
+	 * forward crossing) and it does NOT depend on playback: the composer pauses on
+	 * open, so posting from a paused player is the common case.
+	 *
+	 * Firing rebases the crossing window past the Note's own timestamp, so the
+	 * composer's lease-aware resume cannot replay the same notification a beat
+	 * later — the echo fires exactly once. Ordinary crossing behavior is otherwise
+	 * untouched: rewinding and replaying across the moment fires it again, like
+	 * any other Note.
+	 */
+	function postEcho(note) {
+		// Notes off renders nothing, the echo included (composer.js removes the +
+		// button then, so this is a guard, not a path).
+		if (notesHidden || note.videoId !== currentVideoId) return;
+		const timestamp = Number(note.timestamp);
+		if (Number.isFinite(timestamp)) {
+			lastPlaybackTime = lastPlaybackTime === null ? timestamp : Math.max(lastPlaybackTime, timestamp);
+		}
+		alertQueue.push(note);
+		scheduleAlertDrain();
+	}
 
 	// ---------------------------------------------------------------------------
 	// Video Timeline dots + Note Previews.
@@ -1506,7 +1536,8 @@
 	}
 
 	// Natural forward crossings only: every ordinary playback crossing triggers
-	// (including replays after rewinding); seeks rebase silently below.
+	// (including replays after rewinding); seeks rebase silently below, and so
+	// does a Post Echo, which fires its own Note's notification up front.
 	function handleCrossings(video) {
 		const currentTime = Number(video.currentTime);
 		if (!currentVideoId || !Number.isFinite(currentTime)) {
