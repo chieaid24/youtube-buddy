@@ -210,6 +210,27 @@ const YTB = {
 	// outlast autoplay-on-arrival, short enough not to swallow a real later resume.
 	// See YTB.playAction.
 	PANEL_LOAD_GRACE_MS: 4_000,
+	_arrivalGraceUntil: 0,
+
+	/**
+	 * Arm the short ADR-0010 arrival grace. The clock lives in shared.js because
+	 * either on-video overlay may need to cancel it for an explicit Picture Click.
+	 * @param {number} now
+	 * @returns {number} the grace deadline
+	 */
+	startArrivalGrace(now = Date.now()) {
+		YTB._arrivalGraceUntil = Number(now) + YTB.PANEL_LOAD_GRACE_MS;
+		return YTB._arrivalGraceUntil;
+	},
+
+	/** @param {number} now */
+	withinArrivalGrace(now = Date.now()) {
+		return Number(now) < YTB._arrivalGraceUntil;
+	},
+
+	cancelArrivalGrace() {
+		YTB._arrivalGraceUntil = 0;
+	},
 
 	/**
 	 * Record the video a Room Feed row points at, for notes.js to consult after
@@ -713,6 +734,44 @@ const YTB = {
 	 */
 	dotActivation(_note) {
 		return { action: 'open' };
+	},
+
+	/**
+	 * Classify a click relative to YouTube's player. Known controls and other
+	 * interactive player elements are chrome; the remaining player surface is
+	 * the Video Picture. Callers exclude their own overlay controls first.
+	 * @param {{closest?: (selector: string) => unknown}|null} target
+	 * @returns {'picture'|'chrome'|'outside'}
+	 */
+	pictureClickRegion(target) {
+		if (!target || typeof target.closest !== 'function') return 'outside';
+		if (!target.closest('#movie_player, .html5-video-player')) return 'outside';
+		if (
+			target.closest(
+				'.ytp-chrome-bottom, .ytp-chrome-top, .ytp-popup, .ytp-settings-menu, .ytp-panel-menu, button, a, input, select, textarea, [role="button"], [role="menu"], [role="menuitem"], [role="slider"]',
+			)
+		)
+			return 'chrome';
+		return 'picture';
+	},
+
+	/**
+	 * Route an overlay-open click without touching DOM or playback. A Picture
+	 * Click is consumed and means play unconditionally; player chrome closes the
+	 * overlay but leaves the control to YouTube; an off-player click keeps the
+	 * existing Pause Hold semantics.
+	 * @param {{overlayOpen: boolean, region: 'picture'|'chrome'|'outside', pauseHold: boolean, withinGrace: boolean}} state
+	 * @returns {{close: boolean, consume: boolean, play: boolean, cancelArrivalGrace: boolean}}
+	 */
+	pictureClickAction({ overlayOpen, region, pauseHold, withinGrace }) {
+		if (!overlayOpen) return { close: false, consume: false, play: false, cancelArrivalGrace: false };
+		if (region === 'picture') {
+			return { close: true, consume: true, play: true, cancelArrivalGrace: Boolean(withinGrace) };
+		}
+		if (region === 'chrome') {
+			return { close: true, consume: false, play: false, cancelArrivalGrace: false };
+		}
+		return { close: true, consume: false, play: Boolean(pauseHold), cancelArrivalGrace: false };
 	},
 
 	/**

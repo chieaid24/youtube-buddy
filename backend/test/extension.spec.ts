@@ -402,6 +402,73 @@ describe('note presentation helpers', () => {
 		// Past the grace, no panel: a play is nothing to do with us.
 		expect(window.YTB.playAction({ withinGrace: false, panelOpen: false })).toBe('ignore');
 	});
+
+	it('routes overlay clicks by Picture, player chrome, and off-player Pause Hold', () => {
+		const route = (state: {
+			overlayOpen?: boolean;
+			region?: 'picture' | 'chrome' | 'outside';
+			pauseHold?: boolean;
+			withinGrace?: boolean;
+		}) =>
+			window.YTB.pictureClickAction({
+				overlayOpen: true,
+				region: 'outside',
+				pauseHold: false,
+				withinGrace: false,
+				...state,
+			});
+
+		// The normal watching path is untouched, even on the Video Picture.
+		expect(route({ overlayOpen: false, region: 'picture', pauseHold: true, withinGrace: true })).toEqual({
+			close: false,
+			consume: false,
+			play: false,
+			cancelArrivalGrace: false,
+		});
+
+		// A Picture Click always plays, regardless of the Pause Hold. Inside the
+		// arrival grace it also cancels that hold before play is requested.
+		expect(route({ region: 'picture', pauseHold: false, withinGrace: false })).toEqual({
+			close: true,
+			consume: true,
+			play: true,
+			cancelArrivalGrace: false,
+		});
+		expect(route({ region: 'picture', pauseHold: true, withinGrace: true })).toEqual({
+			close: true,
+			consume: true,
+			play: true,
+			cancelArrivalGrace: true,
+		});
+
+		// Player controls keep the click and own playback, with or without a hold.
+		expect(route({ region: 'chrome', pauseHold: false, withinGrace: false })).toEqual({
+			close: true,
+			consume: false,
+			play: false,
+			cancelArrivalGrace: false,
+		});
+		expect(route({ region: 'chrome', pauseHold: true, withinGrace: true })).toEqual({
+			close: true,
+			consume: false,
+			play: false,
+			cancelArrivalGrace: false,
+		});
+
+		// Off-player dismissal restores only the state represented by a Pause Hold.
+		expect(route({ region: 'outside', pauseHold: false, withinGrace: false }).play).toBe(false);
+		expect(route({ region: 'outside', pauseHold: true, withinGrace: false }).play).toBe(true);
+	});
+
+	it('classifies player surface clicks without treating controls as the Video Picture', () => {
+		const offPlayer = { closest: vi.fn().mockReturnValue(null) };
+		const picture = { closest: vi.fn().mockReturnValueOnce({}).mockReturnValueOnce(null) };
+		const chrome = { closest: vi.fn().mockReturnValue({}) };
+
+		expect(window.YTB.pictureClickRegion(offPlayer)).toBe('outside');
+		expect(window.YTB.pictureClickRegion(picture)).toBe('picture');
+		expect(window.YTB.pictureClickRegion(chrome)).toBe('chrome');
+	});
 });
 
 describe('shared playlist client API', () => {
@@ -1506,7 +1573,17 @@ declare global {
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
 			PENDING_ARRIVAL_TTL_MS: number;
 			PANEL_LOAD_GRACE_MS: number;
+			startArrivalGrace(now?: number): number;
+			withinArrivalGrace(now?: number): boolean;
+			cancelArrivalGrace(): void;
 			playAction(state: { withinGrace: boolean; panelOpen: boolean }): 'hold' | 'dismiss' | 'ignore';
+			pictureClickRegion(target: { closest?: (selector: string) => unknown } | null): 'picture' | 'chrome' | 'outside';
+			pictureClickAction(state: {
+				overlayOpen: boolean;
+				region: 'picture' | 'chrome' | 'outside';
+				pauseHold: boolean;
+				withinGrace: boolean;
+			}): { close: boolean; consume: boolean; play: boolean; cancelArrivalGrace: boolean };
 			setPendingArrival(videoId: string): Promise<boolean>;
 			getPendingArrival(): Promise<{ videoId: string; at: number } | null>;
 			clearPendingArrival(): Promise<boolean>;

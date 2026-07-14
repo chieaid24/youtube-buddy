@@ -116,12 +116,6 @@
 	// reload) and mirrored live from storage (covers SPA nav, where this script
 	// stays alive) — see below.
 	let pendingArrival = null;
-	// Timestamp until which a `play` is treated as watch-page load churn (autoplay
-	// settling in after a Room Feed row paused us on arrival) instead of a
-	// deliberate resume: within it the arrival pause is re-asserted. Armed only by
-	// the arrival pause; a real navigation clears it. See YTB.playAction.
-	let arrivalGraceUntil = 0;
-
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
 	let notificationPosition = 'bottom'; // Playback Notification edge
@@ -304,7 +298,7 @@
 		// Pause at the viewer's own place and hold through the watch page's autoplay
 		// settling (reusing the load-churn grace); the Unseen dot(s) pulse, and the
 		// viewer chooses which to open.
-		arrivalGraceUntil = Date.now() + YTB.PANEL_LOAD_GRACE_MS;
+		YTB.startArrivalGrace();
 		if (!video.paused) video.pause();
 	}
 
@@ -1343,25 +1337,47 @@
 		}
 	}
 
-	// Outside click dismisses. The opening click never lands here because dot,
-	// preview, panel, and notification-card handlers all stop propagation.
-	document.addEventListener('click', (event) => {
-		if (!document.getElementById(PANEL_ID)) return;
-		const path = event.composedPath ? event.composedPath() : [];
-		for (const target of path) {
-			if (!(target instanceof Element)) continue;
-			// A click on the Cluster wrapper's hover-keeper (a gap between fanned
-			// dots) is interacting with the Cluster, not dismissing the panel.
-			if (
-				target.id === PANEL_ID ||
-				target.classList.contains(DOT_CLASS) ||
-				target.classList.contains(CLUSTER_CLASS) ||
-				target.classList.contains('ytb-alert-card')
-			)
-				return;
-		}
-		dismissPanel();
-	});
+	// Route every click while the Expanded Note is open in capture phase. Its own
+	// controls remain inside the panel. A Picture Click is consumed before
+	// YouTube can arm its deferred play/pause toggle; player chrome passes through
+	// after a playback-neutral close; an off-player click keeps Pause Hold
+	// semantics. YTB.pictureClickAction owns the shared decision with composer.js.
+	document.addEventListener(
+		'click',
+		(event) => {
+			const panelOpen = Boolean(document.getElementById(PANEL_ID));
+			if (!panelOpen) return;
+			const path = event.composedPath ? event.composedPath() : [];
+			for (const target of path) {
+				if (!(target instanceof Element)) continue;
+				// A click on the Cluster wrapper's hover-keeper (a gap between fanned
+				// dots) is interacting with the Cluster, not dismissing the panel.
+				if (
+					target.id === PANEL_ID ||
+					target.classList.contains(DOT_CLASS) ||
+					target.classList.contains(CLUSTER_CLASS) ||
+					target.classList.contains('ytb-alert-card')
+				)
+					return;
+			}
+
+			const route = YTB.pictureClickAction({
+				overlayOpen: panelOpen,
+				region: YTB.pictureClickRegion(event.target),
+				pauseHold: pauseLease,
+				withinGrace: YTB.withinArrivalGrace(),
+			});
+			if (!route.close) return;
+			if (route.consume) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			if (route.cancelArrivalGrace) YTB.cancelArrivalGrace();
+			dismissPanel({ resume: false });
+			if (route.play) document.querySelector('video')?.play();
+		},
+		true,
+	);
 
 	document.addEventListener('keydown', (event) => {
 		if (event.key === 'Escape' && document.getElementById(PANEL_ID)) {
@@ -1378,7 +1394,7 @@
 		(event) => {
 			if (!(event.target instanceof HTMLVideoElement)) return;
 			const action = YTB.playAction({
-				withinGrace: Date.now() < arrivalGraceUntil,
+				withinGrace: YTB.withinArrivalGrace(),
 				panelOpen: Boolean(document.getElementById(PANEL_ID)),
 			});
 			if (action === 'ignore') return;
@@ -1615,7 +1631,7 @@
 		}
 		currentVideoId = nextVideoId;
 		lastPlaybackTime = null;
-		arrivalGraceUntil = 0;
+		YTB.cancelArrivalGrace();
 		dismissPanel({ resume: false });
 		pauseLease = false;
 		resetAlerts(); // clear on-screen + queued, cancel the drain

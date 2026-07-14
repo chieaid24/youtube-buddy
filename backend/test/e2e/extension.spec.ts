@@ -1232,6 +1232,154 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 	}
 });
 
+test('an open Expanded Note or Note Composer takes the Picture Click as the single playback writer', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		const panel = page.locator('#ytb-note-panel');
+		const composer = page.locator('#ytb-note-composer');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(3, { timeout: 700 }));
+
+		// Reproduce YouTube's delayed picture toggle in the page world. If YTB lets
+		// a Picture Click through, this handler runs after YTB's play and pauses the
+		// video a beat later. Player controls are deliberately excluded.
+		await page.evaluate(() => {
+			const player = document.querySelector('#movie_player') as HTMLElement;
+			const video = player.querySelector('video') as HTMLVideoElement;
+			document.body.dataset.nativePictureClicks = '0';
+			player.addEventListener('click', (event) => {
+				const target = event.target as Element;
+				if (target.closest('.ytp-chrome-bottom')) return;
+				document.body.dataset.nativePictureClicks = String(Number(document.body.dataset.nativePictureClicks) + 1);
+				setTimeout(() => void (video.paused ? video.play() : video.pause()), 120);
+			});
+
+			const controls = player.querySelector('.ytp-left-controls') as HTMLElement;
+			const toggle = document.createElement('button');
+			toggle.id = 'fixture-player-toggle';
+			toggle.textContent = 'Toggle';
+			toggle.addEventListener('click', () => void (video.paused ? video.play() : video.pause()));
+			const gear = document.createElement('button');
+			gear.id = 'fixture-player-gear';
+			gear.textContent = 'Gear';
+			gear.addEventListener('click', () => {
+				document.body.dataset.gearClicks = String(Number(document.body.dataset.gearClicks || 0) + 1);
+			});
+			controls.append(toggle, gear);
+
+			const outside = document.createElement('button');
+			outside.id = 'fixture-outside';
+			outside.textContent = 'Outside';
+			document.body.append(outside);
+		});
+
+		const isPaused = () => video.evaluate((v: HTMLVideoElement) => v.paused);
+		const parkPaused = (at = 1) =>
+			video.evaluate((v: HTMLVideoElement, time) => {
+				v.pause();
+				v.currentTime = time;
+			}, at);
+		const play = () => video.evaluate((v: HTMLVideoElement) => v.play());
+		const clickPicture = () =>
+			video.evaluate((v: HTMLVideoElement) =>
+				v.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true })),
+			);
+		const expectStaysPlaying = async () => {
+			await expect.poll(isPaused).toBe(false);
+			await page.waitForTimeout(250);
+			expect(await isPaused()).toBe(false);
+		};
+
+		// A playing video's Pause Hold and an already-paused video both converge on
+		// one result for every Expanded Note variant: close, play, and stay playing.
+		await play();
+		await page.locator('.ytb-note-dot-text').click();
+		await expect(panel).toBeVisible();
+		expect(await isPaused()).toBe(true);
+		await clickPicture();
+		await expect(panel).toHaveCount(0);
+		await expectStaysPlaying();
+
+		for (const selector of ['.ytb-note-dot-reaction', '.ytb-note-dot-locked']) {
+			await parkPaused();
+			await page.locator(selector).click();
+			await expect(panel).toBeVisible();
+			await clickPicture();
+			await expect(panel).toHaveCount(0);
+			await expectStaysPlaying();
+		}
+
+		// The Note Composer follows the same rule and still discards its draft.
+		await play();
+		await page.locator('#ytb-note-button').click();
+		await expect(composer).toBeVisible();
+		await composer.locator('textarea').fill('discard this draft');
+		expect(await isPaused()).toBe(true);
+		await clickPicture();
+		await expect(composer).toHaveCount(0);
+		await expectStaysPlaying();
+		await parkPaused();
+		await page.locator('#ytb-note-button').click();
+		await expect(composer).toBeVisible();
+		await expect(composer.locator('textarea')).toHaveValue('');
+		await clickPicture();
+		await expect(composer).toHaveCount(0);
+		await expectStaysPlaying();
+
+		// Player chrome closes the overlay without releasing its Pause Hold. The
+		// clicked control alone decides playback; a passive Gear leaves it paused.
+		await play();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-player-gear').click();
+		await expect(panel).toHaveCount(0);
+		expect(await isPaused()).toBe(true);
+		expect(await page.locator('body').getAttribute('data-gear-clicks')).toBe('1');
+		await parkPaused();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-player-toggle').click();
+		await expect(panel).toHaveCount(0);
+		await expect.poll(isPaused).toBe(false);
+
+		// Off-player clicks retain Pause Hold semantics.
+		await play();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-outside').click();
+		await expect(panel).toHaveCount(0);
+		await expect.poll(isPaused).toBe(false);
+		await parkPaused();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-outside').click();
+		await expect(panel).toHaveCount(0);
+		expect(await isPaused()).toBe(true);
+
+		// With no YTB overlay open, the simulated native picture toggle is untouched.
+		await play();
+		await clickPicture();
+		await expect.poll(isPaused).toBe(true);
+		expect(await page.locator('body').getAttribute('data-native-picture-clicks')).toBe('1');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('an Unseen Mention pulses its Note Dot; hovering Acknowledges it and a reload keeps it clear', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -2382,6 +2530,21 @@ test('a Room Feed reply row lands you at your own place, paused, with the Unseen
 		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 		await expect(dot).toHaveClass(/ytb-note-dot-unseen/);
 		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+
+		// The grace holds automatic play, but an explicit Picture Click with an
+		// Expanded Note open cancels it and plays. Without cancellation the existing
+		// capture-phase play listener would immediately re-pause this exact request.
+		await dot.click();
+		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+		await page
+			.locator('video')
+			.evaluate((video: HTMLVideoElement) =>
+				video.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true })),
+			);
+		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
+		await page.waitForTimeout(300);
+		expect(await page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
