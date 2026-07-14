@@ -213,6 +213,17 @@
 				gap: var(--sp-3);
 				margin-bottom: var(--sp-5);
 			}
+			.brand {
+				display: inline-flex;
+				flex: none;
+				align-items: center;
+				gap: 6px;
+			}
+			.brand-mark {
+				display: block;
+				width: 24px;
+				height: 24px;
+			}
 			h1 {
 				margin: 0;
 				font-size: 15px;
@@ -1060,7 +1071,10 @@
 	</head>
 	<body>
 		<header class="header">
-			<h1>YouTube Buddy<span class="hdot" aria-hidden="true">.</span></h1>
+			<div class="brand">
+				<img class="brand-mark" src="icons/youtube-buddy.svg" alt="" aria-hidden="true" />
+				<h1>YouTube Buddy<span class="hdot" aria-hidden="true">.</span></h1>
+			</div>
 			<div id="name-field">
 				<label class="sr-only" for="name">Nickname</label>
 				<!-- Locked once set; the pencil reopens the input (cosmetic, unguarded). -->
