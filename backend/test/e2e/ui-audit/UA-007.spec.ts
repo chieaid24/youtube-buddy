@@ -1,11 +1,12 @@
 // UA-007: the popup's text links (#join-back, #chooser-cancel) are interactive
 // and must offer a >= 24px-tall hit area (DESIGN.md 1.3). Red at ~19.6px.
 import { expect, test } from '@playwright/test';
-import { launchExtension, seedPaired } from './harness';
+import { launchExtension, routeBackend, seedPaired } from './harness';
 
 test('UA-007: popup text links reach the 24px hit minimum', async () => {
 	const context = await launchExtension();
 	try {
+		routeBackend(context, { down: false, read: () => ({}) });
 		const popup = await seedPaired(context);
 		await popup.reload();
 		await popup.click('#settings-open');
