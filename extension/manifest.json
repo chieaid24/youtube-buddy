@@ -31,7 +31,7 @@
 	],
 	"web_accessible_resources": [
 		{
-			"resources": ["popup.html", "shared.js", "theme.js", "room-code.js", "popup.js"],
+			"resources": ["control-panel-relay.html", "control-panel-relay.js"],
 			"matches": ["*://*.youtube.com/*"]
 		}
 	]

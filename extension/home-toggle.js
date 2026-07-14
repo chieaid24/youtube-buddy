@@ -24,23 +24,22 @@
 // depends on the other having run.
 //
 // This module also hosts the Control Panel Launcher: a control-knobs (sliders)
-// icon pinned to the RIGHT end of the toggle row that opens the full Control
-// Panel (popup.html) in an in-page overlay — an extension-origin iframe over a
-// dim scrim, closed by its x / Esc / a scrim click and focus-trapped while
-// open. It lives in the row (not the Room Home Section) so it stays reachable
-// whether the section is shown or hidden, and its click stops propagation so it
-// opens the panel WITHOUT flipping the toggle. Because the iframe is the same
-// document at the extension origin, any Room join / Setting change made inside
-// it propagates to every in-page surface through the existing
-// chrome.storage.onChanged listeners — no message wiring (ADR-0001 preserved:
-// the iframe, not this script, reaches the popup's APIs).
+// icon pinned to the RIGHT end of the toggle row. It asks a hidden,
+// extension-origin Relay Frame to call chrome.action.openPopup(), so Chrome
+// opens the real action popup and this content script never needs chrome.action
+// or a background service worker (ADR-0012). The Launcher stops propagation so
+// it never flips the Room Home Toggle.
 
 (function () {
 	'use strict';
 
 	const ROW_ID = 'ytb-home-toggle';
 	const LAUNCHER_CLASS = 'ytb-ht-launcher';
-	const OVERLAY_ID = 'ytb-panel-overlay';
+	const RELAY_ID = 'ytb-control-panel-relay';
+	const RELAY_PAGE = 'control-panel-relay.html';
+	const OPEN_MESSAGE = 'ytb:open-control-panel';
+	const OPEN_FAILED_MESSAGE = 'ytb:open-control-panel-failed';
+	const TOOLBAR_FALLBACK_COPY = 'Open YouTube Buddy from the toolbar icon';
 	const EXT_ORIGIN = new URL(chrome.runtime.getURL('')).origin;
 	const STYLE_ID = 'ytb-home-toggle-style';
 	const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -61,6 +60,7 @@
 	let onHome = false;
 	let hidden = null; // null until the stored preference has been read
 	let flipping = false; // one persisted flip at a time
+	let relayLoaded = false;
 
 	injectStyle();
 
@@ -97,11 +97,14 @@
 		// Off the home route (or before the stored state is known) the row has
 		// no business in the page; the section module gates itself the same way.
 		if (!onHome || hidden === null) {
-			document.getElementById(ROW_ID)?.remove();
+			removeHomeControls();
 			return;
 		}
 		let row = document.getElementById(ROW_ID);
-		if (row && row.isConnected) return;
+		if (row && row.isConnected) {
+			ensureRelayFrame(row.parentNode);
+			return;
+		}
 
 		const slot = guideSlot();
 		if (!slot) return; // guide not built yet — a later ytb:mutation retries
@@ -131,13 +134,13 @@
 		launcher.append(buildIcon(TUNE_PATH, 20));
 		launcher.addEventListener('click', (event) => {
 			event.stopPropagation();
-			openPanel();
+			openControlPanel();
 		});
 		launcher.addEventListener('keydown', (event) => {
 			if (event.key !== 'Enter' && event.key !== ' ') return;
 			event.preventDefault();
 			event.stopPropagation();
-			openPanel();
+			openControlPanel();
 		});
 
 		row.append(iconWrap, label, launcher);
@@ -153,7 +156,7 @@
 		});
 
 		syncRow(row);
-		slot.appendChild(row);
+		slot.append(row, ensureRelayFrame(slot));
 	}
 
 	/** Reflect the current state: checked means the section is shown, and the
@@ -164,113 +167,53 @@
 		row.classList.toggle('is-on', shown);
 	}
 
-	// ---------------------------------------------------------------------------
-	// Control Panel overlay: an extension-origin iframe of popup.html over a dim
-	// scrim, closed by its x / Esc / a scrim click and focus-trapped while open.
-	// ---------------------------------------------------------------------------
-
-	let lastFocus = null; // restored to the launcher when the panel closes
-
-	function isPanelOpen() {
-		return !!document.getElementById(OVERLAY_ID);
-	}
-
-	function openPanel() {
-		if (!YTB.isContextActive() || isPanelOpen()) return;
-		lastFocus = document.activeElement;
-
-		const overlay = document.createElement('div');
-		overlay.id = OVERLAY_ID;
-
-		// Sentinels bookend the card: a Tab that leaves it — including out of the
-		// cross-origin iframe, where our keydown listener is blind — resurfaces to
-		// a focusable node we own and is wrapped back inside (the focus trap).
-		const guardStart = focusGuard();
-		const guardEnd = focusGuard();
-
-		const card = document.createElement('div');
-		card.className = 'ytb-panel-card';
-		card.setAttribute('role', 'dialog');
-		card.setAttribute('aria-modal', 'true');
-		card.setAttribute('aria-label', 'Control Panel');
-
-		const closeBtn = document.createElement('button');
-		closeBtn.type = 'button';
-		closeBtn.className = 'ytb-panel-close';
-		closeBtn.setAttribute('aria-label', 'Close');
-		closeBtn.append(YTBTheme.icon('close'));
-		closeBtn.addEventListener('click', closePanel);
-
-		const frame = document.createElement('iframe');
-		frame.className = 'ytb-panel-frame';
-		frame.title = 'Control Panel';
-		frame.src = chrome.runtime.getURL('popup.html');
-
-		guardStart.addEventListener('focus', () => frame.focus());
-		guardEnd.addEventListener('focus', () => closeBtn.focus());
-
-		card.append(closeBtn, frame);
-		overlay.append(guardStart, card, guardEnd);
-		// A click that lands on the scrim itself (never one bubbling from the card)
-		// closes; mousedown-origin guards against a drag that ends on the scrim.
-		overlay.addEventListener('mousedown', (event) => {
-			if (event.target === overlay) closePanel();
+	/** Create the hidden extension-origin frame that can reach chrome.action.
+	 * It is a sibling of the row, so YouTube tearing down the guide removes both. */
+	function ensureRelayFrame(slot) {
+		let frame = document.getElementById(RELAY_ID);
+		if (frame && frame.isConnected) return frame;
+		frame?.remove();
+		relayLoaded = false;
+		frame = document.createElement('iframe');
+		frame.id = RELAY_ID;
+		frame.tabIndex = -1;
+		frame.setAttribute('aria-hidden', 'true');
+		frame.title = '';
+		frame.addEventListener('load', () => {
+			if (frame.isConnected) relayLoaded = true;
 		});
-
-		document.addEventListener('keydown', onPanelKeydown, true);
-		// The iframe is a different origin than this page, so the host can't read
-		// its height; the popup posts it and we size the card snugly per view.
-		window.addEventListener('message', onPanelMessage);
-		(document.body || document.documentElement).appendChild(overlay);
-		// Land focus on the close chip so Esc/Tab work at once and focus leaves the
-		// launcher (which we restore it to on close).
-		closeBtn.focus();
+		frame.src = chrome.runtime.getURL(RELAY_PAGE);
+		if (slot && !frame.isConnected) slot.appendChild(frame);
+		return frame;
 	}
 
-	function closePanel() {
-		const overlay = document.getElementById(OVERLAY_ID);
-		if (!overlay) return;
-		document.removeEventListener('keydown', onPanelKeydown, true);
-		window.removeEventListener('message', onPanelMessage);
-		overlay.remove();
-		if (lastFocus && lastFocus.isConnected) {
+	function openControlPanel() {
+		if (!YTB.isContextActive() || !onHome) return;
+		const row = document.getElementById(ROW_ID);
+		const frame = ensureRelayFrame(row && row.parentNode);
+		const send = () => {
 			try {
-				lastFocus.focus();
+				frame.contentWindow?.postMessage({ type: OPEN_MESSAGE }, EXT_ORIGIN);
 			} catch {
-				/* element gone — nothing to restore focus to */
+				YTB.toast(TOOLBAR_FALLBACK_COPY);
 			}
-		}
-		lastFocus = null;
+		};
+		if (relayLoaded) send();
+		else frame.addEventListener('load', send, { once: true });
 	}
 
-	function onPanelKeydown(event) {
-		if (event.key !== 'Escape' || !isPanelOpen()) return;
-		event.preventDefault();
-		event.stopPropagation();
-		closePanel();
-	}
-
-	/** Size the card to the popup's reported content height (see popup.js). Only
-	 * our own iframe at the extension origin is trusted; the CSS max-height caps
-	 * it to the viewport. */
-	function onPanelMessage(event) {
-		if (event.origin !== EXT_ORIGIN) return;
-		const overlay = document.getElementById(OVERLAY_ID);
-		const frame = overlay && overlay.querySelector('.ytb-panel-frame');
+	/** Only a failure from our current extension frame can trigger fallback UI. */
+	function onRelayMessage(event) {
+		if (event.origin !== EXT_ORIGIN || event.data?.type !== OPEN_FAILED_MESSAGE) return;
+		const frame = document.getElementById(RELAY_ID);
 		if (!frame || event.source !== frame.contentWindow) return;
-		const data = event.data;
-		if (!data || data.type !== 'ytb:panel-height' || typeof data.height !== 'number') return;
-		const card = overlay.querySelector('.ytb-panel-card');
-		if (card) card.style.height = `${Math.max(0, Math.round(data.height))}px`;
+		YTB.toast(TOOLBAR_FALLBACK_COPY);
 	}
 
-	/** A visually-inert tabbable sentinel used to wrap focus back into the card. */
-	function focusGuard() {
-		const guard = document.createElement('div');
-		guard.tabIndex = 0;
-		guard.setAttribute('aria-hidden', 'true');
-		guard.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:0;overflow:hidden;';
-		return guard;
+	function removeHomeControls() {
+		relayLoaded = false;
+		document.getElementById(RELAY_ID)?.remove();
+		document.getElementById(ROW_ID)?.remove();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -281,9 +224,6 @@
 	document.addEventListener('ytb:navigate', () => {
 		if (!YTB.isContextActive()) return;
 		onHome = isHomePath();
-		// The launcher only exists on the home route; a route change takes its
-		// panel with it.
-		if (!onHome) closePanel();
 		ensureRow();
 	});
 
@@ -293,9 +233,11 @@
 		ensureRow();
 	});
 
+	window.addEventListener('message', onRelayMessage);
+
 	YTB.onContextInvalidated(() => {
-		closePanel();
-		document.getElementById(ROW_ID)?.remove();
+		window.removeEventListener('message', onRelayMessage);
+		removeHomeControls();
 	});
 
 	/** An inline SVG glyph (fill follows currentColor). Defaults to the left
@@ -395,74 +337,18 @@
       }
       #${ROW_ID} .${LAUNCHER_CLASS} svg { display: block; width: 20px; height: 20px; }
 
-      /* Control Panel overlay: a centered card holding the popup.html iframe over
-         a dim scrim. Chrome (card, close chip) uses the theme.js --ytb-* tokens
-         so it follows the same Light/Dark preference as the on-video surfaces. */
-      #${OVERLAY_ID} {
+      #${RELAY_ID} {
         position: fixed;
-        inset: 0;
-        z-index: 2147483000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 24px;
-        background: oklch(22% 0.02 52 / 0.5);
-        animation: ytb-panel-fade 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
-      }
-      #${OVERLAY_ID} .ytb-panel-card {
-        position: relative;
-        width: 320px;
-        max-width: calc(100vw - 48px);
-        height: 460px;                       /* seed; popup.js posts the snug height */
-        max-height: calc(100vh - 48px);
-        border-radius: var(--ytb-r-lg, 16px);
-        background: var(--ytb-surface, #fff);
-        box-shadow: var(--ytb-e-dialog, 0 14px 40px rgba(0, 0, 0, 0.5));
-        animation: ytb-panel-pop 200ms cubic-bezier(0.34, 1.3, 0.64, 1) both;
-      }
-      #${OVERLAY_ID} .ytb-panel-frame {
-        display: block;
-        width: 100%;
-        height: 100%;
+        width: 0;
+        height: 0;
         border: 0;
-        border-radius: inherit;
-        background: transparent;
+        visibility: hidden;
+        pointer-events: none;
       }
-      #${OVERLAY_ID} .ytb-panel-close {
-        position: absolute;
-        top: -12px;
-        right: -12px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 30px;
-        height: 30px;
-        padding: 0;
-        border: 1px solid var(--ytb-line, rgba(0, 0, 0, 0.1));
-        border-radius: 999px;
-        background: var(--ytb-surface, #fff);
-        color: var(--ytb-ink-muted, #555);
-        cursor: pointer;
-        box-shadow: var(--ytb-e-pop, 0 6px 20px rgba(0, 0, 0, 0.25));
-        transition: color 140ms, background 140ms;
-      }
-      #${OVERLAY_ID} .ytb-panel-close:hover {
-        color: var(--ytb-ink, #111);
-        background: var(--ytb-accent-100, #f6e6d8);
-      }
-      #${OVERLAY_ID} .ytb-panel-close:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px var(--ytb-ring, rgba(246, 169, 107, 0.55));
-      }
-      #${OVERLAY_ID} .ytb-panel-close svg { display: block; width: 16px; height: 16px; }
-      @keyframes ytb-panel-fade { from { opacity: 0; } }
-      @keyframes ytb-panel-pop { from { opacity: 0; transform: scale(0.97); } }
 
       @media (prefers-reduced-motion: reduce) {
         #${ROW_ID} .ytb-ht-icon,
         #${ROW_ID} .${LAUNCHER_CLASS} { transition: none; }
-        #${OVERLAY_ID},
-        #${OVERLAY_ID} .ytb-panel-card { animation: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
