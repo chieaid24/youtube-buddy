@@ -38,8 +38,6 @@
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
 	const THUMB_DOTS_CLASS = 'ytb-thumb-dots'; // Watched-By Dots cluster on a thumbnail
 	const THUMB_DOT_CLASS = 'ytb-thumb-dot'; // one flat Buddy-colored dot
-	const TOAST_WRAP_CLASS = 'ytb-toast-wrap'; // fixed stack container
-	const TOAST_CLASS = 'ytb-toast'; // one "<Buddy> joined" toast
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
@@ -208,7 +206,7 @@
 		for (const b of buddies) {
 			current.add(b.clientId);
 			if (baselineReady && !knownBuddyIds.has(b.clientId)) {
-				showToast(YTB.buddyName(b.clientId, b.name, roster) + ' joined');
+				YTB.toast(YTB.buddyName(b.clientId, b.name, roster) + ' joined');
 			}
 		}
 		knownBuddyIds = current;
@@ -470,30 +468,6 @@
 		}
 	}
 
-	/**
-	 * Show a small auto-dismissing toast (e.g. "Silly Buddy joined"). Stacks in a
-	 * fixed bottom-right container; each toast fades out after ~4s. Styled via the
-	 * injected renderer stylesheet.
-	 * @param {string} text
-	 */
-	function showToast(text) {
-		let wrap = document.querySelector('.' + TOAST_WRAP_CLASS);
-		if (!wrap) {
-			wrap = document.createElement('div');
-			wrap.className = TOAST_WRAP_CLASS;
-			(document.body || document.documentElement).appendChild(wrap);
-		}
-		const toast = document.createElement('div');
-		toast.className = TOAST_CLASS;
-		toast.textContent = text;
-		wrap.appendChild(toast);
-		requestAnimationFrame(() => toast.classList.add('show'));
-		setTimeout(() => {
-			toast.classList.remove('show');
-			setTimeout(() => toast.remove(), 250);
-		}, 4000);
-	}
-
 	/** Inject the renderer's CSS once (no separate stylesheet file). */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
@@ -582,33 +556,6 @@
       .${THUMB_DOTS_CLASS}:hover > .${TOOLTIP_CLASS},
       .${THUMB_DOTS_CLASS}:focus-visible > .${TOOLTIP_CLASS} {
         opacity: 1;
-      }
-      .${TOAST_WRAP_CLASS} {
-        position: fixed;
-        right: 16px;
-        bottom: 16px;
-        z-index: 2147483000;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        pointer-events: none;
-      }
-      .${TOAST_CLASS} {
-        max-width: 280px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        background: rgba(0, 0, 0, 0.85);
-        color: #fff;
-        font: 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Arial, sans-serif;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        opacity: 0;
-        transform: translateY(8px);
-        transition: opacity 0.25s, transform 0.25s;
-      }
-      .${TOAST_CLASS}.show {
-        opacity: 1;
-        transform: translateY(0);
       }
     `;
 		(document.head || document.documentElement).appendChild(style);

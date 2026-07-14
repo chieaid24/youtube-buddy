@@ -655,6 +655,92 @@ test('Room Home Toggle and the header close control both hide the Room Home Sect
 	}
 });
 
+test('Control Panel Launcher opens the real action popup through a home-only Relay Frame', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const extensions = await context.newPage();
+		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
+		expect(extensionId).toMatch(/^[a-p]{32}$/);
+
+		// A directly navigated extension page gives the test access to the runtime
+		// API without itself being a Chrome-owned POPUP context.
+		const runtime = await context.newPage();
+		await runtime.goto(`chrome-extension://${extensionId}/popup.html`);
+		const popupContextCount = () => runtime.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length);
+		await expect.poll(popupContextCount).toBe(0);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const toggle = page.locator('#ytb-home-toggle');
+		const launcher = toggle.locator('.ytb-ht-launcher');
+		const relay = page.locator('#ytb-control-panel-relay');
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(launcher).toBeVisible();
+		await expect(relay).toHaveAttribute('src', `chrome-extension://${extensionId}/control-panel-relay.html`);
+		expect(
+			await relay.evaluate((frame) => {
+				const rect = frame.getBoundingClientRect();
+				return { width: rect.width, height: rect.height, visibility: getComputedStyle(frame).visibility };
+			}),
+		).toEqual({ width: 0, height: 0, visibility: 'hidden' });
+
+		await launcher.click();
+		await expect.poll(popupContextCount, { timeout: 10_000 }).toBe(1);
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(page.locator('#ytb-panel-overlay, .ytb-panel-card, .ytb-panel-close')).toHaveCount(0);
+
+		// The row and Relay Frame are one home-route surface and leave together.
+		await page.evaluate(() => history.pushState({}, '', '/watch?v=fixture-video'));
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await expect(toggle).toHaveCount(0);
+		await expect(relay).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Control Panel Launcher uses the shared toolbar toast when openPopup fails', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const toggle = page.locator('#ytb-home-toggle');
+		const launcher = toggle.locator('.ytb-ht-launcher');
+		await expect(page.locator('#ytb-control-panel-relay')).toHaveCount(1);
+		const relay = page.frames().find((frame) => frame.url().endsWith('/control-panel-relay.html'));
+		expect(relay).toBeDefined();
+		await relay!.evaluate(() => {
+			Object.defineProperty(chrome.action, 'openPopup', {
+				configurable: true,
+				value: async () => {
+					throw new Error('forced openPopup failure');
+				},
+			});
+		});
+
+		await launcher.click();
+		await expect(page.locator('.ytb-toast')).toHaveText('Open YouTube Buddy from the toolbar icon');
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(page.locator('#ytb-panel-overlay')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('opens the extension popup without runtime errors', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

@@ -338,6 +338,29 @@ const YTB = {
 	},
 
 	/**
+	 * Show one shared, auto-dismissing page toast. theme.js owns the matching
+	 * styles so every content-script caller gets the same presentation.
+	 * @param {string} text
+	 */
+	toast(text) {
+		let wrap = document.querySelector('.ytb-toast-wrap');
+		if (!wrap) {
+			wrap = document.createElement('div');
+			wrap.className = 'ytb-toast-wrap';
+			(document.body || document.documentElement).appendChild(wrap);
+		}
+		const toast = document.createElement('div');
+		toast.className = 'ytb-toast';
+		toast.textContent = String(text);
+		wrap.appendChild(toast);
+		requestAnimationFrame(() => toast.classList.add('show'));
+		setTimeout(() => {
+			toast.classList.remove('show');
+			setTimeout(() => toast.remove(), 250);
+		}, 4000);
+	},
+
+	/**
 	 * Return the existing Client ID, or mint one ONCE (8 hex chars) and persist it.
 	 * Stable for the life of the install.
 	 * @returns {Promise<string>}

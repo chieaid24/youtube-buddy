@@ -201,9 +201,38 @@
 	--ytb-e-pop: 0 6px 20px oklch(52% 0.06 52 / 0.2);
 	--ytb-e-dialog: 0 12px 34px oklch(45% 0.06 52 / 0.26);
 }
+.ytb-toast-wrap {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	z-index: 2147483000;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	pointer-events: none;
+}
+.ytb-toast {
+	max-width: 280px;
+	padding: 10px 14px;
+	border-radius: 8px;
+	background: rgba(0, 0, 0, 0.85);
+	color: #fff;
+	font: 13px/1.3 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+	opacity: 0;
+	transform: translateY(8px);
+	transition: opacity 0.25s, transform 0.25s;
+}
+.ytb-toast.show {
+	opacity: 1;
+	transform: translateY(0);
+}
 @media (prefers-reduced-motion: reduce) {
 	:root {
 		--ytb-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	.ytb-toast {
+		transition: none;
 	}
 }
 `;
