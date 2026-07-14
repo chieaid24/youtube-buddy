@@ -235,11 +235,10 @@
 		// Hidden Buddy Progress leaves `desired` empty, so the reconciliation
 		// below strips existing markers (and re-grows them all when re-shown).
 		const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
-		const desired = new Map(); // clientId -> { fraction, record }
+		const desired = new Map(); // clientId -> record
 		if (records) {
 			for (const r of records) {
-				const fraction = positionFraction(r);
-				if (fraction !== null) desired.set(r.clientId, { fraction, record: r });
+				if (hasPosition(r)) desired.set(r.clientId, r);
 			}
 		}
 
@@ -259,7 +258,12 @@
 			bar.style.position = 'relative';
 		}
 
-		for (const [cid, { fraction, record }] of desired) {
+		// Place through YouTube's own chapter geometry (#159), re-measured here so
+		// a resize, theater/fullscreen, or late-arriving chapter DOM re-aligns every
+		// marker on the next render.
+		const segments = YTB.barSegments(bar);
+
+		for (const [cid, record] of desired) {
 			let marker = existing.get(cid);
 			if (!marker) {
 				marker = document.createElement('div');
@@ -270,7 +274,7 @@
 				marker.appendChild(tooltip);
 				bar.appendChild(marker);
 			}
-			marker.style.left = (fraction * 100).toFixed(3) + '%';
+			marker.style.left = YTB.timeToX(segments, record.timestamp, record.duration).toFixed(2) + 'px';
 			marker.style.background = YTB.buddyColor(cid);
 			const who = YTB.buddyName(record.clientId, record.name, roster);
 			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' @' + YTB.formatTime(record.timestamp);
@@ -447,16 +451,15 @@
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * The clamped [0,1] watched fraction for a record, or null if it can't be
-	 * computed (non-finite / non-positive duration).
+	 * Whether a record can be placed on the bar at all (finite timestamp, positive
+	 * finite duration). Where it lands is YTB.timeToX's business (#159).
 	 * @param {{timestamp: number, duration: number}} record
-	 * @returns {number|null}
+	 * @returns {boolean}
 	 */
-	function positionFraction(record) {
+	function hasPosition(record) {
 		const t = Number(record.timestamp);
 		const d = Number(record.duration);
-		if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return null;
-		return Math.max(0, Math.min(1, t / d));
+		return Number.isFinite(t) && Number.isFinite(d) && d > 0;
 	}
 
 	/** Parse the `v=` videoId out of a /watch href, or null. */
@@ -506,7 +509,9 @@
         top: 0;
         bottom: 0;
         width: 3px;
-        margin-left: -1px;
+        /* Half the marker's width, so the 3px bar straddles its timestamp's x
+           instead of sitting half a pixel right of it (#159). */
+        margin-left: -1.5px;
         background: ${fallback};
         z-index: 40;
         cursor: default;
@@ -638,6 +643,15 @@
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	});
+
+	// The markers sit at bar px (#159), so a bar that changes width must re-place
+	// them. The thumbnail dots carry no bar geometry and are left alone.
+	for (const type of ['resize', 'fullscreenchange']) {
+		window.addEventListener(type, () => {
+			if (!YTB.isContextActive()) return;
+			renderWatchMarker(currentVideoId);
+		});
+	}
 
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== 'local' || !changes.buddyProgressHidden) return;

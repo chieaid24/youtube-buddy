@@ -764,12 +764,17 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		const broadcasts = () => page.evaluate(() => (window as any).__broadcasts as { ok: boolean; connectionLost: boolean }[]);
 		const driveRead = () => page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
 
-		// A successful read draws Bob's marker at 30/100 = 30%.
+		// A successful read draws Bob's marker at 30/100 through the bar's chapter
+		// geometry (#159). This fixture bar is unchaptered — one segment — so that
+		// is exactly 30% of its measured width, written in px.
 		const marker = page.locator('.ytb-watch-marker');
 		await nudgeUntil(page, async () => {
 			await expect(marker).toHaveCount(1);
 		});
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		const barWidth = await page.locator('.ytp-progress-bar').evaluate((el) => el.getBoundingClientRect().width);
+		expect(barWidth).toBeGreaterThan(0); // a zero-width bar would make every assertion below vacuous
+		const markerLeft = () => marker.evaluate((el) => parseFloat((el as HTMLElement).style.left));
+		await expect.poll(markerLeft).toBeCloseTo(0.3 * barWidth, 1);
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => b.ok).length).toBeGreaterThanOrEqual(1);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
@@ -782,13 +787,13 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(1);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: false });
 		await expect(marker).toHaveCount(1);
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
 
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(2);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: true });
 		await expect(marker).toHaveCount(1);
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
 
 		// Only the aborted GETs may have errored; nothing else.
 		expect(
@@ -803,7 +808,7 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
 		await expect(marker).toHaveCount(1);
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();

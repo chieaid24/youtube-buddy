@@ -2,7 +2,8 @@
 //
 // ALL Note & Reaction presentation on the watch page:
 //   - Video Timeline dots (text Notes, Reactions, locked Spoilers) floating
-//     just above the progress bar, each at its exact timestamp fraction —
+//     just above the progress bar, each at the exact x YouTube would draw its
+//     own playhead at for that timestamp (chapter-aware, #159) —
 //     co-timed dots simply overlap, and every dot swallows the pointer events
 //     it receives so YouTube never pops its storyboard thumbnail or time pill
 //     behind a Note Preview;
@@ -363,7 +364,7 @@
 
 		const duration = video ? Number(video.duration) : NaN;
 		const playhead = video ? Number(video.currentTime) : 0;
-		const desired = new Map(); // id -> { note, locked, fraction }
+		const desired = new Map(); // id -> { note, locked, passed, timestamp }
 		// Notes off: desired stays empty, so the reconciliation below strips
 		// every existing dot (and re-grows them all when turned back on).
 		if (!notesHidden && Number.isFinite(duration) && duration > 0) {
@@ -376,10 +377,7 @@
 					// the video is revisited from an earlier point.
 					locked: Boolean(note.spoiler) && playhead < timestamp,
 					passed: playhead >= timestamp,
-					// The dot's exact moment on the bar. Never displaced at rest:
-					// co-timed dots overlap and fan apart only on hover (truth of
-					// position beats legibility).
-					fraction: Math.max(0, Math.min(1, timestamp / duration)),
+					timestamp,
 				});
 			}
 		}
@@ -398,18 +396,24 @@
 		}
 		if (getComputedStyle(bar).position === 'static') bar.style.position = 'relative';
 
+		// Each dot's exact moment on the bar, through YouTube's own chapter geometry
+		// (#159) — re-measured every render, so chapters that arrive late, a resize,
+		// and theater/fullscreen all re-align the dots. Never displaced at rest:
+		// co-timed dots overlap and fan apart only on hover (truth of position beats
+		// legibility).
+		const ids = [...desired.keys()];
+		const barWidth = bar.getBoundingClientRect().width || 0;
+		const segments = YTB.barSegments(bar);
+		const px = ids.map((id) => YTB.timeToX(segments, desired.get(id).timestamp, duration));
+
 		// Group overlapping dots into Clusters from their pixel geometry (#123).
 		// Transitive and recomputed every render, so a Cluster re-forms as the bar
 		// resizes (timeupdate/mutation/resize all re-enter here).
-		const ids = [...desired.keys()];
-		const fractions = ids.map((id) => desired.get(id).fraction);
-		const barWidth = bar.getBoundingClientRect().width || 0;
-		const clusters = YTB.clusterDots(fractions, barWidth, DOT_DIAMETER);
+		const clusters = YTB.clusterDots(px, DOT_DIAMETER);
 
 		// Nearest-neighbour clearance per dot (at-rest px, across ALL dots): a
 		// dot earns the 24px hit extender only when no other dot's glyph could
 		// fall inside it (UA-004).
-		const px = fractions.map((fraction) => fraction * barWidth);
 		const clearanceByIndex = px.map((value, i) => {
 			let nearest = Infinity;
 			for (let j = 0; j < px.length; j++) {
@@ -428,8 +432,8 @@
 
 		for (const cluster of clusters) {
 			const memberIds = cluster.map((i) => ids[i]);
-			const memberFractions = cluster.map((i) => fractions[i]);
-			const key = memberIds.join('|'); // members already sorted by fraction
+			const memberPx = cluster.map((i) => px[i]);
+			const key = memberIds.join('|'); // members already sorted by x (== by timestamp)
 			wanted.add(key);
 
 			let wrapper = byKey.get(key);
@@ -452,16 +456,17 @@
 				wrapper.addEventListener('mouseleave', () => setStoryboardSuppressed(wrapper, false));
 				bar.appendChild(wrapper);
 			}
-			// The wrapper anchors at the Cluster centre as a percentage (resize-
-			// robust); each member sits at its true px offset from that centre, and
-			// the fan is a hover-only transform layered on top.
-			const center = (memberFractions[0] + memberFractions[memberFractions.length - 1]) / 2;
-			wrapper.style.left = (center * 100).toFixed(3) + '%';
+			// The wrapper anchors at the Cluster centre in bar px (chapter geometry
+			// has no fixed percentage to lean on); each member sits at its true px
+			// offset from that centre, and the fan is a hover-only transform layered
+			// on top. Every render re-measures, so a resize re-anchors it.
+			const center = (memberPx[0] + memberPx[memberPx.length - 1]) / 2;
+			wrapper.style.left = center.toFixed(2) + 'px';
 
-			const offsets = YTB.fanOffsets(memberFractions, CLUSTER_FAN_GAP, barWidth, DOT_DIAMETER);
+			const offsets = YTB.fanOffsets(memberPx, CLUSTER_FAN_GAP, barWidth, DOT_DIAMETER);
 			let halfExtent = 0;
 			memberIds.forEach((id, k) => {
-				const basePx = (memberFractions[k] - center) * barWidth;
+				const basePx = memberPx[k] - center;
 				const dot = existing.get(id) || buildDot(id);
 				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
 				dot.classList.toggle(DOT_ROOMY_CLASS, clearanceByIndex[cluster[k]] >= DOT_HIT_DIAMETER);
@@ -530,7 +535,7 @@
 		dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
 		// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
 		// construction: the halo is box-shadow only, so neighbouring dots — which
-		// sit at their true, possibly overlapping fractions — are never displaced.
+		// sit at their true, possibly overlapping moments — are never displaced.
 		const unseen = unseenDotIds.has(id);
 		dot.classList.toggle(DOT_UNSEEN_CLASS, unseen);
 		// An Unseen pulse keeps its full-color eye-catch until Acknowledged. On
@@ -1642,7 +1647,7 @@
       /* --- Dot Cluster (#123): the wrapper owning the hover/focus state for the
          dots that overlap at rest. It carries the vertical lift (its members sit
          at its bottom edge, just clear of the bar) and anchors at the Cluster
-         centre as a percentage, so its resting position is resize-robust. It is
+         centre in bar px, re-measured on every render (#159). It is
          pointer-events:none at rest — only the member dots catch the pointer, so
          it never blocks the scrubber — but while hovered a ::before keeper spans
          the fanned band so the pointer can cross the gaps the fan opens (and
@@ -1743,7 +1748,7 @@
 
       /* --- Unseen pulse (ADR-0010): an expanding apricot halo, box-shadow
          only — the dot never moves, resizes, or recolors, and neighbouring
-         dots (at their true, possibly overlapping fractions) are never
+         dots (at their true, possibly overlapping moments) are never
          displaced. Shares the popup Waiting dot's ~1.6s breathing rhythm
          (DESIGN.md section 2). */
       .${DOT_UNSEEN_CLASS} {
