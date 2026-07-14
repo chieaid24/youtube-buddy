@@ -129,8 +129,11 @@ async function init() {
 	if (config.code) {
 		showConnected(config.code);
 		// Re-assert presence on open: refreshes my TTL and backfills installs that
-		// predate the presence feature.
-		await YTB.assertPresence(config.code);
+		// predate the presence feature. Deliberately NOT awaited — it is a
+		// best-effort write (it resolves false rather than throwing), and holding
+		// the boot on it holds every room-derived control, Leave room included,
+		// behind a backend that may be slow or gone.
+		YTB.assertPresence(config.code);
 		await refreshStatus(config.code);
 	} else {
 		showView('chooser');
@@ -414,26 +417,29 @@ function openConfirm({ title, body, confirmLabel, variant, onConfirm }) {
 }
 
 // Confirm leaving the current room before `onProceed` (the red Leave variant).
-// Copy adapts to whether a buddy is actually connected.
+// The dialog opens on LOCAL state alone and never waits on a Room read: leaving
+// must work while the backend is unreachable (Connection Lost is a supported
+// state), and a gated dialog leaves the viewer stuck in a room they can't quit.
+// Who they are leaving behind is an enrichment — the copy adapts once the read
+// lands, and simply stays generic if it never does.
 async function confirmDisconnectThen(onProceed) {
+	openConfirm({
+		title: 'Leave this room?',
+		body: 'This will remove you from the room.',
+		confirmLabel: 'Leave',
+		variant: 'danger',
+		onConfirm: onProceed,
+	});
 	const { code } = await YTB.getConfig();
 	const names = await buddyNames(code);
+	// A slow read must not overwrite a dialog the viewer already dismissed or
+	// re-opened for something else; `pendingConfirm` identifies the open one.
+	if (pendingConfirm !== onProceed) return;
 	if (names.length > 0) {
-		openConfirm({
-			title: 'Are you sure you want to go?',
-			body: `This will remove you from the room, away from: ${names.join(', ')}.`,
-			confirmLabel: 'Leave',
-			variant: 'danger',
-			onConfirm: onProceed,
-		});
+		el.confirmTitle.textContent = 'Are you sure you want to go?';
+		el.confirmBody.textContent = `This will remove you from the room, away from: ${names.join(', ')}.`;
 	} else {
-		openConfirm({
-			title: 'Leave this room?',
-			body: 'No buddy has joined the room yet.',
-			confirmLabel: 'Leave',
-			variant: 'danger',
-			onConfirm: onProceed,
-		});
+		el.confirmBody.textContent = 'No buddy has joined the room yet.';
 	}
 }
 
@@ -446,20 +452,23 @@ async function setSharing(on) {
 	await refreshStatus(code);
 }
 
-// Confirmed disconnect via Leave room (now in Settings). Remove membership
-// server-side before clearing local state so the Room slot and Buddy markers
-// are released; landing on the chooser also closes the Settings view.
+// Confirmed disconnect via Leave room (now in Settings). Leaving is LOCAL state:
+// clear it and land on the chooser at once (which also closes Settings), then
+// release the membership server-side so the Room slot and the Buddy's markers go
+// with it. The release is deliberately NOT a gate — an unreachable backend must
+// not trap the viewer in a room they have already left, and the records carry a
+// TTL that collects them anyway if the DELETE never lands.
 async function clearCodeAndChoose() {
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code: '' });
-	if (oldCode) {
-		await YTB.deleteMember(oldCode, myClientId);
-		await YTB.clearRoomColors(oldCode);
-	}
 	el.code.textContent = '';
 	activeRoomCode = '';
 	updateSettingsRoomControls();
 	showView('chooser');
+	if (oldCode) {
+		await YTB.clearRoomColors(oldCode);
+		await YTB.deleteMember(oldCode, myClientId);
+	}
 }
 
 // Buddy Display Names under `code` for the confirmation, via the shared roomView
@@ -622,10 +631,16 @@ async function refreshStatus(code) {
 
 	const { sharing } = await YTB.getConfig();
 	currentSharing = sharing;
+	// The active Room Code is LOCAL state, so claim it BEFORE the Room read: the
+	// Settings Room group (Stop sharing, Leave room) hangs off it, and gating that
+	// on the backend leaves a viewer with no way out of the room for as long as the
+	// GET is in flight — forever, if it never settles.
+	activeRoomCode = code;
+	updateSettingsRoomControls();
+
 	const records = await YTB.getRecords(code);
 	const connection = YTB.connectionState(connectionFailures, records.ok);
 	connectionFailures = connection.failures;
-	activeRoomCode = code;
 
 	if (!records.ok) {
 		setStatus(
@@ -816,19 +831,3 @@ function formatLastSeen(updatedAt) {
 	const day = Math.floor(hr / 24);
 	return `${day}d ago`;
 }
-
-// --- In-page Control Panel overlay: report content height to the host ---
-// When popup.html is embedded as the overlay iframe (home-toggle.js), the host
-// YouTube page can't read our height across the extension/page origin boundary,
-// so we post it and let the host size the iframe snugly for the current view.
-// Inert in the toolbar popup, where window.parent === window and nothing here
-// listens for the message.
-(function reportPanelHeight() {
-	if (window.parent === window) return;
-	const post = () => {
-		const height = Math.ceil(document.body.getBoundingClientRect().height);
-		window.parent.postMessage({ type: 'ytb:panel-height', height }, '*');
-	};
-	new ResizeObserver(post).observe(document.body);
-	post();
-})();

@@ -933,6 +933,92 @@ test('Room Home Toggle and the header close control both hide the Room Home Sect
 	}
 });
 
+test('Control Panel Launcher opens the real action popup through a home-only Relay Frame', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const extensions = await context.newPage();
+		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
+		expect(extensionId).toMatch(/^[a-p]{32}$/);
+
+		// A directly navigated extension page gives the test access to the runtime
+		// API without itself being a Chrome-owned POPUP context.
+		const runtime = await context.newPage();
+		await runtime.goto(`chrome-extension://${extensionId}/popup.html`);
+		const popupContextCount = () => runtime.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length);
+		await expect.poll(popupContextCount).toBe(0);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const toggle = page.locator('#ytb-home-toggle');
+		const launcher = toggle.locator('.ytb-ht-launcher');
+		const relay = page.locator('#ytb-control-panel-relay');
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(launcher).toBeVisible();
+		await expect(relay).toHaveAttribute('src', `chrome-extension://${extensionId}/control-panel-relay.html`);
+		expect(
+			await relay.evaluate((frame) => {
+				const rect = frame.getBoundingClientRect();
+				return { width: rect.width, height: rect.height, visibility: getComputedStyle(frame).visibility };
+			}),
+		).toEqual({ width: 0, height: 0, visibility: 'hidden' });
+
+		await launcher.click();
+		await expect.poll(popupContextCount, { timeout: 10_000 }).toBe(1);
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(page.locator('#ytb-panel-overlay, .ytb-panel-card, .ytb-panel-close')).toHaveCount(0);
+
+		// The row and Relay Frame are one home-route surface and leave together.
+		await page.evaluate(() => history.pushState({}, '', '/watch?v=fixture-video'));
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await expect(toggle).toHaveCount(0);
+		await expect(relay).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Control Panel Launcher uses the shared toolbar toast when openPopup fails', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const toggle = page.locator('#ytb-home-toggle');
+		const launcher = toggle.locator('.ytb-ht-launcher');
+		await expect(page.locator('#ytb-control-panel-relay')).toHaveCount(1);
+		const relay = page.frames().find((frame) => frame.url().endsWith('/control-panel-relay.html'));
+		expect(relay).toBeDefined();
+		await relay!.evaluate(() => {
+			Object.defineProperty(chrome.action, 'openPopup', {
+				configurable: true,
+				value: async () => {
+					throw new Error('forced openPopup failure');
+				},
+			});
+		});
+
+		await launcher.click();
+		await expect(page.locator('.ytb-toast')).toHaveText('Open YouTube Buddy from the toolbar icon');
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(page.locator('#ytb-panel-overlay')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('opens the extension popup without runtime errors', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -946,6 +1032,32 @@ test('opens the extension popup without runtime errors', async () => {
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup.html`);
 		await expect(popup.locator('h1')).toContainText('YouTube Buddy');
+		await expect(popup.locator('.brand-mark')).toBeVisible();
+		expect(
+			await popup.locator('.brand-mark').evaluate((image: HTMLImageElement) => ({
+				width: image.naturalWidth,
+				height: image.naturalHeight,
+			})),
+		).toEqual({ width: 128, height: 128 });
+		expect(
+			await popup.evaluate(() => {
+				const manifest = chrome.runtime.getManifest();
+				return { icons: manifest.icons, actionIcons: manifest.action?.default_icon };
+			}),
+		).toEqual({
+			icons: {
+				16: 'icons/icon-16.png',
+				32: 'icons/icon-32.png',
+				48: 'icons/icon-48.png',
+				128: 'icons/icon-128.png',
+			},
+			actionIcons: {
+				16: 'icons/icon-16.png',
+				32: 'icons/icon-32.png',
+				48: 'icons/icon-48.png',
+				128: 'icons/icon-128.png',
+			},
+		});
 		await expect(popup.locator('#choose-create')).toBeVisible();
 		await popup.waitForTimeout(250);
 		await extensions.reload();
@@ -1057,12 +1169,17 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		const broadcasts = () => page.evaluate(() => (window as any).__broadcasts as { ok: boolean; connectionLost: boolean }[]);
 		const driveRead = () => page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
 
-		// A successful read draws Bob's marker at 30/100 = 30%.
+		// A successful read draws Bob's marker at 30/100 through the bar's chapter
+		// geometry (#159). This fixture bar is unchaptered — one segment — so that
+		// is exactly 30% of its measured width, written in px.
 		const marker = page.locator('.ytb-watch-marker');
 		await nudgeUntil(page, async () => {
 			await expect(marker).toHaveCount(1);
 		});
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		const barWidth = await page.locator('.ytp-progress-bar').evaluate((el) => el.getBoundingClientRect().width);
+		expect(barWidth).toBeGreaterThan(0); // a zero-width bar would make every assertion below vacuous
+		const markerLeft = () => marker.evaluate((el) => parseFloat((el as HTMLElement).style.left));
+		await expect.poll(markerLeft).toBeCloseTo(0.3 * barWidth, 1);
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => b.ok).length).toBeGreaterThanOrEqual(1);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
@@ -1075,13 +1192,13 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(1);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: false });
 		await expect(marker).toHaveCount(1);
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
 
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(2);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: true });
 		await expect(marker).toHaveCount(1);
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
 
 		// Only the aborted GETs may have errored; nothing else.
 		expect(
@@ -1096,7 +1213,7 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
 		await expect(marker).toHaveCount(1);
-		expect(await marker.evaluate((el) => (el as HTMLElement).style.left)).toBe('30%');
+		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
@@ -1503,6 +1620,154 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 		await page.locator('.ytb-note-dot-text').click();
 		await expect(panel).toBeVisible();
 		await expect(panel.locator('.ytb-panel-gohere')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('an open Expanded Note or Note Composer takes the Picture Click as the single playback writer', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		const panel = page.locator('#ytb-note-panel');
+		const composer = page.locator('#ytb-note-composer');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(3, { timeout: 700 }));
+
+		// Reproduce YouTube's delayed picture toggle in the page world. If YTB lets
+		// a Picture Click through, this handler runs after YTB's play and pauses the
+		// video a beat later. Player controls are deliberately excluded.
+		await page.evaluate(() => {
+			const player = document.querySelector('#movie_player') as HTMLElement;
+			const video = player.querySelector('video') as HTMLVideoElement;
+			document.body.dataset.nativePictureClicks = '0';
+			player.addEventListener('click', (event) => {
+				const target = event.target as Element;
+				if (target.closest('.ytp-chrome-bottom')) return;
+				document.body.dataset.nativePictureClicks = String(Number(document.body.dataset.nativePictureClicks) + 1);
+				setTimeout(() => void (video.paused ? video.play() : video.pause()), 120);
+			});
+
+			const controls = player.querySelector('.ytp-left-controls') as HTMLElement;
+			const toggle = document.createElement('button');
+			toggle.id = 'fixture-player-toggle';
+			toggle.textContent = 'Toggle';
+			toggle.addEventListener('click', () => void (video.paused ? video.play() : video.pause()));
+			const gear = document.createElement('button');
+			gear.id = 'fixture-player-gear';
+			gear.textContent = 'Gear';
+			gear.addEventListener('click', () => {
+				document.body.dataset.gearClicks = String(Number(document.body.dataset.gearClicks || 0) + 1);
+			});
+			controls.append(toggle, gear);
+
+			const outside = document.createElement('button');
+			outside.id = 'fixture-outside';
+			outside.textContent = 'Outside';
+			document.body.append(outside);
+		});
+
+		const isPaused = () => video.evaluate((v: HTMLVideoElement) => v.paused);
+		const parkPaused = (at = 1) =>
+			video.evaluate((v: HTMLVideoElement, time) => {
+				v.pause();
+				v.currentTime = time;
+			}, at);
+		const play = () => video.evaluate((v: HTMLVideoElement) => v.play());
+		const clickPicture = () =>
+			video.evaluate((v: HTMLVideoElement) =>
+				v.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true })),
+			);
+		const expectStaysPlaying = async () => {
+			await expect.poll(isPaused).toBe(false);
+			await page.waitForTimeout(250);
+			expect(await isPaused()).toBe(false);
+		};
+
+		// A playing video's Pause Hold and an already-paused video both converge on
+		// one result for every Expanded Note variant: close, play, and stay playing.
+		await play();
+		await page.locator('.ytb-note-dot-text').click();
+		await expect(panel).toBeVisible();
+		expect(await isPaused()).toBe(true);
+		await clickPicture();
+		await expect(panel).toHaveCount(0);
+		await expectStaysPlaying();
+
+		for (const selector of ['.ytb-note-dot-reaction', '.ytb-note-dot-locked']) {
+			await parkPaused();
+			await page.locator(selector).click();
+			await expect(panel).toBeVisible();
+			await clickPicture();
+			await expect(panel).toHaveCount(0);
+			await expectStaysPlaying();
+		}
+
+		// The Note Composer follows the same rule and still discards its draft.
+		await play();
+		await page.locator('#ytb-note-button').click();
+		await expect(composer).toBeVisible();
+		await composer.locator('textarea').fill('discard this draft');
+		expect(await isPaused()).toBe(true);
+		await clickPicture();
+		await expect(composer).toHaveCount(0);
+		await expectStaysPlaying();
+		await parkPaused();
+		await page.locator('#ytb-note-button').click();
+		await expect(composer).toBeVisible();
+		await expect(composer.locator('textarea')).toHaveValue('');
+		await clickPicture();
+		await expect(composer).toHaveCount(0);
+		await expectStaysPlaying();
+
+		// Player chrome closes the overlay without releasing its Pause Hold. The
+		// clicked control alone decides playback; a passive Gear leaves it paused.
+		await play();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-player-gear').click();
+		await expect(panel).toHaveCount(0);
+		expect(await isPaused()).toBe(true);
+		expect(await page.locator('body').getAttribute('data-gear-clicks')).toBe('1');
+		await parkPaused();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-player-toggle').click();
+		await expect(panel).toHaveCount(0);
+		await expect.poll(isPaused).toBe(false);
+
+		// Off-player clicks retain Pause Hold semantics.
+		await play();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-outside').click();
+		await expect(panel).toHaveCount(0);
+		await expect.poll(isPaused).toBe(false);
+		await parkPaused();
+		await page.locator('.ytb-note-dot-text').click();
+		await page.locator('#fixture-outside').click();
+		await expect(panel).toHaveCount(0);
+		expect(await isPaused()).toBe(true);
+
+		// With no YTB overlay open, the simulated native picture toggle is untouched.
+		await play();
+		await clickPicture();
+		await expect.poll(isPaused).toBe(true);
+		expect(await page.locator('body').getAttribute('data-native-picture-clicks')).toBe('1');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -2660,6 +2925,21 @@ test('a Room Feed reply row lands you at your own place, paused, with the Unseen
 		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 		await expect(dot).toHaveClass(/ytb-note-dot-unseen/);
 		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+
+		// The grace holds automatic play, but an explicit Picture Click with an
+		// Expanded Note open cancels it and plays. Without cancellation the existing
+		// capture-phase play listener would immediately re-pause this exact request.
+		await dot.click();
+		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+		await page
+			.locator('video')
+			.evaluate((video: HTMLVideoElement) =>
+				video.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true })),
+			);
+		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
+		await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
+		await page.waitForTimeout(300);
+		expect(await page.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(false);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

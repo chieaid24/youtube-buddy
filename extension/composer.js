@@ -456,11 +456,38 @@
 	document.addEventListener('keydown', (event) => {
 		if (event.key === 'Escape') closeComposer();
 	});
-	// Clicking anywhere outside dismisses and discards (composer + button clicks
-	// stop propagation, so they never land here).
-	document.addEventListener('click', () => {
-		if (document.getElementById(COMPOSER_ID)) closeComposer();
-	});
+	// Share the capture-phase Picture Click rule with the Expanded Note. Composer
+	// controls and the Add Note toggle keep their own handlers. Everything else
+	// routes through the pure decision seam before YouTube can arm its deferred
+	// picture toggle; player chrome still receives the click unchanged.
+	document.addEventListener(
+		'click',
+		(event) => {
+			const composerOpen = Boolean(document.getElementById(COMPOSER_ID));
+			if (!composerOpen) return;
+			const path = event.composedPath ? event.composedPath() : [];
+			for (const target of path) {
+				if (!(target instanceof Element)) continue;
+				if (target.id === COMPOSER_ID || target.id === BUTTON_ID) return;
+			}
+
+			const route = YTB.pictureClickAction({
+				overlayOpen: composerOpen,
+				region: YTB.pictureClickRegion(event.target),
+				pauseHold: pauseLeaseActive,
+				withinGrace: YTB.withinArrivalGrace(),
+			});
+			if (!route.close) return;
+			if (route.consume) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			if (route.cancelArrivalGrace) YTB.cancelArrivalGrace();
+			closeComposer({ resume: false });
+			if (route.play) document.querySelector('video')?.play();
+		},
+		true,
+	);
 
 	YTB.onContextInvalidated(() => {
 		closeComposer({ resume: false });

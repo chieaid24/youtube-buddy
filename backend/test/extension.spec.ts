@@ -338,54 +338,96 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.crossedNotes(notes, 10, 11)).toEqual([]);
 	});
 
+	it('maps a timestamp to x through the bar chapter geometry, never into a gap', () => {
+		const x = (segments: Array<{ left: number; width: number }>, t: number, d: number): number => window.YTB.timeToX(segments, t, d);
+		// UNCHAPTERED: one full-width segment is exactly `fraction * barWidth`, so
+		// chapter awareness is a no-op there by construction.
+		const plain = [{ left: 0, width: 1000 }];
+		expect(x(plain, 0, 200)).toBe(0);
+		expect(x(plain, 50, 200)).toBe(250);
+		expect(x(plain, 200, 200)).toBe(1000);
+
+		// CHAPTERED, as YouTube draws it: three segments whose widths are
+		// proportional to their chapters' durations, separated by 4px gaps. The bar
+		// is still 1000px wide, but only 992px of it is segment (two gaps), and the
+		// 100s video's time is shared out over that 992px — never over the 1000px.
+		const segs = [
+			{ left: 0, width: 496 }, // first half of the video: 0s -> 50s
+			{ left: 500, width: 248 }, // 50s -> 75s
+			{ left: 752, width: 248 }, // 75s -> 100s
+		];
+		// t = 0 and t = duration pin to the outer edges of the outer segments.
+		expect(x(segs, 0, 100)).toBe(0);
+		expect(x(segs, 100, 100)).toBe(1000);
+		// Inside a segment: linear within that segment, NOT across the whole bar.
+		// 25s is halfway through chapter 1 -> 248px, where the uniform mapping would
+		// wrongly say 250px.
+		expect(x(segs, 25, 100)).toBeCloseTo(248, 6);
+		// The 50s boundary sits at the END of the earlier chapter (496), not at the
+		// start of the next one (500): the walk consumes segment width only.
+		expect(x(segs, 50, 100)).toBeCloseTo(496, 6);
+		// Past the boundary, x picks up the gap the uniform mapping ignores: 62.5s is
+		// halfway through chapter 2 -> 500 + 124 = 624, while `fraction * barWidth`
+		// would say 625.
+		expect(x(segs, 62.5, 100)).toBeCloseTo(624, 6);
+		// A timestamp whose UNIFORM x would land inside the 4px gap (498px) never
+		// lands in a gap here: 49.8s maps into chapter 1, at 494.
+		expect(x(segs, 49.8, 100)).toBeCloseTo(494.016, 3);
+		// Out-of-range timestamps clamp to the bar's ends.
+		expect(x(segs, -10, 100)).toBe(0);
+		expect(x(segs, 500, 100)).toBe(1000);
+		// Degenerate inputs: no segments (the bar is not laid out yet) and a
+		// nonsense duration both resolve to the bar's left edge rather than NaN.
+		expect(x([], 30, 100)).toBe(0);
+		expect(x(segs, 30, 0)).toBe(0);
+		expect(x(segs, Number.NaN, 100)).toBe(0);
+	});
+
 	it('groups overlapping Note Dots into transitive Dot Clusters', () => {
-		const cluster = (fractions: number[], barWidth: number, diameter: number): number[][] =>
-			window.YTB.clusterDots(fractions, barWidth, diameter);
+		const cluster = (xs: number[], diameter: number): number[][] => window.YTB.clusterDots(xs, diameter);
 		// A lone dot is a Cluster of one; two dots well over a diameter apart do NOT
-		// overlap (bar 1000px, dot 6px: 0.3 apart == 300px).
-		expect(cluster([0.2], 1000, 6)).toEqual([[0]]);
-		expect(cluster([0.2, 0.5], 1000, 6)).toEqual([[0], [1]]);
-		// Touching boundary is inclusive (<=): centres exactly one diameter apart
-		// merge. Uses exact binary fractions (bar 1024, dot 8) so no float noise
-		// straddles the boundary — 0.5078125 - 0.5 == 8/1024 exactly.
-		expect(cluster([0.5, 0.5078125], 1024, 8)).toEqual([[0, 1]]);
+		// overlap (dot 6px: 300px apart).
+		expect(cluster([200], 6)).toEqual([[0]]);
+		expect(cluster([200, 500], 6)).toEqual([[0], [1]]);
+		// Touching boundary is inclusive (<=): centres exactly one diameter apart merge.
+		expect(cluster([512, 520], 8)).toEqual([[0, 1]]);
 		// Overlapping pair (5px apart) merges; clusters return left to right,
-		// members by fraction (the later-listed earlier dot leads the group).
-		expect(cluster([0.505, 0.5], 1000, 6)).toEqual([[1, 0]]);
+		// members by x (the later-listed earlier dot leads the group).
+		expect(cluster([505, 500], 6)).toEqual([[1, 0]]);
 		// Transitive chain: three dots each 4px from the NEXT are one Cluster even
 		// though the outer two (8px apart, over a diameter) do not touch.
-		expect(cluster([0.5, 0.504, 0.508], 1000, 6)).toEqual([[0, 1, 2]]);
+		expect(cluster([500, 504, 508], 6)).toEqual([[0, 1, 2]]);
 		// Identical timestamps overlap (zero distance) — one Cluster.
-		expect(cluster([0.4, 0.4], 1000, 6)).toEqual([[0, 1]]);
+		expect(cluster([400, 400], 6)).toEqual([[0, 1]]);
 		// A separate far dot stays its own Cluster.
-		expect(cluster([0.5, 0.504, 0.9], 1000, 6)).toEqual([[0, 1], [2]]);
+		expect(cluster([500, 504, 900], 6)).toEqual([[0, 1], [2]]);
 		// Degenerate inputs.
-		expect(cluster([], 1000, 6)).toEqual([]);
+		expect(cluster([], 6)).toEqual([]);
 	});
 
 	it('fans a Dot Cluster evenly about its centroid, clamped to the bar', () => {
-		const fan = (fractions: number[], gap: number, barWidth: number, diameter: number): number[] =>
-			window.YTB.fanOffsets(fractions, gap, barWidth, diameter);
+		const fan = (xs: number[], gap: number, barWidth: number, diameter: number): number[] =>
+			window.YTB.fanOffsets(xs, gap, barWidth, diameter);
 		// A lone dot never moves.
-		expect(fan([0.5], 14, 1000, 6)).toEqual([0]);
+		expect(fan([500], 14, 1000, 6)).toEqual([0]);
 		// A co-timed pair separates symmetrically by the gap about the centroid.
-		expect(fan([0.5, 0.5], 14, 1000, 6)).toEqual([-7, 7]);
+		expect(fan([500, 500], 14, 1000, 6)).toEqual([-7, 7]);
 		// Offsets return in INPUT order but slots go by timestamp: the earlier dot
 		// takes the left slot regardless of input order.
-		expect(fan([0.5, 0.5], 14, 1000, 6)).toEqual([-7, 7]);
-		// A tight triple centred at 0.5 (bar 1000 -> 500px) fans to 500 +/- gap.
-		const triple = fan([0.5, 0.5, 0.5], 20, 1000, 6);
+		expect(fan([500, 500], 14, 1000, 6)).toEqual([-7, 7]);
+		// A tight triple centred at 500px fans to 500 +/- gap.
+		const triple = fan([500, 500, 500], 20, 1000, 6);
 		expect(triple).toEqual([-20, 0, 20]);
 		// Edge clamp: a pair hard against the right edge slides left so no circle
 		// (radius 3) is pushed past 1000. Fanned centres would be 998+/-7 = [991,1005];
 		// the whole fan shifts by -8 so the rightmost centre lands at 997 = 1000-3.
-		const right = fan([0.998, 0.998], 14, 1000, 6);
+		const right = fan([998, 998], 14, 1000, 6);
 		// original centre px = 998; offsets = clampedCentre - 998.
 		expect(right[0]).toBeCloseTo(991 - 8 - 998, 5); // -15
 		expect(right[1]).toBeCloseTo(1005 - 8 - 998, 5); // -1
 		// Left-edge clamp mirrors it: fanned centres [-5, 9] shift +8 so the left
 		// circle sits at 3 = radius.
-		const left = fan([0.002, 0.002], 14, 1000, 6);
+		const left = fan([2, 2], 14, 1000, 6);
 		expect(left[0]).toBeCloseTo(-5 + 8 - 2, 5); // 1
 		expect(left[1]).toBeCloseTo(9 + 8 - 2, 5); // 15
 		// Degenerate input.
@@ -401,6 +443,73 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.playAction({ withinGrace: false, panelOpen: true })).toBe('dismiss');
 		// Past the grace, no panel: a play is nothing to do with us.
 		expect(window.YTB.playAction({ withinGrace: false, panelOpen: false })).toBe('ignore');
+	});
+
+	it('routes overlay clicks by Picture, player chrome, and off-player Pause Hold', () => {
+		const route = (state: {
+			overlayOpen?: boolean;
+			region?: 'picture' | 'chrome' | 'outside';
+			pauseHold?: boolean;
+			withinGrace?: boolean;
+		}) =>
+			window.YTB.pictureClickAction({
+				overlayOpen: true,
+				region: 'outside',
+				pauseHold: false,
+				withinGrace: false,
+				...state,
+			});
+
+		// The normal watching path is untouched, even on the Video Picture.
+		expect(route({ overlayOpen: false, region: 'picture', pauseHold: true, withinGrace: true })).toEqual({
+			close: false,
+			consume: false,
+			play: false,
+			cancelArrivalGrace: false,
+		});
+
+		// A Picture Click always plays, regardless of the Pause Hold. Inside the
+		// arrival grace it also cancels that hold before play is requested.
+		expect(route({ region: 'picture', pauseHold: false, withinGrace: false })).toEqual({
+			close: true,
+			consume: true,
+			play: true,
+			cancelArrivalGrace: false,
+		});
+		expect(route({ region: 'picture', pauseHold: true, withinGrace: true })).toEqual({
+			close: true,
+			consume: true,
+			play: true,
+			cancelArrivalGrace: true,
+		});
+
+		// Player controls keep the click and own playback, with or without a hold.
+		expect(route({ region: 'chrome', pauseHold: false, withinGrace: false })).toEqual({
+			close: true,
+			consume: false,
+			play: false,
+			cancelArrivalGrace: false,
+		});
+		expect(route({ region: 'chrome', pauseHold: true, withinGrace: true })).toEqual({
+			close: true,
+			consume: false,
+			play: false,
+			cancelArrivalGrace: false,
+		});
+
+		// Off-player dismissal restores only the state represented by a Pause Hold.
+		expect(route({ region: 'outside', pauseHold: false, withinGrace: false }).play).toBe(false);
+		expect(route({ region: 'outside', pauseHold: true, withinGrace: false }).play).toBe(true);
+	});
+
+	it('classifies player surface clicks without treating controls as the Video Picture', () => {
+		const offPlayer = { closest: vi.fn().mockReturnValue(null) };
+		const picture = { closest: vi.fn().mockReturnValueOnce({}).mockReturnValueOnce(null) };
+		const chrome = { closest: vi.fn().mockReturnValue({}) };
+
+		expect(window.YTB.pictureClickRegion(offPlayer)).toBe('outside');
+		expect(window.YTB.pictureClickRegion(picture)).toBe('picture');
+		expect(window.YTB.pictureClickRegion(chrome)).toBe('chrome');
 	});
 });
 
@@ -1506,7 +1615,17 @@ declare global {
 			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
 			PENDING_ARRIVAL_TTL_MS: number;
 			PANEL_LOAD_GRACE_MS: number;
+			startArrivalGrace(now?: number): number;
+			withinArrivalGrace(now?: number): boolean;
+			cancelArrivalGrace(): void;
 			playAction(state: { withinGrace: boolean; panelOpen: boolean }): 'hold' | 'dismiss' | 'ignore';
+			pictureClickRegion(target: { closest?: (selector: string) => unknown } | null): 'picture' | 'chrome' | 'outside';
+			pictureClickAction(state: {
+				overlayOpen: boolean;
+				region: 'picture' | 'chrome' | 'outside';
+				pauseHold: boolean;
+				withinGrace: boolean;
+			}): { close: boolean; consume: boolean; play: boolean; cancelArrivalGrace: boolean };
 			setPendingArrival(videoId: string): Promise<boolean>;
 			getPendingArrival(): Promise<{ videoId: string; at: number } | null>;
 			clearPendingArrival(): Promise<boolean>;

@@ -210,6 +210,27 @@ const YTB = {
 	// outlast autoplay-on-arrival, short enough not to swallow a real later resume.
 	// See YTB.playAction.
 	PANEL_LOAD_GRACE_MS: 4_000,
+	_arrivalGraceUntil: 0,
+
+	/**
+	 * Arm the short ADR-0010 arrival grace. The clock lives in shared.js because
+	 * either on-video overlay may need to cancel it for an explicit Picture Click.
+	 * @param {number} now
+	 * @returns {number} the grace deadline
+	 */
+	startArrivalGrace(now = Date.now()) {
+		YTB._arrivalGraceUntil = Number(now) + YTB.PANEL_LOAD_GRACE_MS;
+		return YTB._arrivalGraceUntil;
+	},
+
+	/** @param {number} now */
+	withinArrivalGrace(now = Date.now()) {
+		return Number(now) < YTB._arrivalGraceUntil;
+	},
+
+	cancelArrivalGrace() {
+		YTB._arrivalGraceUntil = 0;
+	},
 
 	/**
 	 * Record the video a Room Feed row points at, for notes.js to consult after
@@ -314,6 +335,29 @@ const YTB = {
 		if (pageDark === true) return 'dark';
 		if (pageDark === false) return 'light';
 		return null;
+	},
+
+	/**
+	 * Show one shared, auto-dismissing page toast. theme.js owns the matching
+	 * styles so every content-script caller gets the same presentation.
+	 * @param {string} text
+	 */
+	toast(text) {
+		let wrap = document.querySelector('.ytb-toast-wrap');
+		if (!wrap) {
+			wrap = document.createElement('div');
+			wrap.className = 'ytb-toast-wrap';
+			(document.body || document.documentElement).appendChild(wrap);
+		}
+		const toast = document.createElement('div');
+		toast.className = 'ytb-toast';
+		toast.textContent = String(text);
+		wrap.appendChild(toast);
+		requestAnimationFrame(() => toast.classList.add('show'));
+		setTimeout(() => {
+			toast.classList.remove('show');
+			setTimeout(() => toast.remove(), 250);
+		}, 4000);
 	},
 
 	/**
@@ -716,6 +760,44 @@ const YTB = {
 	},
 
 	/**
+	 * Classify a click relative to YouTube's player. Known controls and other
+	 * interactive player elements are chrome; the remaining player surface is
+	 * the Video Picture. Callers exclude their own overlay controls first.
+	 * @param {{closest?: (selector: string) => unknown}|null} target
+	 * @returns {'picture'|'chrome'|'outside'}
+	 */
+	pictureClickRegion(target) {
+		if (!target || typeof target.closest !== 'function') return 'outside';
+		if (!target.closest('#movie_player, .html5-video-player')) return 'outside';
+		if (
+			target.closest(
+				'.ytp-chrome-bottom, .ytp-chrome-top, .ytp-popup, .ytp-settings-menu, .ytp-panel-menu, button, a, input, select, textarea, [role="button"], [role="menu"], [role="menuitem"], [role="slider"]',
+			)
+		)
+			return 'chrome';
+		return 'picture';
+	},
+
+	/**
+	 * Route an overlay-open click without touching DOM or playback. A Picture
+	 * Click is consumed and means play unconditionally; player chrome closes the
+	 * overlay but leaves the control to YouTube; an off-player click keeps the
+	 * existing Pause Hold semantics.
+	 * @param {{overlayOpen: boolean, region: 'picture'|'chrome'|'outside', pauseHold: boolean, withinGrace: boolean}} state
+	 * @returns {{close: boolean, consume: boolean, play: boolean, cancelArrivalGrace: boolean}}
+	 */
+	pictureClickAction({ overlayOpen, region, pauseHold, withinGrace }) {
+		if (!overlayOpen) return { close: false, consume: false, play: false, cancelArrivalGrace: false };
+		if (region === 'picture') {
+			return { close: true, consume: true, play: true, cancelArrivalGrace: Boolean(withinGrace) };
+		}
+		if (region === 'chrome') {
+			return { close: true, consume: false, play: false, cancelArrivalGrace: false };
+		}
+		return { close: true, consume: false, play: Boolean(pauseHold), cancelArrivalGrace: false };
+	},
+
+	/**
 	 * What a video `play` event does — a pure decision so notes.js stays a thin
 	 * executor and both contracts are testable. A play inside the arrival grace
 	 * (ADR-0010: the watch page's autoplay settling after a Room Feed row paused us
@@ -785,68 +867,132 @@ const YTB = {
 			.sort((a, b) => a.timestamp - b.timestamp);
 	},
 
+	// --- Progress-bar geometry: the one time-to-x mapping both on-bar surfaces use ---
+
+	/**
+	 * The progress bar's chapter segments, in bar-local px, measured fresh on every
+	 * call. YouTube lays a CHAPTERED bar out as one `.ytp-chapter-hover-container`
+	 * per chapter — each width proportional to its chapter's duration, separated by
+	 * a 4px gap — and draws its playhead through that segmented geometry, so a
+	 * timestamp's x is NOT `fraction * barWidth` (#159). An unchaptered bar exposes
+	 * a single full-width container, which reduces the mapping to exactly that.
+	 *
+	 * This is the ONE place that reads YouTube's chapter DOM; the mapping itself is
+	 * pure (`timeToX`), and both Note Dots and Buddy markers place through the pair.
+	 * @param {Element|null} bar the `.ytp-progress-bar` element
+	 * @returns {Array<{left: number, width: number}>} segments, left to right
+	 */
+	barSegments(bar) {
+		if (!bar) return [];
+		const barRect = bar.getBoundingClientRect();
+		const segments = [];
+		for (const el of bar.querySelectorAll('.ytp-chapter-hover-container')) {
+			const rect = el.getBoundingClientRect();
+			if (rect.width > 0) segments.push({ left: rect.left - barRect.left, width: rect.width });
+		}
+		segments.sort((a, b) => a.left - b.left);
+		// The chapter DOM has not been built yet (the player initializes async, and
+		// a late ytb:mutation re-renders): the whole bar is one segment, which is
+		// the unchaptered mapping.
+		if (segments.length === 0 && barRect.width > 0) segments.push({ left: 0, width: barRect.width });
+		return segments;
+	},
+
+	/**
+	 * Map a timestamp to its x offset in px from the progress bar's left edge,
+	 * through the bar's measured chapter geometry (#159). Segment widths are
+	 * proportional to chapter durations, so a timestamp's share of the total
+	 * SEGMENT width — the bar minus its inter-chapter gaps — places it inside the
+	 * same segment, at the same offset, that YouTube draws its own playhead at. A
+	 * one-segment (unchaptered) bar reduces to `fraction * barWidth` exactly, so
+	 * this is a no-op there by construction.
+	 *
+	 * A timestamp therefore never lands in an inter-segment gap: the walk consumes
+	 * segment width only, and a time exactly on a chapter boundary resolves to the
+	 * END of the earlier chapter. Pure — the caller measures (`barSegments`), so
+	 * the mapping is unit-tested at the shared.js seam.
+	 * @param {Array<{left: number, width: number}>} segments bar-local px, left to right
+	 * @param {number} timestamp seconds into the video
+	 * @param {number} duration the video's duration in seconds
+	 * @returns {number} px offset from the bar's left edge
+	 */
+	timeToX(segments, timestamp, duration) {
+		const segs = (segments || []).filter((s) => s && Number.isFinite(Number(s.left)) && Number(s.width) > 0);
+		if (segs.length === 0) return 0;
+		const t = Number(timestamp);
+		const d = Number(duration);
+		const fraction = Number.isFinite(t) && Number.isFinite(d) && d > 0 ? Math.max(0, Math.min(1, t / d)) : 0;
+		const total = segs.reduce((sum, s) => sum + Number(s.width), 0);
+		const contentPx = fraction * total;
+		let consumed = 0;
+		for (const s of segs) {
+			const width = Number(s.width);
+			if (contentPx <= consumed + width) return Number(s.left) + (contentPx - consumed);
+			consumed += width;
+		}
+		const last = segs[segs.length - 1];
+		return Number(last.left) + Number(last.width);
+	},
+
 	// --- Dot Cluster helpers (pure — the fan math, tested at the shared.js seam) ---
 
 	/**
-	 * Dot Cluster grouping (#119): given each Note Dot's timestamp fraction in
-	 * [0,1], the rendered progress-bar width in px, and the dot diameter in px,
-	 * group the dots whose rendered circles touch or overlap. Grouping is
-	 * TRANSITIVE — a chain of dots each overlapping the next is a single Cluster
-	 * even when the outer two do not touch — and a lone dot is a Cluster of one.
+	 * Dot Cluster grouping (#119): given each Note Dot's x offset on the bar in px
+	 * (from `timeToX`) and the dot diameter in px, group the dots whose rendered
+	 * circles touch or overlap. Grouping is TRANSITIVE — a chain of dots each
+	 * overlapping the next is a single Cluster even when the outer two do not
+	 * touch — and a lone dot is a Cluster of one.
 	 *
-	 * Returns clusters as arrays of ORIGINAL indices (into `fractions`), each
-	 * cluster ordered by fraction (timestamp) and the clusters themselves ordered
-	 * left to right. Pure (no DOM): the wiring reads pixel geometry and hands it
-	 * here, so the grouping is unit-tested at the shared.js seam.
-	 * @param {number[]} fractions each dot's bar fraction in [0,1]
-	 * @param {number} barWidth rendered progress-bar width in px
+	 * Returns clusters as arrays of ORIGINAL indices (into `xs`), each cluster
+	 * ordered left to right and the clusters themselves ordered left to right.
+	 * Pure (no DOM): the wiring measures the bar and hands the px here, so the
+	 * grouping is unit-tested at the shared.js seam.
+	 * @param {number[]} xs each dot's px offset from the bar's left edge
 	 * @param {number} dotDiameter dot diameter in px
-	 * @returns {number[][]} clusters of original indices, each sorted by fraction
+	 * @returns {number[][]} clusters of original indices, each sorted by x
 	 */
-	clusterDots(fractions, barWidth, dotDiameter) {
-		const width = Number(barWidth) || 0;
+	clusterDots(xs, dotDiameter) {
 		const diameter = Math.max(0, Number(dotDiameter) || 0);
-		const order = (fractions || [])
-			.map((fraction, index) => ({ index, fraction: Number(fraction) || 0 }))
-			.sort((a, b) => a.fraction - b.fraction);
+		const order = (xs || []).map((x, index) => ({ index, x: Number(x) || 0 })).sort((a, b) => a.x - b.x);
 		const clusters = [];
 		let current = null;
-		let prevFraction = 0;
-		for (const { index, fraction } of order) {
+		let prevX = 0;
+		for (const { index, x } of order) {
 			// Circles touch or overlap when the gap between centers is within one
 			// diameter; comparing to the PREVIOUS sorted dot makes the merge
 			// transitive (a covered middle dot chains its neighbours together).
-			if (current && (fraction - prevFraction) * width <= diameter) {
+			if (current && x - prevX <= diameter) {
 				current.push(index);
 			} else {
 				current = [index];
 				clusters.push(current);
 			}
-			prevFraction = fraction;
+			prevX = x;
 		}
 		return clusters;
 	},
 
 	/**
-	 * Dot Cluster fan offsets (#119): given a Cluster's member fractions, the gap
-	 * in px between adjacent fanned dots, the bar width in px, and the dot
-	 * diameter in px, return a per-member horizontal PIXEL offset that fans the
-	 * members apart evenly about the Cluster's centroid, ordered by timestamp and
-	 * clamped so no member's circle is pushed past either edge of the bar. A
-	 * Cluster of one gets a zero offset.
+	 * Dot Cluster fan offsets (#119): given a Cluster's member x offsets in px
+	 * (from `timeToX`), the gap in px between adjacent fanned dots, the bar width
+	 * in px, and the dot diameter in px, return a per-member horizontal PIXEL
+	 * offset that fans the members apart evenly about the Cluster's centroid,
+	 * ordered by timestamp and clamped so no member's circle is pushed past either
+	 * edge of the bar. A Cluster of one gets a zero offset.
 	 *
-	 * Offsets return in the SAME order as the input fractions (the wiring keeps
-	 * each dot paired with its offset); a member's fanned SLOT is chosen by
-	 * timestamp order. Pure display math — the underlying `left` positions never
-	 * change — so it is unit-tested at the shared.js seam.
-	 * @param {number[]} fractions the Cluster members' bar fractions in [0,1]
+	 * Offsets return in the SAME order as the input xs (the wiring keeps each dot
+	 * paired with its offset); a member's fanned SLOT is chosen by x, which is
+	 * timestamp order (the mapping is monotonic). Pure display math — the
+	 * underlying `left` positions never change — so it is unit-tested at the
+	 * shared.js seam.
+	 * @param {number[]} xs the Cluster members' px offsets from the bar's left edge
 	 * @param {number} gap px between adjacent fanned dot centers
 	 * @param {number} barWidth rendered progress-bar width in px
 	 * @param {number} dotDiameter dot diameter in px
 	 * @returns {number[]} per-member px offsets, in input order
 	 */
-	fanOffsets(fractions, gap, barWidth, dotDiameter) {
-		const members = fractions || [];
+	fanOffsets(xs, gap, barWidth, dotDiameter) {
+		const members = xs || [];
 		const n = members.length;
 		if (n === 0) return [];
 		if (n === 1) return [0];
@@ -855,8 +1001,8 @@ const YTB = {
 		const radius = Math.max(0, Number(dotDiameter) || 0) / 2;
 		// Rank members by timestamp to assign evenly spaced fan slots, remembering
 		// each original position so the offsets return in input order.
-		const ranked = members.map((fraction, index) => ({ index, fraction: Number(fraction) || 0 })).sort((a, b) => a.fraction - b.fraction);
-		const centroidPx = (ranked.reduce((sum, m) => sum + m.fraction, 0) / n) * width;
+		const ranked = members.map((x, index) => ({ index, x: Number(x) || 0 })).sort((a, b) => a.x - b.x);
+		const centroidPx = ranked.reduce((sum, m) => sum + m.x, 0) / n;
 		// Target fanned centers: evenly spaced by `step`, symmetric about the
 		// centroid so the Cluster keeps its footing while opening up.
 		const centers = ranked.map((_, rank) => centroidPx + (rank - (n - 1) / 2) * step);
@@ -867,7 +1013,7 @@ const YTB = {
 		else if (centers[n - 1] > width - radius) shift = width - radius - centers[n - 1];
 		const offsets = new Array(n);
 		ranked.forEach((m, rank) => {
-			offsets[m.index] = centers[rank] + shift - m.fraction * width;
+			offsets[m.index] = centers[rank] + shift - m.x;
 		});
 		return offsets;
 	},

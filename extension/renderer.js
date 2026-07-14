@@ -38,8 +38,6 @@
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
 	const THUMB_DOTS_CLASS = 'ytb-thumb-dots'; // Watched-By Dots cluster on a thumbnail
 	const THUMB_DOT_CLASS = 'ytb-thumb-dot'; // one flat Buddy-colored dot
-	const TOAST_WRAP_CLASS = 'ytb-toast-wrap'; // fixed stack container
-	const TOAST_CLASS = 'ytb-toast'; // one "<Buddy> joined" toast
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
@@ -208,7 +206,7 @@
 		for (const b of buddies) {
 			current.add(b.clientId);
 			if (baselineReady && !knownBuddyIds.has(b.clientId)) {
-				showToast(YTB.buddyName(b.clientId, b.name, roster) + ' joined');
+				YTB.toast(YTB.buddyName(b.clientId, b.name, roster) + ' joined');
 			}
 		}
 		knownBuddyIds = current;
@@ -235,11 +233,10 @@
 		// Hidden Buddy Progress leaves `desired` empty, so the reconciliation
 		// below strips existing markers (and re-grows them all when re-shown).
 		const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
-		const desired = new Map(); // clientId -> { fraction, record }
+		const desired = new Map(); // clientId -> record
 		if (records) {
 			for (const r of records) {
-				const fraction = positionFraction(r);
-				if (fraction !== null) desired.set(r.clientId, { fraction, record: r });
+				if (hasPosition(r)) desired.set(r.clientId, r);
 			}
 		}
 
@@ -259,7 +256,12 @@
 			bar.style.position = 'relative';
 		}
 
-		for (const [cid, { fraction, record }] of desired) {
+		// Place through YouTube's own chapter geometry (#159), re-measured here so
+		// a resize, theater/fullscreen, or late-arriving chapter DOM re-aligns every
+		// marker on the next render.
+		const segments = YTB.barSegments(bar);
+
+		for (const [cid, record] of desired) {
 			let marker = existing.get(cid);
 			if (!marker) {
 				marker = document.createElement('div');
@@ -270,7 +272,7 @@
 				marker.appendChild(tooltip);
 				bar.appendChild(marker);
 			}
-			marker.style.left = (fraction * 100).toFixed(3) + '%';
+			marker.style.left = YTB.timeToX(segments, record.timestamp, record.duration).toFixed(2) + 'px';
 			marker.style.background = YTB.buddyColor(cid);
 			const who = YTB.buddyName(record.clientId, record.name, roster);
 			marker.querySelector('.' + TOOLTIP_CLASS).textContent = who + ' @' + YTB.formatTime(record.timestamp);
@@ -447,16 +449,15 @@
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * The clamped [0,1] watched fraction for a record, or null if it can't be
-	 * computed (non-finite / non-positive duration).
+	 * Whether a record can be placed on the bar at all (finite timestamp, positive
+	 * finite duration). Where it lands is YTB.timeToX's business (#159).
 	 * @param {{timestamp: number, duration: number}} record
-	 * @returns {number|null}
+	 * @returns {boolean}
 	 */
-	function positionFraction(record) {
+	function hasPosition(record) {
 		const t = Number(record.timestamp);
 		const d = Number(record.duration);
-		if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return null;
-		return Math.max(0, Math.min(1, t / d));
+		return Number.isFinite(t) && Number.isFinite(d) && d > 0;
 	}
 
 	/** Parse the `v=` videoId out of a /watch href, or null. */
@@ -468,30 +469,6 @@
 		} catch {
 			return null;
 		}
-	}
-
-	/**
-	 * Show a small auto-dismissing toast (e.g. "Silly Buddy joined"). Stacks in a
-	 * fixed bottom-right container; each toast fades out after ~4s. Styled via the
-	 * injected renderer stylesheet.
-	 * @param {string} text
-	 */
-	function showToast(text) {
-		let wrap = document.querySelector('.' + TOAST_WRAP_CLASS);
-		if (!wrap) {
-			wrap = document.createElement('div');
-			wrap.className = TOAST_WRAP_CLASS;
-			(document.body || document.documentElement).appendChild(wrap);
-		}
-		const toast = document.createElement('div');
-		toast.className = TOAST_CLASS;
-		toast.textContent = text;
-		wrap.appendChild(toast);
-		requestAnimationFrame(() => toast.classList.add('show'));
-		setTimeout(() => {
-			toast.classList.remove('show');
-			setTimeout(() => toast.remove(), 250);
-		}, 4000);
 	}
 
 	/** Inject the renderer's CSS once (no separate stylesheet file). */
@@ -506,7 +483,9 @@
         top: 0;
         bottom: 0;
         width: 3px;
-        margin-left: -1px;
+        /* Half the marker's width, so the 3px bar straddles its timestamp's x
+           instead of sitting half a pixel right of it (#159). */
+        margin-left: -1.5px;
         background: ${fallback};
         z-index: 40;
         cursor: default;
@@ -583,33 +562,6 @@
       .${THUMB_DOTS_CLASS}:focus-visible > .${TOOLTIP_CLASS} {
         opacity: 1;
       }
-      .${TOAST_WRAP_CLASS} {
-        position: fixed;
-        right: 16px;
-        bottom: 16px;
-        z-index: 2147483000;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        pointer-events: none;
-      }
-      .${TOAST_CLASS} {
-        max-width: 280px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        background: rgba(0, 0, 0, 0.85);
-        color: #fff;
-        font: 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Arial, sans-serif;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        opacity: 0;
-        transform: translateY(8px);
-        transition: opacity 0.25s, transform 0.25s;
-      }
-      .${TOAST_CLASS}.show {
-        opacity: 1;
-        transform: translateY(0);
-      }
     `;
 		(document.head || document.documentElement).appendChild(style);
 	}
@@ -638,6 +590,15 @@
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	});
+
+	// The markers sit at bar px (#159), so a bar that changes width must re-place
+	// them. The thumbnail dots carry no bar geometry and are left alone.
+	for (const type of ['resize', 'fullscreenchange']) {
+		window.addEventListener(type, () => {
+			if (!YTB.isContextActive()) return;
+			renderWatchMarker(currentVideoId);
+		});
+	}
 
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== 'local' || !changes.buddyProgressHidden) return;
