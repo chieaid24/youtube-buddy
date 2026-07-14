@@ -937,85 +937,134 @@ const YTB = {
 	// --- Dot Cluster helpers (pure — the fan math, tested at the shared.js seam) ---
 
 	/**
-	 * Dot Cluster grouping (#119): given each Note Dot's x offset on the bar in px
-	 * (from `timeToX`) and the dot diameter in px, group the dots whose rendered
-	 * circles touch or overlap. Grouping is TRANSITIVE — a chain of dots each
-	 * overlapping the next is a single Cluster even when the outer two do not
-	 * touch — and a lone dot is a Cluster of one.
+	 * The Dot Cluster fan (#162), solved as a MINIMUM DISPLACEMENT over every Note
+	 * Dot on the Video Timeline rather than assigned as even rank slots: given each
+	 * dot's at-rest x offset on the bar in px (from `timeToX`), each dot lands as
+	 * close to its true moment as it can, subject to one constraint — no two dot
+	 * centers closer than the Fan Gap. Three properties follow, and they are the
+	 * whole reason the fan is solved this way:
 	 *
-	 * Returns clusters as arrays of ORIGINAL indices (into `xs`), each cluster
-	 * ordered left to right and the clusters themselves ordered left to right.
-	 * Pure (no DOM): the wiring measures the bar and hands the px here, so the
-	 * grouping is unit-tested at the shared.js seam.
-	 * @param {number[]} xs each dot's px offset from the bar's left edge
-	 * @param {number} dotDiameter dot diameter in px
-	 * @returns {number[][]} clusters of original indices, each sorted by x
+	 * - A dot with slack does not move at all, so true spacing survives wherever
+	 *   geometry allows (a lone dot has an offset of exactly 0).
+	 * - The constraint is GLOBAL — over every dot on the bar, not per group — so a
+	 *   fanned dot can never land on a dot "outside" its Cluster: there is no
+	 *   outside. A dot the fan would have reached is chained INTO the Cluster, and
+	 *   it too moves only as far as it must.
+	 * - A Dot Cluster is therefore exactly the set of dots the constraint chains
+	 *   together (the block that must move as one). That block is what fans on
+	 *   hover / focus / pin; the rest of the bar stays put.
+	 *
+	 * The **Fan Gap** opens to `idealGap` where the bar has room for it and shrinks
+	 * toward a floor of one dot diameter where it does not (fanned dots may touch,
+	 * never cover), so a crowded bar fans tighter and the fan always stays on the
+	 * bar. Only when even the floor cannot fit (far more dots than the bar can
+	 * hold) does separation win over containment: the chain keeps its floor gap and
+	 * centers on the bar, overhanging both ends, because a fan that covers its own
+	 * dots has stopped being a reachability affordance.
+	 *
+	 * The solve is an L2 isotonic regression (PAVA): substituting z_i = x_i - i*gap
+	 * turns "centers at least `gap` apart, in x order" into "z nondecreasing", whose
+	 * minimum-displacement fit is the pooled block means; the bar's edges are a box
+	 * constraint on that fit, which is exactly a clamp of the unbounded solution.
+	 *
+	 * Pure display math (no DOM): the caller measures the bar and hands the px in,
+	 * the at-rest `left` positions never change, and only hover/focus/pin applies
+	 * the returned offsets as a transform — so all of it is unit-tested at the
+	 * shared.js seam.
+	 * @param {number[]} xs each dot's px offset from the bar's left edge, at rest
+	 * @param {{idealGap: number, barWidth: number, dotDiameter: number}} options
+	 *   `idealGap` px between fanned dot centers where there is room; `barWidth` the
+	 *   rendered progress-bar width; `dotDiameter` the dot's px diameter (and, by
+	 *   definition, the Fan Gap's floor — touching, never covering).
+	 * @returns {{clusters: number[][], offsets: number[], gap: number}} `clusters` of
+	 *   ORIGINAL indices (into `xs`), each ordered left to right and the clusters
+	 *   themselves left to right; `offsets` the per-dot fan displacement in px, in
+	 *   INPUT order; `gap` the Fan Gap the fan actually resolved to.
 	 */
-	clusterDots(xs, dotDiameter) {
-		const diameter = Math.max(0, Number(dotDiameter) || 0);
-		const order = (xs || []).map((x, index) => ({ index, x: Number(x) || 0 })).sort((a, b) => a.x - b.x);
+	solveDotFan(xs, options) {
+		const input = xs || [];
+		const opts = options || {};
+		const diameter = Math.max(0, Number(opts.dotDiameter) || 0);
+		const width = Math.max(0, Number(opts.barWidth) || 0);
+		// The floor is the dot diameter itself: fanned dots may touch, never cover.
+		const ideal = Math.max(diameter, Number(opts.idealGap) || 0);
+		const offsets = new Array(input.length).fill(0);
+		const dots = input.map((x, index) => ({ index, x: Number(x) || 0 })).sort((a, b) => a.x - b.x || a.index - b.index);
+		const n = dots.length;
+		if (n === 0) return { clusters: [], offsets, gap: ideal };
+
+		// The Fan Gap. The n-1 gaps have to fit between the outer circles' edges, so
+		// the bar's room for them is (width - diameter); an unmeasured bar (not laid
+		// out yet) imposes no bound at all and keeps the ideal.
+		const bounded = width > diameter;
+		const room = bounded ? width - diameter : Infinity;
+		const gap = n > 1 ? Math.min(ideal, Math.max(diameter, room / (n - 1))) : ideal;
+
+		// Isotonic (PAVA) fit of z_i = x_i - i*gap: pool adjacent blocks while the
+		// left one's mean exceeds the right's — i.e. while the two would land closer
+		// than the Fan Gap — and each surviving block is a Dot Cluster's rigid core.
+		const blocks = []; // { sum, count, start } over the x-sorted dots
+		for (let i = 0; i < n; i++) {
+			let block = { sum: dots[i].x - i * gap, count: 1, start: i };
+			while (blocks.length > 0) {
+				const prev = blocks[blocks.length - 1];
+				if (prev.sum / prev.count <= block.sum / block.count) break;
+				blocks.pop();
+				block = { sum: prev.sum + block.sum, count: prev.count + block.count, start: prev.start };
+			}
+			blocks.push(block);
+		}
+
+		// The bar's edges as a box constraint on that fit: every solved center sits
+		// in [radius, width - radius], which (the fit being nondecreasing) is a plain
+		// clamp of each block's value into [lo, hi]. lo > hi means even the floor gap
+		// cannot fit the chain on the bar — then hold the gap and center the chain.
+		const radius = diameter / 2;
+		let lo = -Infinity;
+		let hi = Infinity;
+		if (bounded) {
+			lo = radius;
+			hi = width - radius - (n - 1) * gap;
+			if (lo > hi) {
+				const mid = (lo + hi) / 2;
+				lo = mid;
+				hi = mid;
+			}
+		}
+
+		const solved = new Array(n);
+		for (const block of blocks) {
+			const value = Math.min(Math.max(block.sum / block.count, lo), hi);
+			for (let k = 0; k < block.count; k++) {
+				const i = block.start + k;
+				solved[i] = value + i * gap;
+			}
+		}
+
+		// A Cluster is what the constraint chains together: the dots left in contact
+		// (exactly the Fan Gap apart) once the solve settles, which also re-chains
+		// blocks the bar's edge clamp pressed against each other.
+		const EPS = 1e-6;
 		const clusters = [];
 		let current = null;
-		let prevX = 0;
-		for (const { index, x } of order) {
-			// Circles touch or overlap when the gap between centers is within one
-			// diameter; comparing to the PREVIOUS sorted dot makes the merge
-			// transitive (a covered middle dot chains its neighbours together).
-			if (current && x - prevX <= diameter) {
-				current.push(index);
-			} else {
-				current = [index];
+		for (let i = 0; i < n; i++) {
+			if (current !== null && solved[i] - solved[i - 1] <= gap + EPS) current.push(i);
+			else {
+				current = [i];
 				clusters.push(current);
 			}
-			prevX = x;
 		}
-		return clusters;
-	},
 
-	/**
-	 * Dot Cluster fan offsets (#119): given a Cluster's member x offsets in px
-	 * (from `timeToX`), the gap in px between adjacent fanned dots, the bar width
-	 * in px, and the dot diameter in px, return a per-member horizontal PIXEL
-	 * offset that fans the members apart evenly about the Cluster's centroid,
-	 * ordered by timestamp and clamped so no member's circle is pushed past either
-	 * edge of the bar. A Cluster of one gets a zero offset.
-	 *
-	 * Offsets return in the SAME order as the input xs (the wiring keeps each dot
-	 * paired with its offset); a member's fanned SLOT is chosen by x, which is
-	 * timestamp order (the mapping is monotonic). Pure display math — the
-	 * underlying `left` positions never change — so it is unit-tested at the
-	 * shared.js seam.
-	 * @param {number[]} xs the Cluster members' px offsets from the bar's left edge
-	 * @param {number} gap px between adjacent fanned dot centers
-	 * @param {number} barWidth rendered progress-bar width in px
-	 * @param {number} dotDiameter dot diameter in px
-	 * @returns {number[]} per-member px offsets, in input order
-	 */
-	fanOffsets(xs, gap, barWidth, dotDiameter) {
-		const members = xs || [];
-		const n = members.length;
-		if (n === 0) return [];
-		if (n === 1) return [0];
-		const width = Number(barWidth) || 0;
-		const step = Number(gap) || 0;
-		const radius = Math.max(0, Number(dotDiameter) || 0) / 2;
-		// Rank members by timestamp to assign evenly spaced fan slots, remembering
-		// each original position so the offsets return in input order.
-		const ranked = members.map((x, index) => ({ index, x: Number(x) || 0 })).sort((a, b) => a.x - b.x);
-		const centroidPx = ranked.reduce((sum, m) => sum + m.x, 0) / n;
-		// Target fanned centers: evenly spaced by `step`, symmetric about the
-		// centroid so the Cluster keeps its footing while opening up.
-		const centers = ranked.map((_, rank) => centroidPx + (rank - (n - 1) / 2) * step);
-		// Slide the WHOLE fan (preserving even spacing) so its outer circles stay
-		// on the bar. If it is wider than the bar, favour the left edge.
-		let shift = 0;
-		if (centers[0] < radius) shift = radius - centers[0];
-		else if (centers[n - 1] > width - radius) shift = width - radius - centers[n - 1];
-		const offsets = new Array(n);
-		ranked.forEach((m, rank) => {
-			offsets[m.index] = centers[rank] + shift - m.x;
-		});
-		return offsets;
+		for (const cluster of clusters) {
+			// A Cluster of one is displaced by nothing: it has no one to separate
+			// from, and the bar's edges only exist to keep a FAN on the bar — a dot
+			// hanging off the end at rest stays exactly where it is (moving it would
+			// be a hover-time jitter that tells the viewer nothing).
+			if (cluster.length === 1) continue;
+			for (const i of cluster) offsets[dots[i].index] = solved[i] - dots[i].x;
+		}
+		// Report clusters in the caller's own index space, still left to right.
+		return { clusters: clusters.map((cluster) => cluster.map((i) => dots[i].index)), offsets, gap };
 	},
 
 	// --- Room Home Section helpers (pure — tested at the shared.js seam) ---

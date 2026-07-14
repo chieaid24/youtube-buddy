@@ -63,7 +63,7 @@
 	const CLUSTER_PINNED_CLASS = 'ytb-dot-cluster-pinned'; // stays fanned while its Note's panel is open
 	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
 	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
-	const CLUSTER_FAN_GAP = 14; // px between adjacent fanned dot centers (a covered dot becomes hoverable)
+	const CLUSTER_FAN_GAP = 14; // px — the Fan Gap's IDEAL; it shrinks toward DOT_DIAMETER on a crowded bar
 	const DOT_HIT_DIAMETER = 24; // px — min hit target (DESIGN.md 1.3); granted only to dots with that much clearance
 	const UNSEEN_RING_GAP = '#0f0f0f'; // separates the reduced-motion Unseen ring from the Buddy-colored fill (UA-026)
 	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible 24px hit extender (UA-004)
@@ -430,10 +430,16 @@
 		const segments = YTB.barSegments(bar);
 		const px = ids.map((id) => YTB.timeToX(segments, desired.get(id).timestamp, duration));
 
-		// Group overlapping dots into Clusters from their pixel geometry (#123).
-		// Transitive and recomputed every render, so a Cluster re-forms as the bar
-		// resizes (timeupdate/mutation/resize all re-enter here).
-		const clusters = YTB.clusterDots(px, DOT_DIAMETER);
+		// Solve the fan for the WHOLE bar in one go (#162): every dot lands as close
+		// to its true moment as the Fan Gap allows, so a dot with room does not move
+		// and no fanned dot can reach a dot at rest elsewhere. A Cluster is what that
+		// constraint chains together. Recomputed every render, so the fan re-solves
+		// as the bar resizes (timeupdate/mutation/resize all re-enter here).
+		const { clusters, offsets } = YTB.solveDotFan(px, {
+			idealGap: CLUSTER_FAN_GAP,
+			barWidth,
+			dotDiameter: DOT_DIAMETER,
+		});
 
 		// Nearest-neighbour clearance per dot (at-rest px, across ALL dots): a
 		// dot earns the 24px hit extender only when no other dot's glyph could
@@ -487,17 +493,17 @@
 			const center = (memberPx[0] + memberPx[memberPx.length - 1]) / 2;
 			wrapper.style.left = center.toFixed(2) + 'px';
 
-			const offsets = YTB.fanOffsets(memberPx, CLUSTER_FAN_GAP, barWidth, DOT_DIAMETER);
 			let halfExtent = 0;
 			memberIds.forEach((id, k) => {
 				const basePx = memberPx[k] - center;
+				const fan = offsets[cluster[k]]; // solved for the whole bar, read per dot
 				const dot = existing.get(id) || buildDot(id);
 				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
 				dot.classList.toggle(DOT_ROOMY_CLASS, clearanceByIndex[cluster[k]] >= DOT_HIT_DIAMETER);
 				dot.style.left = basePx.toFixed(2) + 'px';
-				dot.style.setProperty('--ytb-fan', offsets[k].toFixed(2) + 'px');
+				dot.style.setProperty('--ytb-fan', fan.toFixed(2) + 'px');
 				updateDot(dot, id, desired.get(id));
-				halfExtent = Math.max(halfExtent, Math.abs(basePx + offsets[k]));
+				halfExtent = Math.max(halfExtent, Math.abs(basePx + fan));
 			});
 			// The hover-keeper spans the fanned band so the pointer can cross the
 			// gaps the fan opens (and travel between members) without collapsing it.
@@ -1703,18 +1709,23 @@
          EVERY interactive surface we own on the player lives STRICTLY ABOVE the
          progress bar's top edge (#158), so the bar stays seekable under a Note —
          at a Note's exact timestamp included. The wrapper's bottom edge is that
-         boundary (3px above the bar), and the keeper below, the dots' hit
-         extender, and the preview's hover bridge all stop at or before it. */
+         boundary (6px above the bar since #162 lifted the dots), and the keeper
+         below, the dots' hit extender, and the preview's hover bridge all stop at
+         or before it. */
       .${CLUSTER_CLASS} {
         position: absolute;
-        bottom: calc(100% + 3px);
+        bottom: calc(100% + 6px);
         width: 0;
         height: 6px;
         z-index: 41;
         pointer-events: none;
       }
-      /* Hover keeper: bottom-anchored to the wrapper (the bar's top edge less the
-         3px gap), so it never reaches at or below the bar. */
+      /* Hover keeper: it reaches from above the dots down across the whole 6px
+         clearance and stops FLUSH with the bar's top edge — the furthest it can go
+         while still claiming none of the bar (#158). That leaves no dead strip
+         between bar and dots, so travelling up off the scrubber into a fan never
+         crosses a gap that would collapse it (#162), and a press on the bar under
+         a Note still reaches YouTube's own seek. */
       .${CLUSTER_CLASS}::before {
         content: '';
         position: absolute;
@@ -1722,7 +1733,7 @@
         transform: translateX(-50%);
         width: var(--ytb-fan-extent, 0px);
         top: -4px;
-        bottom: 0;
+        bottom: -6px;
         pointer-events: none;
       }
       .${CLUSTER_CLASS}:hover::before { pointer-events: auto; }
