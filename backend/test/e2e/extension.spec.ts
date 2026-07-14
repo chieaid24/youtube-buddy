@@ -754,6 +754,32 @@ test('opens the extension popup without runtime errors', async () => {
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup.html`);
 		await expect(popup.locator('h1')).toContainText('YouTube Buddy');
+		await expect(popup.locator('.brand-mark')).toBeVisible();
+		expect(
+			await popup.locator('.brand-mark').evaluate((image: HTMLImageElement) => ({
+				width: image.naturalWidth,
+				height: image.naturalHeight,
+			})),
+		).toEqual({ width: 128, height: 128 });
+		expect(
+			await popup.evaluate(() => {
+				const manifest = chrome.runtime.getManifest();
+				return { icons: manifest.icons, actionIcons: manifest.action?.default_icon };
+			}),
+		).toEqual({
+			icons: {
+				16: 'icons/icon-16.png',
+				32: 'icons/icon-32.png',
+				48: 'icons/icon-48.png',
+				128: 'icons/icon-128.png',
+			},
+			actionIcons: {
+				16: 'icons/icon-16.png',
+				32: 'icons/icon-32.png',
+				48: 'icons/icon-48.png',
+				128: 'icons/icon-128.png',
+			},
+		});
 		await expect(popup.locator('#choose-create')).toBeVisible();
 		await popup.waitForTimeout(250);
 		await extensions.reload();
