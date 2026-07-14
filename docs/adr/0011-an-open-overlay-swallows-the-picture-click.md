@@ -71,3 +71,29 @@ We also now suppress a native host-page interaction, which is the kind of thing 
 next reader. That is the whole reason this is written down: the swallow is intentional, narrowly
 scoped to an open overlay on the picture, and reversing it means going back to (a) and accepting the
 race.
+
+## Amendment: the matrix keys on the Press Origin, not only the click target
+
+The decision above routes a click by _where it landed_. That is not enough, because a `click` event
+does not report where the gesture began: press on one element, release on another, and the browser
+fires the click on their **common ancestor**. Both overlays are mounted inside `#movie_player`, so
+the common ancestor of "pressed in the Expanded Note, released on the video" is the player -- and the
+matrix, reading only the target, classifies that as a Picture Click. Close the overlay, play the
+video.
+
+Nothing produces that gesture more reliably than selecting text: highlight a Note body, drag a few
+pixels past the panel's edge, and the panel you were reading disappears. The same holds for a
+selection dragged out of the Note Composer's textarea. So the swallow above, left as written, makes
+the overlays' own content unhighlightable in practice -- the very thing the panel is for.
+
+The fix stays inside the single routing matrix rather than growing a special case in `notes.js`: a
+capture-phase `pointerdown` records the **Press Origin** (was the press inside the open overlay?),
+and `YTB.pictureClickAction` takes it as an input. A gesture that began inside the overlay is routed
+as a **no-op** -- no close, no consume, no play, no grace cancellation -- whatever region it ends in,
+because it was never a click _at_ the player; it was the tail of an interaction the overlay owns.
+Both `notes.js` and `composer.js` consume the same rule, so the Expanded Note and the Note Composer
+cannot drift.
+
+This narrows the swallow rather than widening it. The Picture Click keeps its full meaning for the
+gesture it was written for -- a press AND release on the picture, which is unambiguously "play this
+video" -- and gives back the one gesture it was never entitled to take.
