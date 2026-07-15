@@ -3358,6 +3358,33 @@ const kebabFixture = `<!doctype html>
 
 type KebabFixtureWindow = { openLockupMenu: () => void; closeMenu: () => void };
 
+// Open (or re-open) a tile's kebab menu and resolve once the extension's single
+// Recommend row has landed in the FRESHLY REBUILT generation. The fixture opens
+// the menu asynchronously (a setTimeout) and bumps data-opens on every open,
+// while the extension re-arms a 3s capture on every kebab click and injects the
+// row only on a later throttled ytb:mutation. Under full-suite load those two
+// async legs can drift far enough apart that the capture expires before the menu
+// finishes opening, so the row never injects — the flake in #183. Re-clicking the
+// kebab both re-arms that capture and forces a new generation, so wrapping the
+// open in toPass makes a slow open recover instead of timing out. Gating the
+// row assertion on data-opens having advanced past THIS click guarantees we
+// resolve on the rebuilt row, never a doomed pre-rebuild instance racing the
+// caller's click.
+async function openKebabRow(page: Page, kebabId: string, listSelector: string) {
+	const opensNow = () => page.evaluate(() => Number(document.querySelector<HTMLElement>('tp-yt-iron-dropdown')?.dataset.opens || 0));
+	await expect(async () => {
+		const before = await opensNow();
+		await page.locator('#' + kebabId).click();
+		// Wait for this click's rebuild (a new generation) before touching the row.
+		await page.waitForFunction((n) => Number(document.querySelector<HTMLElement>('tp-yt-iron-dropdown')?.dataset.opens || 0) > n, before, {
+			timeout: 3000,
+		});
+		// Nudge the throttled ytb:mutation so the extension reconciles the row in.
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await expect(page.locator(listSelector + ' .ytb-kebab-add')).toHaveCount(1, { timeout: 3000 });
+	}).toPass({ timeout: 20_000 });
+}
+
 test('Recommend to Buddies row appears in both kebab menu generations and recommends the right video', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -3399,18 +3426,16 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 			}, containerSelector);
 
 		// Lockup generation: the row lands inside the sheet's list view model.
-		await page.locator('#lockup-kebab').click();
-		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await openKebabRow(page, 'lockup-kebab', 'yt-list-view-model');
 		await expect(row).toContainText('Recommend to Buddies');
 		expect(await rowFullyVisible('yt-contextual-sheet-layout')).toBe(true);
 
 		// Re-opening the menu never stacks duplicates. The mimic (like YouTube)
 		// rebuilds the menu content on each open, destroying the previous row —
-		// wait for that second render before touching the fresh row, or the click
-		// below would race the rebuild and land on the doomed first instance.
-		await page.locator('#lockup-kebab').click();
-		await page.waitForFunction(() => document.querySelector<HTMLElement>('tp-yt-iron-dropdown')?.dataset.opens === '2');
-		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		// openKebabRow waits for that fresh render (data-opens advances) before it
+		// resolves, so the click below lands on the rebuilt row, never the doomed
+		// first instance.
+		await openKebabRow(page, 'lockup-kebab', 'yt-list-view-model');
 		await expect(row).toHaveCount(1);
 
 		// Activating it recommends THAT tile's video, with the lockup title class.
@@ -3427,8 +3452,7 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 
 		// Classic generation: same row inside the paper listbox, right video,
 		// and the paper popup grows to fit it too.
-		await page.locator('#classic-kebab').click();
-		await nudgeUntil(page, () => expect(page.locator('tp-yt-paper-listbox .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await openKebabRow(page, 'classic-kebab', 'tp-yt-paper-listbox');
 		expect(await rowFullyVisible('ytd-menu-popup-renderer')).toBe(true);
 		await row.click();
 		await expect(row).toContainText('Recommended');
@@ -3445,8 +3469,7 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 			if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
 			return route.abort('connectionrefused');
 		});
-		await page.locator('#lockup-kebab').click();
-		await nudgeUntil(page, () => expect(page.locator('yt-list-view-model .ytb-kebab-add')).toHaveCount(1, { timeout: 700 }));
+		await openKebabRow(page, 'lockup-kebab', 'yt-list-view-model');
 		await row.click();
 		await expect(row).toHaveClass(/is-network-error/);
 		await expect(row).toContainText("Can't reach the backend. Check your connection and try again.");
