@@ -579,6 +579,19 @@ describe('GET /?code=', () => {
 		expect(data.presence.map((r) => r.clientId)).toEqual(['c2']);
 	});
 
+	it('partitions a Progress Record whose clientId matches an Object.prototype property name into progress', async () => {
+		// A clientId such as "toString" passes validation (it is not a reserved
+		// record kind) and must be treated as an ordinary progress key. The GET /
+		// partition selects a bucket by the key's first segment, so it must not
+		// resolve inherited Object.prototype members for such a clientId.
+		const code = 'get-proto-clientid';
+		expect((await post(code, body({ clientId: 'toString', videoId: 'v1' }))).status).toBe(200);
+		const res = await SELF.fetch(`https://example.com/?code=${code}`);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { progress: { clientId: string }[] };
+		expect(data.progress.map((r) => r.clientId)).toEqual(['toString']);
+	});
+
 	it('rejects a missing code with 400', async () => {
 		const res = await SELF.fetch('https://example.com/');
 		expect(res.status).toBe(400);

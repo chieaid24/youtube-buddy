@@ -429,7 +429,13 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 				const value = await env.PROGRESS.get(k.name);
 				if (value === null) return;
 				const kind = k.name.slice(prefix.length).split(':')[0];
-				(buckets[kind] ?? progress).push(JSON.parse(value));
+				// Only the five reserved kinds have their own bucket; every other
+				// first segment is a Progress Record's clientId and belongs in
+				// progress. Match on OWN properties so a clientId that happens to
+				// equal an inherited Object property name (e.g. "toString") routes
+				// to progress instead of resolving a prototype member.
+				const bucket = Object.hasOwn(buckets, kind) ? buckets[kind] : progress;
+				bucket.push(JSON.parse(value));
 			}),
 		);
 		return json({ progress, presence, notes, replies, playlist, events });
