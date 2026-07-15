@@ -624,10 +624,48 @@
 		// Hovering an Unseen dot Acknowledges it (ADR-0010) — the Note Preview that
 		// hover opens is the eye-catch the pulse asked for; keyboard focus, which
 		// opens the same preview, Acknowledges identically. (mouseenter never
-		// bubbles, so it needs no swallowing above.)
-		dot.addEventListener('mouseenter', () => acknowledgeDot(dot.dataset.ytbNoteId));
-		dot.addEventListener('focus', () => acknowledgeDot(dot.dataset.ytbNoteId));
+		// bubbles, so it needs no swallowing above.) The same two triggers are what
+		// unfold the Preview, so each also clamps it inside the player (#181) first,
+		// measuring the card against the player's live rect before it paints.
+		dot.addEventListener('mouseenter', () => {
+			clampPreview(dot);
+			acknowledgeDot(dot.dataset.ytbNoteId);
+		});
+		dot.addEventListener('focus', () => {
+			clampPreview(dot);
+			acknowledgeDot(dot.dataset.ytbNoteId);
+		});
 		return dot;
+	}
+
+	/**
+	 * Slide a Note Preview back inside the player's edges before it unfolds (#181).
+	 * A Preview is centred on its dot; near the bar's ends the card (up to 240px)
+	 * would overflow the player and be clipped by the viewport — hovering a Note at
+	 * 0:25 on a long video rendered the body's first characters cut off. We measure
+	 * the card's own layout width against the player's box and, only when it would
+	 * spill past a small inset (the 8px positionPanel uses for the Expanded Note),
+	 * set --ytb-preview-shift so the CSS translates the card inside. The paired
+	 * transform-origin and ::before bridge read the same variable, so a shifted card
+	 * still grows out of its dot and keeps its hover bridge over the dot. The shift
+	 * is 0 whenever the card already fits, leaving mid-bar Previews pixel-identical.
+	 */
+	function clampPreview(dot) {
+		const preview = dot.querySelector('.' + PREVIEW_CLASS);
+		const host = player();
+		if (!preview || !host) return;
+		const hostRect = host.getBoundingClientRect();
+		const dotRect = dot.getBoundingClientRect();
+		const center = dotRect.left + dotRect.width / 2;
+		const half = preview.offsetWidth / 2; // untransformed layout width, scale-independent
+		const inset = 8; // matches positionPanel's player-edge inset
+		const overLeft = hostRect.left + inset - (center - half);
+		const overRight = center + half - (hostRect.right - inset);
+		let shift = 0;
+		if (overLeft > 0)
+			shift = overLeft; // near the start: push right
+		else if (overRight > 0) shift = -overRight; // near the end: pull left
+		preview.style.setProperty('--ytb-preview-shift', shift.toFixed(2) + 'px');
 	}
 
 	/** Reconcile one Note Dot's colour, state classes, label, and Preview. */
@@ -1942,7 +1980,7 @@
          Expanded Note that grows out of it rather than lingering beside it. */
       .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} {
         opacity: 0 !important;
-        transform: translateX(-50%) scale(0.6) !important;
+        transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px))) scale(0.6) !important;
         transition: none !important;
         pointer-events: none !important;
       }
@@ -1957,8 +1995,13 @@
         position: absolute;
         bottom: 18px;
         left: 50%;
-        transform-origin: 50% calc(100% + 15px);
-        transform: translateX(-50%) scale(0.6);
+        /* --ytb-preview-shift (JS, clampPreview) slides a card back inside the
+           player's edges near the bar's ends (#181); 0 mid-bar, so most cards
+           are untouched. The origin subtracts the same shift so the unfold still
+           grows out of the dot — which sits a shift to the LEFT of a card pushed
+           right — not out of the card's own displaced centre. */
+        transform-origin: calc(50% - var(--ytb-preview-shift, 0px)) calc(100% + 15px);
+        transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px))) scale(0.6);
         /* Two auto columns — content, then the corner timestamp (#158). The
            timestamp is a real grid item, not an absolute overlay, so it CONTRIBUTES
            intrinsic width: a max-content card always widens to fit body + time, at
@@ -1997,7 +2040,9 @@
       .${PREVIEW_CLASS}::before {
         content: '';
         position: absolute;
-        left: 50%;
+        /* Anchored over the DOT, not the card centre, so the pointer can still
+           travel dot-to-card after a clamp shift moves the card off its dot. */
+        left: calc(50% - var(--ytb-preview-shift, 0px));
         transform: translateX(-50%);
         width: 16px;
         top: 100%;
@@ -2007,7 +2052,7 @@
       .${DOT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
         opacity: 1;
-        transform: translateX(-50%) scale(1);
+        transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px))) scale(1);
       }
       .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
         pointer-events: auto;
@@ -2349,12 +2394,13 @@
         .${DOT_CLASS} { transition: none; }
         /* The Note Preview's unfold-from-the-dot collapses to a plain opacity
            fade: the centring translate stays constant (so nothing animates), but
-           the scale and its transition are dropped. The Expanded Note's FLIP is
-           skipped in JS on this same query, fading opacity only. */
+           the scale and its transition are dropped. The clamp shift (#181) is
+           kept so an edge card is still inside the player. The Expanded Note's
+           FLIP is skipped in JS on this same query, fading opacity only. */
         .${PREVIEW_CLASS},
         .${DOT_CLASS}:hover .${PREVIEW_CLASS},
         .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
-          transform: translateX(-50%);
+          transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px)));
           transition: opacity var(--ytb-dur-quick) linear;
         }
         /* Unseen: a static ring replaces the looping halo — and it is held off
