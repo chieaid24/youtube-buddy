@@ -37,7 +37,7 @@ Your membership in a Room, from your perspective. _Unpaired_ — no code. _Waiti
 _Avoid_: paired, connected, linked
 
 **Sharing**:
-Whether this installation currently reports its own Progress Records. Pausing sharing never stops _seeing_ the Buddies' markers.
+Whether this installation currently reports its own Progress Records. It gates **only** Progress Record reporting — Notes, Replies, Recommendations, and presence are all independent of it, so a member who has paused Sharing still reads AND writes Notes and Replies exactly as before (writing needs a Room, not Sharing). Pausing Sharing never stops _seeing_ the Buddies' markers, and never stops the member appearing in the Room via presence.
 _Avoid_: broadcasting, syncing (which also covers reads)
 
 **Connection Lost**:
