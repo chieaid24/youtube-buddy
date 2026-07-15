@@ -121,6 +121,16 @@
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
 	let notificationPosition = 'bottom'; // Playback Notification edge
 
+	// Controls Hold state (CONTEXT.md): while a Note surface is engaged,
+	// YouTube's chrome must not autohide — the dots swallow the pointer events
+	// that would keep it awake, so YTB.controlsHold (the shared refcount)
+	// re-feeds YouTube's timer instead. Hover/focus holds are keyed by the
+	// Cluster wrapper that took them, so a wrapper that leaves the DOM without
+	// its mouseleave/focusout (a re-render, or YouTube rebuilding the bar) can
+	// never leak one: sweepControlsHolds releases any disconnected key.
+	const holdBySurface = new Map(); // wrapper Element -> { hover: release|null, focus: release|null }
+	let panelHoldRelease = null; // the open Expanded Note's own hold
+
 	injectStyle();
 
 	YTB.getSettings().then((settings) => {
@@ -382,6 +392,7 @@
 
 	/** Reconcile all Note dots for the active video against the progress bar. */
 	function renderDots() {
+		sweepControlsHolds(); // a wrapper YouTube detached must not hold the chrome awake
 		const bar = document.querySelector('.ytp-progress-bar');
 		const video = document.querySelector('video');
 		if (!bar) return; // player not built yet — a later ytb:mutation retries
@@ -415,7 +426,10 @@
 			else dot.remove();
 		}
 		if (desired.size === 0) {
-			for (const wrapper of bar.querySelectorAll('.' + CLUSTER_CLASS)) wrapper.remove();
+			for (const wrapper of bar.querySelectorAll('.' + CLUSTER_CLASS)) {
+				releaseControlsHolds(wrapper);
+				wrapper.remove();
+			}
 			return;
 		}
 		if (getComputedStyle(bar).position === 'static') bar.style.position = 'relative';
@@ -484,6 +498,11 @@
 				// scrubbing the instant the pointer leaves it.
 				wrapper.addEventListener('mouseenter', () => setStoryboardSuppressed(wrapper, true));
 				wrapper.addEventListener('mouseleave', () => setStoryboardSuppressed(wrapper, false));
+				// Hover or keyboard focus anywhere in this wrapper (its dots and
+				// their Note Previews included) takes a Controls Hold: the swallowed
+				// pointer activity is fed back to the player, so the timeline never
+				// fades out from under a hovering hand.
+				bindControlsHold(wrapper);
 				bar.appendChild(wrapper);
 			}
 			// The wrapper anchors at the Cluster centre in bar px (chapter geometry
@@ -516,7 +535,10 @@
 		// Drop wrappers whose membership no longer exists; their surviving dots were
 		// already moved into the new wrapper above, so only empties remain.
 		for (const [key, wrapper] of byKey) {
-			if (!wanted.has(key)) wrapper.remove();
+			if (!wanted.has(key)) {
+				releaseControlsHolds(wrapper);
+				wrapper.remove();
+			}
 		}
 	}
 
@@ -524,6 +546,56 @@
 	function setStoryboardSuppressed(wrapper, suppressed) {
 		const player = wrapper.closest('#movie_player, .html5-video-player');
 		if (player) player.classList.toggle(TOOLTIP_SUPPRESSED_CLASS, suppressed);
+	}
+
+	/**
+	 * Controls Hold wiring for one Cluster wrapper. The wrapper subtree contains
+	 * its Note Dots and their Note Previews (a preview is a dot's child), and
+	 * mouseenter/mouseleave + focusin/focusout are delivered for the whole
+	 * subtree, so this ONE binding covers every hover/keyboard-focus engagement
+	 * the issue names — dot, Cluster, and preview alike. Pointer and keyboard
+	 * contribute independently (a dot can be hovered AND focused); each side
+	 * holds at most one acquire at a time.
+	 */
+	function bindControlsHold(wrapper) {
+		const holds = { hover: null, focus: null };
+		holdBySurface.set(wrapper, holds);
+		wrapper.addEventListener('mouseenter', () => {
+			holds.hover ||= YTB.controlsHold.acquire();
+		});
+		wrapper.addEventListener('mouseleave', () => {
+			holds.hover?.();
+			holds.hover = null;
+		});
+		wrapper.addEventListener('focusin', () => {
+			holds.focus ||= YTB.controlsHold.acquire();
+		});
+		wrapper.addEventListener('focusout', () => {
+			holds.focus?.();
+			holds.focus = null;
+		});
+	}
+
+	/** Release (idempotently) and forget one wrapper's Controls Holds. */
+	function releaseControlsHolds(wrapper) {
+		const holds = holdBySurface.get(wrapper);
+		if (!holds) return;
+		holds.hover?.();
+		holds.focus?.();
+		holdBySurface.delete(wrapper);
+	}
+
+	/**
+	 * Release the holds of wrappers that left the DOM without their
+	 * mouseleave/focusout ever firing (YouTube rebuilt the bar, or navigation
+	 * dropped it wholesale). Runs on every renderDots pass — timeupdate,
+	 * mutation, resize — so a leaked hold lives one render at most and the
+	 * chrome can never stay pinned awake.
+	 */
+	function sweepControlsHolds() {
+		for (const wrapper of [...holdBySurface.keys()]) {
+			if (!wrapper.isConnected) releaseControlsHolds(wrapper);
+		}
 	}
 
 	/** One-time construction of a Note Dot button, its Preview, and listeners. */
@@ -788,6 +860,11 @@
 		const variant = YTB.notePanelVariant(note, playhead);
 		const panel = buildPanel(note, config, playhead, variant);
 		host.appendChild(panel);
+		// The open panel takes its own Controls Hold: the pointer sits on the
+		// panel — whose containment swallows its events — so nothing else keeps
+		// the chrome (and the panel's own anchor dot) awake. removePanel releases.
+		panelHoldRelease?.();
+		panelHoldRelease = YTB.controlsHold.acquire();
 		positionPanel(panel);
 		// The reply list seeded while the panel was detached (zero heights), so
 		// renderReplies' bottom-pin could not engage. Pin once now that the panel
@@ -1321,6 +1398,8 @@
 
 	function removePanel() {
 		stopConversationPoll();
+		panelHoldRelease?.(); // hand the autohide timer back to YouTube
+		panelHoldRelease = null;
 		document.getElementById(PANEL_ID)?.remove();
 		document.querySelector('.' + DOT_OPEN_CLASS)?.classList.remove(DOT_OPEN_CLASS);
 		document.querySelector('.' + CLUSTER_PINNED_CLASS)?.classList.remove(CLUSTER_PINNED_CLASS);
@@ -1422,6 +1501,8 @@
 	YTB.onContextInvalidated(() => {
 		stopConversationPoll();
 		dismissPanel({ resume: false });
+		// A stale script must not keep feeding the player's autohide timer.
+		for (const wrapper of [...holdBySurface.keys()]) releaseControlsHolds(wrapper);
 	});
 
 	// ---------------------------------------------------------------------------

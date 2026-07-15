@@ -813,6 +813,100 @@ const YTB = {
 		return panelOpen ? 'dismiss' : 'ignore';
 	},
 
+	// --- Controls Hold (CONTEXT.md): keep YouTube's chrome awake while a Note is engaged ---
+
+	// The ticker period a Controls Hold re-feeds YouTube's autohide timer on —
+	// comfortably inside YouTube's ~3s inactivity window, so a hand parked
+	// motionless on a Note surface can never let it expire between feeds.
+	CONTROLS_HOLD_TICK_MS: 1500,
+
+	/**
+	 * The Controls Hold core: a REFCOUNTED hold on YouTube's control-bar
+	 * autohide. Note Dots swallow the pointer events they receive (so hovering
+	 * one never pops YouTube's storyboard or time pill), which leaves YouTube's
+	 * inactivity timer starving under the viewer's own hovering hand; while at
+	 * least one hold is live this core feeds that timer instead — immediately on
+	 * the first acquire, then on a ticker, so the chrome stays awake by
+	 * YouTube's own rules. Releasing the last hold stops the ticker and hands
+	 * the timer straight back: the chrome fades on YouTube's normal schedule,
+	 * never snapping away, and nothing is left overridden.
+	 *
+	 * `acquire()` returns a ONE-SHOT release: however many times a caller
+	 * invokes it, it decrements once — so unbalanced DOM events (a duplicate
+	 * mouseleave, a sweep racing a real release) can never underflow the count.
+	 * Several surfaces hold at once (a hovered/focused Note Dot or Dot Cluster
+	 * or Note Preview, an open Expanded Note, an open Note Composer); the
+	 * chrome stays awake until the LAST one lets go.
+	 *
+	 * The dispatch and timers are injected seams so the refcount/ticker core is
+	 * testable in workerd, like the other shared client behaviors.
+	 * @param {{dispatch: (tick: number) => void, tickMs?: number,
+	 *   setTimer?: (fn: () => void, ms: number) => unknown,
+	 *   clearTimer?: (id: unknown) => void}} deps
+	 * @returns {{acquire: () => () => void, holders: () => number}}
+	 */
+	createControlsHold({
+		dispatch,
+		tickMs = YTB.CONTROLS_HOLD_TICK_MS,
+		setTimer = (fn, ms) => setInterval(fn, ms),
+		clearTimer = (id) => clearInterval(id),
+	}) {
+		let holders = 0;
+		let timer = null;
+		let tick = 0;
+		// Guarded, so a tick already queued when the last hold released (or a
+		// stray timer a host forgot to clear) can never feed after release.
+		const feed = () => {
+			if (holders === 0) return;
+			dispatch(tick++);
+		};
+		return {
+			acquire() {
+				holders += 1;
+				if (holders === 1) {
+					feed(); // wake NOW — the parked pointer is invisible to YouTube
+					timer = setTimer(feed, tickMs);
+				}
+				let released = false;
+				return () => {
+					if (released) return;
+					released = true;
+					holders -= 1;
+					if (holders === 0 && timer !== null) {
+						clearTimer(timer);
+						timer = null;
+					}
+				};
+			},
+			holders: () => holders,
+		};
+	},
+
+	/**
+	 * The real Controls Hold dispatch: one synthetic `mousemove` on the player
+	 * root — NOT the progress bar, so YouTube's scrub preview and time pill
+	 * never fire — with coordinates over the Video Picture's centre, jittered
+	 * by a pixel per tick so YouTube reads genuine movement. No-op without a
+	 * player (the popup loads this file too).
+	 * @param {number} tick the hold's feed counter (drives the jitter)
+	 */
+	nudgePlayerControls(tick) {
+		if (typeof document === 'undefined') return;
+		const player = document.querySelector('#movie_player, .html5-video-player');
+		if (!player) return;
+		const rect = player.getBoundingClientRect();
+		if (!(rect.width > 0) || !(rect.height > 0)) return;
+		player.dispatchEvent(
+			new MouseEvent('mousemove', {
+				bubbles: true,
+				cancelable: true,
+				view: window,
+				clientX: rect.left + rect.width / 2 + (tick % 2),
+				clientY: rect.top + rect.height / 2 + (Math.floor(tick / 2) % 2),
+			}),
+		);
+	},
+
 	/**
 	 * Which Expanded Note variant a Note opens into at panel-open, given the
 	 * viewer's playhead — the pure routing behind the panel's three shapes:
@@ -2015,5 +2109,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 	YTB._buddyColors = changes.buddyColors.newValue || {};
 	if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('ytb:buddy-colors'));
 });
+
+// The ONE Controls Hold (CONTEXT.md). It lives on the YTB global so notes.js
+// (dots/Clusters/Previews, the Expanded Note) and composer.js consume the SAME
+// refcount regardless of load order: the chrome stays awake until the last
+// engaged Note surface — whichever file owns it — lets go.
+YTB.controlsHold = YTB.createControlsHold({ dispatch: (tick) => YTB.nudgePlayerControls(tick) });
 
 window.YTB = YTB;

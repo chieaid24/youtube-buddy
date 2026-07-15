@@ -1760,6 +1760,105 @@ describe('pending arrival handshake (Room Feed row -> notes.js)', () => {
 	});
 });
 
+describe('Controls Hold (the refcounted chrome-awake core)', () => {
+	// The core behind YTB.controlsHold, built with injected dispatch/timer seams
+	// so every contract is observable: the real singleton only swaps in the DOM
+	// mousemove dispatch and real interval timers.
+	type Hold = { acquire: () => () => void; holders: () => number };
+	const makeHold = () => {
+		const dispatch = vi.fn();
+		const setTimer = vi.fn(() => 'timer-1' as unknown);
+		const clearTimer = vi.fn();
+		const hold: Hold = window.YTB.createControlsHold({ dispatch, tickMs: 1500, setTimer, clearTimer });
+		return { hold, dispatch, setTimer, clearTimer };
+	};
+
+	it("keeps the ticker period comfortably inside YouTube's ~3s autohide window", () => {
+		expect(window.YTB.CONTROLS_HOLD_TICK_MS).toBeGreaterThanOrEqual(1000);
+		expect(window.YTB.CONTROLS_HOLD_TICK_MS).toBeLessThanOrEqual(2000);
+	});
+
+	it('starts the ticker on the FIRST acquire only, feeding immediately', () => {
+		const { hold, dispatch, setTimer } = makeHold();
+		expect(hold.holders()).toBe(0);
+		expect(dispatch).not.toHaveBeenCalled();
+
+		hold.acquire();
+		expect(hold.holders()).toBe(1);
+		expect(dispatch).toHaveBeenCalledTimes(1); // wake NOW — a parked pointer is invisible to YouTube
+		expect(setTimer).toHaveBeenCalledTimes(1);
+		expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 1500);
+
+		hold.acquire(); // a second holder joins the SAME ticker
+		expect(hold.holders()).toBe(2);
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		expect(setTimer).toHaveBeenCalledTimes(1);
+	});
+
+	it('each tick feeds the dispatch with an advancing counter (the jitter seam)', () => {
+		const { hold, dispatch, setTimer } = makeHold();
+		hold.acquire();
+		const tick = setTimer.mock.calls[0][0] as () => void;
+		tick();
+		tick();
+		expect(dispatch.mock.calls.map(([n]) => n)).toEqual([0, 1, 2]);
+	});
+
+	it('stops the ticker only when the LAST holder releases', () => {
+		const { hold, clearTimer } = makeHold();
+		const releaseDot = hold.acquire();
+		const releasePanel = hold.acquire();
+
+		releaseDot();
+		expect(hold.holders()).toBe(1);
+		expect(clearTimer).not.toHaveBeenCalled(); // the panel still holds
+
+		releasePanel();
+		expect(hold.holders()).toBe(0);
+		expect(clearTimer).toHaveBeenCalledTimes(1);
+		expect(clearTimer).toHaveBeenCalledWith('timer-1');
+	});
+
+	it('a release is one-shot: double-releasing never underflows a sibling hold', () => {
+		const { hold, clearTimer } = makeHold();
+		const releaseA = hold.acquire();
+		hold.acquire();
+
+		releaseA();
+		releaseA(); // a sweep racing the real mouseleave, a duplicate DOM event...
+		expect(hold.holders()).toBe(1); // ...decrements exactly once
+		expect(clearTimer).not.toHaveBeenCalled();
+	});
+
+	it('never dispatches after the last release, even for an already-queued tick', () => {
+		const { hold, dispatch, setTimer } = makeHold();
+		const release = hold.acquire();
+		const tick = setTimer.mock.calls[0][0] as () => void;
+
+		release();
+		dispatch.mockClear();
+		tick(); // the interval callback that was in flight when the hold released
+		expect(dispatch).not.toHaveBeenCalled();
+	});
+
+	it('re-acquiring after a full release starts a fresh ticker with a fresh immediate feed', () => {
+		const { hold, dispatch, setTimer } = makeHold();
+		hold.acquire()();
+		expect(hold.holders()).toBe(0);
+
+		dispatch.mockClear();
+		hold.acquire();
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		expect(setTimer).toHaveBeenCalledTimes(2);
+	});
+
+	it('exposes the ONE shared instance both notes.js and composer.js consume', () => {
+		expect(window.YTB.controlsHold).toBeDefined();
+		expect(typeof window.YTB.controlsHold.acquire).toBe('function');
+		expect(typeof window.YTB.controlsHold.holders).toBe('function');
+	});
+});
+
 describe('extension context lifecycle', () => {
 	it('keeps unrelated Chrome API failures observable', async () => {
 		const failure = new Error('storage unavailable');
@@ -1875,6 +1974,15 @@ declare global {
 			withinArrivalGrace(now?: number): boolean;
 			cancelArrivalGrace(): void;
 			playAction(state: { withinGrace: boolean; panelOpen: boolean }): 'hold' | 'dismiss' | 'ignore';
+			CONTROLS_HOLD_TICK_MS: number;
+			createControlsHold(deps: {
+				dispatch: (tick: number) => void;
+				tickMs?: number;
+				setTimer?: (fn: () => void, ms: number) => unknown;
+				clearTimer?: (id: unknown) => void;
+			}): { acquire: () => () => void; holders: () => number };
+			nudgePlayerControls(tick: number): void;
+			controlsHold: { acquire: () => () => void; holders: () => number };
 			pictureClickRegion(target: { closest?: (selector: string) => unknown } | null): 'picture' | 'chrome' | 'outside';
 			pictureClickAction(state: {
 				overlayOpen: boolean;
