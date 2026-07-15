@@ -1059,7 +1059,7 @@ describe('room home section helpers', () => {
 			// A different video is ignored.
 			{ clientId: 'b5', name: 'Gus', videoId: 'other', timestamp: 50, duration: 100, updatedAt: 999 },
 		];
-		const rows = window.YTB.watchedByRows(progress, 'v', me);
+		const rows: Array<{ clientId: string; name: string; status: string | null }> = window.YTB.watchedByRows(progress, 'v', me);
 		// Newest first: Nyx(400), Mo(300), Big(200), Sam(100 — latest, not the 50 record).
 		expect(rows.map((r) => r.clientId)).toEqual(['b4', 'b2', 'b3', 'b1']);
 		expect(rows.map((r) => r.name)).toEqual(['Nyx', 'Mo', 'Big', 'Sam']);
