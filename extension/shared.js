@@ -1430,6 +1430,70 @@ const YTB = {
 	},
 
 	/**
+	 * A Progress Record's Watch Status (CONTEXT.md): how far a Buddy got through
+	 * a video, in words. Round `timestamp / duration` to the NEAREST 5% first,
+	 * and let that ONE rounded number decide the wording — 80% or more reads
+	 * "Watched", anything less reads the rounded percent floored at 5% (a Buddy
+	 * who HAS a record never reads "0%"). A record with no usable duration
+	 * (missing, zero, or non-finite — or a non-finite timestamp) has NO status:
+	 * its row shows the name alone, and we never render "NaN%".
+	 * @param {number} timestamp seconds into the video.
+	 * @param {number} duration the video's length in seconds.
+	 * @returns {?string} "Watched", a rounded percent like "45%", or null.
+	 */
+	watchStatus(timestamp, duration) {
+		const t = Number(timestamp);
+		const d = Number(duration);
+		if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return null;
+		const rounded = Math.round((t / d) * 20) * 5; // nearest 5%
+		if (rounded >= 80) return 'Watched';
+		return Math.max(rounded, 5) + '%';
+	},
+
+	/**
+	 * The Watched-By Dots tooltip's rows: one per Buddy with a Progress Record
+	 * for the video — the viewer excluded (YouTube's red Watched Bar tells their
+	 * own state) — newest watcher first, the SAME order the dots render in. Each
+	 * row carries the Buddy's Client ID (the renderer paints its Buddy Color),
+	 * Room-unique Display Name, and Watch Status (null for a record with no
+	 * usable duration). The Room cap bounds this at four rows, so nothing
+	 * collapses and no "and N others" is needed.
+	 * @param {Array<object>} progress Room read progress records (all members).
+	 * @param {string} videoId
+	 * @param {string} myClientId
+	 * @param {Array<{clientId: string, name?: string}>} [roster] makes names Room-unique.
+	 * @returns {Array<{clientId: string, name: string, status: ?string}>}
+	 */
+	watchedByRows(progress, videoId, myClientId, roster) {
+		const latest = new Map(); // clientId -> latest record for this video
+		for (const r of progress || []) {
+			if (!r || !r.clientId || r.videoId !== videoId || r.clientId === myClientId) continue;
+			const prev = latest.get(r.clientId);
+			if (!prev || r.updatedAt > prev.updatedAt) latest.set(r.clientId, r);
+		}
+		return [...latest.values()]
+			.sort((a, b) => b.updatedAt - a.updatedAt || (a.clientId < b.clientId ? -1 : 1))
+			.map((r) => ({
+				clientId: r.clientId,
+				name: YTB.buddyName(r.clientId, r.name, roster),
+				status: YTB.watchStatus(r.timestamp, r.duration),
+			}));
+	},
+
+	/**
+	 * The Watched-By Dots cluster's accessible name: the flat equivalent of the
+	 * visual rows ("Watched by Big Buddy Watched, Sam 45%"), so a screen reader
+	 * and a keyboard-focus user get the same names + statuses the pointer shows.
+	 * A row with no Watch Status contributes its name alone.
+	 * @param {Array<{name: string, status: ?string}>} rows watchedByRows output.
+	 * @returns {string} '' when there are no rows.
+	 */
+	watchedByAriaLabel(rows) {
+		if (!rows || rows.length === 0) return '';
+		return 'Watched by ' + rows.map((r) => (r.status ? `${r.name} ${r.status}` : r.name)).join(', ');
+	},
+
+	/**
 	 * Each viewer's "Recommended for you" grid, derived from the Room's
 	 * Recommendations (ADR-0007): the items whose `addedBy` is NOT the viewer
 	 * (you never recommend to yourself), minus the videoIds the viewer has

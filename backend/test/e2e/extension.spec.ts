@@ -254,8 +254,10 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 	try {
 		await stubRoomBackend(context, {
 			progress: [
+				// Two branches of the Watch Status table on one tooltip: Sam floors
+				// up to "5%" (a record never reads "0%"), Kim rounds past 80 to "Watched".
 				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-lockup', timestamp: 2, duration: 100, updatedAt: 1 },
-				{ clientId: 'buddy-2', name: 'Kim', videoId: 'vid-lockup', timestamp: 70, duration: 100, updatedAt: 2 },
+				{ clientId: 'buddy-2', name: 'Kim', videoId: 'vid-lockup', timestamp: 95, duration: 100, updatedAt: 2 },
 				// The viewer's own record must never grow a dot (YouTube's red
 				// Watched Bar already tells the viewer's state).
 				{ clientId: 'viewer-e2e', name: 'Viewer', videoId: 'vid-lockup', timestamp: 90, duration: 100, updatedAt: 9 },
@@ -283,11 +285,21 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 			}, selector);
 
 		// Keyboard focus shows the tooltip (asserted before any pointer input so
-		// :focus-visible matches). The cluster is a focusable labelled image.
+		// :focus-visible matches). The cluster is a focusable labelled image whose
+		// tooltip is one row per dot: a Buddy Color swatch, Display Name, Watch Status.
 		const classicTip = page.locator('#classic-anchor .ytb-thumb-dots > .ytb-watch-tooltip');
+		const classicRows = classicTip.locator('.ytb-thumb-row');
 		await page.evaluate(() => document.querySelector<HTMLElement>('#classic-anchor .ytb-thumb-dots')!.focus());
-		await expect(classicTip).toHaveText('Watched by Sam');
+		await expect(classicRows).toHaveCount(1);
+		await expect(classicRows.nth(0).locator('.ytb-thumb-name')).toHaveText('Sam');
+		await expect(classicRows.nth(0).locator('.ytb-thumb-status')).toHaveText('55%'); // 55/100 rounds to 55%
+		// The accessible name mirrors the rows (name + status), for a screen reader.
+		await expect(page.locator('#classic-anchor .ytb-thumb-dots')).toHaveAttribute('aria-label', 'Watched by Sam 55%');
 		await expect.poll(() => classicTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+		// Focus settles the dots up (~1.25x) — a transform, not a layout change.
+		expect(await page.evaluate(() => getComputedStyle(document.querySelector('#classic-anchor .ytb-thumb-dot')!).transform)).not.toBe(
+			'none',
+		);
 		await page.evaluate(() => document.querySelector<HTMLElement>('#classic-anchor .ytb-thumb-dots')!.blur());
 
 		// Lockup tile: the cluster lives inside the REAL thumbnail box — never
@@ -315,11 +327,18 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 		expect(lockupCluster.right).toBeLessThanOrEqual(lockupThumb.right);
 		expect(lockupCluster.bottom).toBeLessThanOrEqual(lockupThumb.bottom);
 
-		// Hover shows the single dark Buddies-only tooltip — most recent watcher
-		// first, no "You" for the viewer's own record — fully inside the box.
+		// Hover shows the dark tooltip's rows — one per dot, most recent watcher
+		// first, no "You" for the viewer's own record — each with its Watch Status,
+		// fully inside the box.
 		await page.locator('#lockup-thumb .ytb-thumb-dots').hover();
 		const tip = page.locator('#lockup-thumb .ytb-thumb-dots > .ytb-watch-tooltip');
-		await expect(tip).toHaveText('Watched by Kim and Sam');
+		const lockupRows = tip.locator('.ytb-thumb-row');
+		await expect(lockupRows).toHaveCount(2);
+		await expect(lockupRows.nth(0).locator('.ytb-thumb-name')).toHaveText('Kim');
+		await expect(lockupRows.nth(0).locator('.ytb-thumb-status')).toHaveText('Watched'); // 95/100 rounds past 80
+		await expect(lockupRows.nth(1).locator('.ytb-thumb-name')).toHaveText('Sam');
+		await expect(lockupRows.nth(1).locator('.ytb-thumb-status')).toHaveText('5%'); // 2/100 floors up
+		await expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveAttribute('aria-label', 'Watched by Kim Watched, Sam 5%');
 		await expect.poll(() => tip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 		const tipRect = await rect('#lockup-thumb .ytb-thumb-dots > .ytb-watch-tooltip');
 		expect(tipRect.left).toBeGreaterThanOrEqual(lockupThumb.left);
@@ -381,7 +400,12 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 		).toBe(true);
 		await previewCluster.hover();
 		const previewTip = page.locator('#preview-host .ytb-thumb-dots > .ytb-watch-tooltip');
-		await expect(previewTip).toHaveText('Watched by Kim and Sam');
+		const previewRows = previewTip.locator('.ytb-thumb-row');
+		await expect(previewRows).toHaveCount(2);
+		await expect(previewRows.nth(0).locator('.ytb-thumb-name')).toHaveText('Kim');
+		await expect(previewRows.nth(0).locator('.ytb-thumb-status')).toHaveText('Watched');
+		await expect(previewRows.nth(1).locator('.ytb-thumb-name')).toHaveText('Sam');
+		await expect(previewRows.nth(1).locator('.ytb-thumb-status')).toHaveText('5%');
 		await expect.poll(() => previewTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 		await page.mouse.move(0, 0);
 
