@@ -107,6 +107,7 @@
 	// then resumes; a video that was already paused stays paused.
 	let openNote = null;
 	let pauseLease = false;
+	let panelPressOrigin = 'elsewhere'; // capture-time origin for the next click (ADR-0011)
 	let pollTimer = null;
 	let labelTimer = null;
 	let pendingReply = false;
@@ -1400,6 +1401,7 @@
 		stopConversationPoll();
 		panelHoldRelease?.(); // hand the autohide timer back to YouTube
 		panelHoldRelease = null;
+		panelPressOrigin = 'elsewhere';
 		document.getElementById(PANEL_ID)?.remove();
 		document.querySelector('.' + DOT_OPEN_CLASS)?.classList.remove(DOT_OPEN_CLASS);
 		document.querySelector('.' + CLUSTER_PINNED_CLASS)?.classList.remove(CLUSTER_PINNED_CLASS);
@@ -1427,14 +1429,33 @@
 		}
 	}
 
+	// Capture where the gesture began before the panel's containment handler can
+	// stop the pointerdown. A selection dragged past the panel edge reports its
+	// later click on a common ancestor in the player, but remains panel-owned.
+	document.addEventListener(
+		'pointerdown',
+		(event) => {
+			const panelOpen = Boolean(document.getElementById(PANEL_ID));
+			if (!panelOpen) {
+				panelPressOrigin = 'elsewhere';
+				return;
+			}
+			const path = event.composedPath ? event.composedPath() : [event.target];
+			panelPressOrigin = path.some((target) => target instanceof Element && target.id === PANEL_ID) ? 'overlay' : 'elsewhere';
+		},
+		true,
+	);
+
 	// Route every click while the Expanded Note is open in capture phase. Its own
-	// controls remain inside the panel. A Picture Click is consumed before
-	// YouTube can arm its deferred play/pause toggle; player chrome passes through
-	// after a playback-neutral close; an off-player click keeps Pause Hold
-	// semantics. YTB.pictureClickAction owns the shared decision with composer.js.
+	// controls remain inside the panel. Press Origin protects a selection dragged
+	// out of the panel; a genuine Picture Click is consumed before YouTube can arm
+	// its deferred play/pause toggle. YTB.pictureClickAction owns the shared
+	// decision with composer.js.
 	document.addEventListener(
 		'click',
 		(event) => {
+			const pressOrigin = panelPressOrigin;
+			panelPressOrigin = 'elsewhere';
 			const panelOpen = Boolean(document.getElementById(PANEL_ID));
 			if (!panelOpen) return;
 			const path = event.composedPath ? event.composedPath() : [];
@@ -1454,14 +1475,15 @@
 			const route = YTB.pictureClickAction({
 				overlayOpen: panelOpen,
 				region: YTB.pictureClickRegion(event.target),
+				pressOrigin,
 				pauseHold: pauseLease,
 				withinGrace: YTB.withinArrivalGrace(),
 			});
-			if (!route.close) return;
 			if (route.consume) {
 				event.preventDefault();
 				event.stopPropagation();
 			}
+			if (!route.close) return;
 			if (route.cancelArrivalGrace) YTB.cancelArrivalGrace();
 			dismissPanel({ resume: false });
 			if (route.play) document.querySelector('video')?.play();
@@ -2083,8 +2105,16 @@
         box-shadow: var(--ytb-e-dialog);
         font: 13px/1.45 var(--ytb-font);
         text-align: left;
+        -webkit-user-select: text;
+        user-select: text;
       }
       #${PANEL_ID}:focus { outline: none; }
+      #${PANEL_ID} button,
+      #${PANEL_ID} .ytb-panel-spoiler,
+      #${PANEL_ID} .ytb-panel-emoji {
+        -webkit-user-select: none;
+        user-select: none;
+      }
       @keyframes ytb-pop-in {
         from { opacity: 0; transform: scale(0.96) translateY(4px); }
       }

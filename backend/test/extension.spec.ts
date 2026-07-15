@@ -575,12 +575,14 @@ describe('note presentation helpers', () => {
 		const route = (state: {
 			overlayOpen?: boolean;
 			region?: 'picture' | 'chrome' | 'outside';
+			pressOrigin?: 'overlay' | 'elsewhere';
 			pauseHold?: boolean;
 			withinGrace?: boolean;
 		}) =>
 			window.YTB.pictureClickAction({
 				overlayOpen: true,
 				region: 'outside',
+				pressOrigin: 'elsewhere',
 				pauseHold: false,
 				withinGrace: false,
 				...state,
@@ -608,6 +610,19 @@ describe('note presentation helpers', () => {
 			play: true,
 			cancelArrivalGrace: true,
 		});
+
+		// The click target can be the player when a selection starts in an
+		// overlay and ends outside it. Press Origin owns that gesture, so every
+		// release region suppresses only the host click: the overlay, playback,
+		// and arrival grace stay untouched.
+		for (const region of ['picture', 'chrome', 'outside'] as const) {
+			expect(route({ region, pressOrigin: 'overlay', pauseHold: true, withinGrace: true })).toEqual({
+				close: false,
+				consume: true,
+				play: false,
+				cancelArrivalGrace: false,
+			});
+		}
 
 		// Player controls keep the click and own playback, with or without a hold.
 		expect(route({ region: 'chrome', pauseHold: false, withinGrace: false })).toEqual({
@@ -1987,6 +2002,7 @@ declare global {
 			pictureClickAction(state: {
 				overlayOpen: boolean;
 				region: 'picture' | 'chrome' | 'outside';
+				pressOrigin: 'overlay' | 'elsewhere';
 				pauseHold: boolean;
 				withinGrace: boolean;
 			}): { close: boolean; consume: boolean; play: boolean; cancelArrivalGrace: boolean };

@@ -88,11 +88,12 @@ the overlays' own content unhighlightable in practice -- the very thing the pane
 
 The fix stays inside the single routing matrix rather than growing a special case in `notes.js`: a
 capture-phase `pointerdown` records the **Press Origin** (was the press inside the open overlay?),
-and `YTB.pictureClickAction` takes it as an input. A gesture that began inside the overlay is routed
-as a **no-op** -- no close, no consume, no play, no grace cancellation -- whatever region it ends in,
-because it was never a click _at_ the player; it was the tail of an interaction the overlay owns.
-Both `notes.js` and `composer.js` consume the same rule, so the Expanded Note and the Note Composer
-cannot drift.
+and `YTB.pictureClickAction` takes it as an input. A gesture that began inside the overlay changes no
+YTB state -- no close, no play, no grace cancellation -- whatever region it ends in, because it was
+never a click _at_ the player; it was the tail of an interaction the overlay owns. YTB still consumes
+that tail click so YouTube cannot reinterpret the common-ancestor click as a playback toggle. Both
+`notes.js` and `composer.js` consume the same rule, so the Expanded Note and the Note Composer cannot
+drift.
 
 This narrows the swallow rather than widening it. The Picture Click keeps its full meaning for the
 gesture it was written for -- a press AND release on the picture, which is unambiguously "play this
