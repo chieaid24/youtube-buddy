@@ -16,6 +16,31 @@ import {
 	textAndBackground,
 } from './harness';
 
+test('UA-003: contrast measurement waits for the resting transition color', async ({ page }) => {
+	await page.setContent(`
+		<style>
+			#transitioning-meta {
+				background: rgb(255, 255, 255);
+				color: rgb(255, 255, 255);
+				transition: color 500ms linear;
+			}
+			.settled-theme #transitioning-meta { color: rgb(32, 32, 32); }
+		</style>
+		<div id="transitioning-meta">Meta</div>
+	`);
+	const activeTransitions = await page.evaluate(() => {
+		const meta = document.getElementById('transitioning-meta')!;
+		void getComputedStyle(meta).color;
+		document.documentElement.classList.add('settled-theme');
+		return meta.getAnimations().length;
+	});
+	expect(activeTransitions).toBe(1);
+
+	const { fg, bg } = await textAndBackground(page, '#transitioning-meta');
+	expect(fg).toEqual([32, 32, 32, 255]);
+	expect(bg).toEqual([255, 255, 255, 255]);
+});
+
 test('UA-003: meta text passes AA on the panel, preview, and composer in both themes', async () => {
 	const context = await launchExtension();
 	try {

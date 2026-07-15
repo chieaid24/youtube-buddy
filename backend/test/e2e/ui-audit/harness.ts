@@ -313,24 +313,48 @@ export function contrastRatio(a: number[], b: number[]): number {
 	return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-/** Computed color of an element and the first opaque background behind it, as sRGB tuples. */
+/** Resting color of an element and the first opaque background behind it, as sRGB tuples. */
 export async function textAndBackground(page: Page, selector: string): Promise<{ fg: number[]; bg: number[] }> {
-	const { fg, bg } = await page.evaluate((sel) => {
+	const { fg, bg } = await page.evaluate(async (sel) => {
 		const el = document.querySelector(sel);
 		if (!el) throw new Error('missing ' + sel);
-		const fg = getComputedStyle(el).color;
-		let bg = '';
-		let node: Element | null = el;
-		while (node) {
-			const b = getComputedStyle(node).backgroundColor;
-			if (b && !b.includes('transparent') && !/rgba\(.*,\s*0\)/.test(b)) {
-				bg = b;
-				break;
+
+		const read = () => {
+			const fg = getComputedStyle(el).color;
+			let bg = '';
+			let backgroundNode: Element | null = null;
+			let node: Element | null = el;
+			while (node) {
+				const candidate = getComputedStyle(node).backgroundColor;
+				if (candidate && !candidate.includes('transparent') && !/rgba\(.*,\s*0\)/.test(candidate)) {
+					bg = candidate;
+					backgroundNode = node;
+					break;
+				}
+				node = node.parentElement;
 			}
-			node = node.parentElement;
-		}
-		if (!bg) bg = 'rgb(255, 255, 255)';
-		return { fg, bg };
+			if (!bg) bg = 'rgb(255, 255, 255)';
+			return { fg, bg, backgroundNode };
+		};
+
+		// Reading computed style registers a just-triggered CSS transition. Give
+		// the browser one frame to expose it, then wait for the measured ink and
+		// surface colors to reach their resting values before sampling them.
+		let sample = read();
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const colorProperties = new Set(['color', 'background', 'background-color']);
+		const nodes = sample.backgroundNode && sample.backgroundNode !== el ? [el, sample.backgroundNode] : [el];
+		const transitions = nodes.flatMap((node) =>
+			node
+				.getAnimations()
+				.filter(
+					(animation): animation is CSSTransition =>
+						animation instanceof CSSTransition && colorProperties.has(animation.transitionProperty),
+				),
+		);
+		await Promise.all(transitions.map((transition) => transition.finished.catch(() => undefined)));
+		sample = read();
+		return { fg: sample.fg, bg: sample.bg };
 	}, selector);
 	return { fg: [...(await resolveColor(page, fg))], bg: [...(await resolveColor(page, bg))] };
 }
