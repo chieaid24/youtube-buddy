@@ -1067,6 +1067,75 @@ const YTB = {
 		return { clusters: clusters.map((cluster) => cluster.map((i) => dots[i].index)), offsets, gap };
 	},
 
+	// --- Own-churn + Watched-By ownership (pure — tested at the shared.js seam) ---
+
+	/**
+	 * Whether a MutationObserver batch is ENTIRELY the extension's own DOM churn
+	 * (#174). Every YTB-created root carries a `ytb-`-prefixed id or class, so a
+	 * record is ours iff its target sits inside a YTB-owned element (text swaps
+	 * in our tooltips, dots reconciled inside a cluster) or every node it added
+	 * or removed is YTB-owned (mounting/unmounting our roots in YouTube's DOM).
+	 * content.js drops these batches instead of emitting `ytb:mutation`, so a
+	 * render pass can never re-trigger itself — the loop that made YouTube's
+	 * hover-autoplay preview flicker while we mirrored dots into it. Anything
+	 * ambiguous (a record mixing our nodes with YouTube's, or moving none at
+	 * all) counts as NOT ours: the failure mode must be a redundant render
+	 * pass, never a missed one. Pure over duck-typed records (`target`,
+	 * `addedNodes`, `removedNodes`; nodes with `nodeType`, `id`, `classList`,
+	 * `parentNode`), so the rule is unit-tested at the shared.js seam.
+	 * @param {Iterable<{target: object, addedNodes: Iterable, removedNodes: Iterable}>} records
+	 * @returns {boolean} true iff there is at least one record and all are YTB-owned
+	 */
+	ytbOwnedChurn(records) {
+		const isYtbElement = (node) => {
+			if (!node || node.nodeType !== 1) return false;
+			if (typeof node.id === 'string' && node.id.startsWith('ytb-')) return true;
+			for (const cls of node.classList || []) {
+				if (typeof cls === 'string' && cls.startsWith('ytb-')) return true;
+			}
+			return false;
+		};
+		// A node is YTB-owned if it, or any ancestor still attached to it, is a
+		// YTB element. Removed nodes have no parent anymore, so ownership of a
+		// detached subtree rests on the removed root itself carrying the prefix.
+		const isOwned = (node) => {
+			for (let n = node; n; n = n.parentNode) {
+				if (isYtbElement(n)) return true;
+			}
+			return false;
+		};
+		let any = false;
+		for (const record of records || []) {
+			any = true;
+			if (isOwned(record.target)) continue;
+			const churn = [...(record.addedNodes || []), ...(record.removedNodes || [])];
+			if (churn.length === 0 || !churn.every(isOwned)) return false;
+		}
+		return any;
+	},
+
+	/**
+	 * Whether YouTube's hover-autoplay preview host covers a tile's thumbnail
+	 * box — the geometric half of pairing the preview to the ONE tile it sits
+	 * over (#174; the caller has already matched videoIds). The measured host is
+	 * LARGER than the tile it previews and overflows it on every side, so a
+	 * neighbouring tile can intersect the host's overhang; requiring the
+	 * intersection to cover at least half the tile's own area keeps a duplicate
+	 * of the same videoId elsewhere in the feed owning its own dots. Pure over
+	 * duck-typed rects, so the threshold is unit-tested at the shared.js seam.
+	 * @param {{left: number, top: number, right: number, bottom: number}} previewRect
+	 * @param {{left: number, top: number, right: number, bottom: number}} tileRect
+	 * @returns {boolean}
+	 */
+	previewOwnsTile(previewRect, tileRect) {
+		if (!previewRect || !tileRect) return false;
+		const width = Math.min(previewRect.right, tileRect.right) - Math.max(previewRect.left, tileRect.left);
+		const height = Math.min(previewRect.bottom, tileRect.bottom) - Math.max(previewRect.top, tileRect.top);
+		if (width <= 0 || height <= 0) return false;
+		const tileArea = (tileRect.right - tileRect.left) * (tileRect.bottom - tileRect.top);
+		return tileArea > 0 && width * height >= tileArea / 2;
+	},
+
 	// --- Room Home Section helpers (pure — tested at the shared.js seam) ---
 
 	/**

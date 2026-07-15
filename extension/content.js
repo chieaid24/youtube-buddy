@@ -79,10 +79,13 @@
 
 	// Fallback + mutation source: watch the body subtree. Each mutation cheaply
 	// re-checks the URL (catches navs that don't surface yt-navigate-finish) and
-	// feeds the throttled ytb:mutation used for feed lazy-loads.
-	const observer = new MutationObserver(() => {
+	// feeds the throttled ytb:mutation used for feed lazy-loads. A batch that is
+	// entirely OUR OWN churn (YTB-owned nodes — #174) emits nothing: a render
+	// pass mounting or unmounting extension UI must never re-trigger itself
+	// through this observer.
+	const observer = new MutationObserver((records) => {
 		emitNavigateIfUrlChanged();
-		emitMutationThrottled();
+		if (!YTB.ytbOwnedChurn(records)) emitMutationThrottled();
 	});
 	observer.observe(document.body, { childList: true, subtree: true });
 

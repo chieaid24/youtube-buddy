@@ -292,10 +292,12 @@
 	// (as playlist-add.js and home-toggle.js do for the menu and guide DOM).
 	// ---------------------------------------------------------------------------
 
-	// YouTube's hover-autoplay inline preview host. When the preview is a
-	// document-level overlay covering the tile, the in-box cluster is buried
-	// under a foreign stacking context no z-index of ours can beat — so the
-	// cluster is mirrored INTO the visible preview host (and removed with it).
+	// YouTube's hover-autoplay inline preview host: a document-level SINGLETON,
+	// never reparented into a tile, sized over the hovered tile and larger than
+	// its thumbnail box. While it visibly covers a decorated tile the cluster
+	// is mirrored INTO the host — and ownership is explicit (#174): the mirror
+	// owns that video's cluster and the covered tile's own is swept, never left
+	// to stacking-order luck.
 	const PREVIEW_HOST_SELECTOR = 'ytd-video-preview';
 
 	/**
@@ -321,8 +323,21 @@
 	 * ytb:mutation passes never tear down a tooltip mid-hover. Dot COLORS are
 	 * repainted every pass: a Buddy Color re-assignment changes no ids, so it
 	 * must never be short-circuited by the signature.
+	 *
+	 * Exactly one surface owns a video's cluster at any moment (#174): while a
+	 * visible preview host covers a tile, the preview MIRROR owns it and the
+	 * tile's own cluster goes; otherwise the tile owns it. Every cluster the
+	 * pass keeps is claimed, and the closing sweep removes every unclaimed
+	 * `.ytb-thumb-dots` left anywhere in the document — a recycled tile, a
+	 * hidden preview's stale mirror, a reparented box — so doubling is
+	 * impossible by construction rather than by z-index luck.
 	 */
 	function renderThumbnails() {
+		const claimed = new Set(); // every cluster this pass kept
+		// The preview pass runs FIRST: it decides which tile boxes a visible
+		// preview covers, so the tile pass below can cede those clusters.
+		const coveredBoxes = renderPreviewDots(claimed);
+
 		const anchors = document.querySelectorAll('a[href*="/watch?v="]');
 		for (const anchor of anchors) {
 			// Decorate only thumbnail anchors — the ones wrapping the tile image — so
@@ -336,44 +351,50 @@
 			if (anchor.closest('#ytb-home-section')) continue;
 
 			// Anchors inside a hover-autoplay preview host belong to
-			// renderPreviewDots below — decorating both would double the dots.
+			// renderPreviewDots — decorating both would double the dots.
 			if (anchor.closest(PREVIEW_HOST_SELECTOR)) continue;
 
 			const videoId = videoIdFromHref(anchor.getAttribute('href'));
-			// Hidden Buddy Progress removes every tile's dots via the null branch.
+			// Hidden Buddy Progress removes every tile's dots via the null branch
+			// (unclaimed, so the sweep strips them).
 			const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
-
-			// The cluster lives inside the thumbnail box, itself inside the anchor —
-			// one anchor-scoped lookup finds it wherever the box resolved to.
-			let cluster = anchor.querySelector('.' + THUMB_DOTS_CLASS);
-
-			if (!records || records.length === 0) {
-				if (cluster) cluster.remove();
-				continue;
-			}
+			if (!records || records.length === 0) continue;
 
 			const box = thumbBoxFor(anchor);
-			if (cluster && !box.contains(cluster)) {
-				// The tile hydrated its real thumbnail box after the cluster attached
-				// to the anchor — rebuild inside the right parent.
-				cluster.remove();
-				cluster = null;
-			}
+			// A visible preview covers this tile: the mirror owns its cluster, and
+			// the tile's own (unclaimed) one is swept.
+			if (coveredBoxes.has(box)) continue;
 
-			renderDotsCluster(box, cluster, videoId, records);
+			// The cluster lives inside the thumbnail box, itself inside the anchor —
+			// one anchor-scoped lookup finds it wherever the box resolved to. One
+			// that attached before the tile hydrated its real thumbnail box is
+			// rebuilt inside the right parent (the stray gets swept).
+			let cluster = anchor.querySelector('.' + THUMB_DOTS_CLASS);
+			if (cluster && !box.contains(cluster)) cluster = null;
+
+			claimed.add(renderDotsCluster(box, cluster, videoId, records));
 		}
 
-		renderPreviewDots();
+		// The sweep: any cluster this pass did not claim is an orphan — a
+		// recycled tile's, a hidden preview's stale mirror, a preview-covered
+		// tile's own — and goes. At most one cluster per video survives, by
+		// construction.
+		for (const cluster of document.querySelectorAll('.' + THUMB_DOTS_CLASS)) {
+			if (!claimed.has(cluster)) cluster.remove();
+		}
 	}
 
 	/**
 	 * Build (or reconcile) one Watched-By Dots cluster inside `box`: one flat
 	 * dot per Buddy record, newest first, plus the single dark tooltip. Shared
-	 * by the per-tile pass and the preview mirror.
+	 * by the per-tile pass and the preview mirror. Reconciles IN PLACE: a pass
+	 * that changes nothing writes nothing beyond the color repaint, so a stable
+	 * cluster is never removed-and-re-added (#174).
 	 * @param {Element} box the positioning parent the cluster must stay inside
 	 * @param {?Element} cluster the existing cluster in `box`, if any
 	 * @param {string} videoId
 	 * @param {Array<object>} records this video's Buddy records (latest per Buddy)
+	 * @returns {Element} the cluster kept by this pass (for the caller's claim)
 	 */
 	function renderDotsCluster(box, cluster, videoId, records) {
 		// Most-recent watcher first — the same order watchedByLabel names them.
@@ -397,10 +418,13 @@
 		}
 
 		// Label first (cheap, and names can change without the watcher set
-		// changing): the Buddies-only variant — never a "You" entry.
+		// changing): the Buddies-only variant — never a "You" entry. Guarded so
+		// an unchanged pass performs no write (setting equal textContent still
+		// replaces the text node — childList churn for nothing).
 		const label = 'Watched by ' + YTB.watchedByLabel(watchers, videoId, myClientId, roster, { buddiesOnly: true });
-		cluster.setAttribute('aria-label', label);
-		cluster.querySelector(':scope > .' + TOOLTIP_CLASS).textContent = label;
+		if (cluster.getAttribute('aria-label') !== label) cluster.setAttribute('aria-label', label);
+		const tooltipEl = cluster.querySelector(':scope > .' + TOOLTIP_CLASS);
+		if (tooltipEl.textContent !== label) tooltipEl.textContent = label;
 
 		// Rebuild the dots only when the video or its watcher set changed.
 		const sig = videoId + '|' + watchers.map((w) => w.clientId).join(',');
@@ -420,28 +444,49 @@
 		for (const dot of cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS)) {
 			dot.style.background = YTB.buddyColor(dot.dataset.ytbCid);
 		}
+
+		return cluster;
 	}
 
 	/**
 	 * Mirror the Watched-By Dots into YouTube's hover-autoplay inline preview
 	 * while it covers a decorated tile, so the dots stay visible AND hoverable
-	 * during the preview. Runs on every render pass (the preview mounting
-	 * triggers ytb:mutation); a preview that is hidden, previewing an
-	 * un-watched video, or gone again loses its mirrored cluster.
+	 * during the preview — the mirror stays a DESCENDANT of the preview host,
+	 * keeping the pointer inside the host's subtree (a document-level float of
+	 * ours would fire a synthetic mouseleave and cancel the autoplay). Runs
+	 * first on every render pass; a preview that is hidden, previewing an
+	 * un-watched video, or gone again leaves its mirror unclaimed for the
+	 * sweep.
+	 *
+	 * While a mirror renders, the ONE tile the preview covers cedes its own
+	 * cluster (#174): the covered tile is the one showing the SAME videoId
+	 * whose thumbnail box the host geometrically overlaps
+	 * (YTB.previewOwnsTile) — a duplicate of the videoId elsewhere in the feed
+	 * keeps its own dots.
+	 * @param {Set<Element>} claimed this pass's claim set (mirrors added here)
+	 * @returns {Set<Element>} the tile thumbnail boxes covered by a preview
 	 */
-	function renderPreviewDots() {
+	function renderPreviewDots(claimed) {
+		const coveredBoxes = new Set();
 		for (const host of document.querySelectorAll(PREVIEW_HOST_SELECTOR)) {
 			const cluster = host.querySelector('.' + THUMB_DOTS_CLASS);
-			const anchor = host.querySelector('a[href*="/watch?v="]');
-			const visible = host.getBoundingClientRect().width > 0;
-			const videoId = visible && anchor ? videoIdFromHref(anchor.getAttribute('href')) : null;
+			const hostRect = host.getBoundingClientRect();
+			const anchor = hostRect.width > 0 ? host.querySelector('a[href*="/watch?v="]') : null;
+			const videoId = anchor ? videoIdFromHref(anchor.getAttribute('href')) : null;
 			const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
-			if (!records || records.length === 0) {
-				if (cluster) cluster.remove();
-				continue;
+			if (!records || records.length === 0) continue;
+
+			claimed.add(renderDotsCluster(host, cluster, videoId, records));
+
+			for (const tileAnchor of document.querySelectorAll('a[href*="/watch?v="]')) {
+				if (!tileAnchor.querySelector('img')) continue;
+				if (tileAnchor.closest(PREVIEW_HOST_SELECTOR) || tileAnchor.closest('#ytb-home-section')) continue;
+				if (videoIdFromHref(tileAnchor.getAttribute('href')) !== videoId) continue;
+				const box = thumbBoxFor(tileAnchor);
+				if (YTB.previewOwnsTile(hostRect, box.getBoundingClientRect())) coveredBoxes.add(box);
 			}
-			renderDotsCluster(host, cluster, videoId, records);
 		}
+		return coveredBoxes;
 	}
 
 	// ---------------------------------------------------------------------------
