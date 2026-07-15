@@ -26,6 +26,10 @@
 	let currentVideoId = null;
 	let openToken = 0;
 	let pauseLeaseActive = false; // opening the composer paused a playing video
+	// The open composer's Controls Hold (CONTEXT.md): the same YTB.controlsHold
+	// refcount notes.js consumes, so YouTube's chrome stays awake while the
+	// viewer composes (the composer swallows the pointer activity that would).
+	let holdRelease = null;
 
 	// Settings (live via chrome.storage.onChanged): the Spoiler Default seeds
 	// the composer's checkbox on each open, and Notes Visibility off removes
@@ -172,6 +176,8 @@
 	 */
 	function closeComposer({ resume = true } = {}) {
 		openToken += 1;
+		holdRelease?.(); // hand the autohide timer back to YouTube
+		holdRelease = null;
 		document.getElementById(COMPOSER_ID)?.remove();
 		if (resume && pauseLeaseActive) {
 			const video = document.querySelector('video');
@@ -258,6 +264,10 @@
 		}
 
 		host.append(composer);
+		// The open composer takes a Controls Hold; closeComposer (every dismissal
+		// path funnels through it) releases.
+		holdRelease?.();
+		holdRelease = YTB.controlsHold.acquire();
 		positionComposer(composer, button);
 		composer.querySelector('textarea')?.focus();
 	}
