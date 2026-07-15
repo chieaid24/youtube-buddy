@@ -309,6 +309,21 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.dotActivation({ kind: 'text', spoiler: true, timestamp: 42 })).toEqual({ action: 'open' });
 	});
 
+	it('sets a Playback Notification lifetime by kind and trigger — a Post Echo lives half a crossing', () => {
+		// A natural forward crossing fires the FULL lifetime, whoever authored it.
+		expect(window.YTB.notificationLifetime('text', 'crossing')).toBe(window.YTB.NOTE_CARD_MS);
+		expect(window.YTB.notificationLifetime('emoji', 'crossing')).toBe(window.YTB.REACTION_BURST_MS);
+		// A Post Echo lives exactly half — one factor, both kinds.
+		expect(window.YTB.notificationLifetime('text', 'echo')).toBe(window.YTB.NOTE_CARD_MS / 2);
+		expect(window.YTB.notificationLifetime('emoji', 'echo')).toBe(window.YTB.REACTION_BURST_MS / 2);
+		// Concrete numbers pin the contract the burst CSS animation-duration and the
+		// card removal timeout depend on: 4s/2s card, 2s/1s burst.
+		expect(window.YTB.notificationLifetime('text', 'crossing')).toBe(4000);
+		expect(window.YTB.notificationLifetime('text', 'echo')).toBe(2000);
+		expect(window.YTB.notificationLifetime('emoji', 'crossing')).toBe(2000);
+		expect(window.YTB.notificationLifetime('emoji', 'echo')).toBe(1000);
+	});
+
 	it('chooses the Expanded Note variant from the panel-open playhead', () => {
 		// A Spoiler whose moment is still ahead of the playhead opens masked.
 		expect(window.YTB.notePanelVariant({ kind: 'text', spoiler: true, timestamp: 42 }, 5)).toBe('spoiler');
@@ -2143,6 +2158,9 @@ declare global {
 			connectionState(prevFailures: number, ok: boolean): { failures: number; lost: boolean };
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];
 			dotActivation(note: { kind?: string; spoiler?: boolean; timestamp?: number }): { action: 'open' };
+			NOTE_CARD_MS: number;
+			REACTION_BURST_MS: number;
+			notificationLifetime(kind: string, trigger: 'crossing' | 'echo'): number;
 			notePanelVariant(note: { kind?: string; spoiler?: boolean; timestamp?: number }, playhead: number): 'text' | 'reaction' | 'spoiler';
 			nearNoteMoment(timestamp: number, playhead: number): boolean;
 		};
