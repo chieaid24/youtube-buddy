@@ -840,8 +840,9 @@
         cursor: pointer;
         transition: background 120ms ease;
       }
+      /* Pointer hover is an underline and nothing else (#171); the wash and
+         ring belong to keyboard :focus-visible below. */
       #${SECTION_ID} a.ytb-hs-text-link:hover {
-        background: var(--ytb-accent-050);
         text-decoration: underline;
       }
       #${SECTION_ID} a.ytb-hs-text-link:focus-visible {
@@ -860,7 +861,7 @@
         font-weight: 600;
         text-decoration: none;
       }
-      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover,
+      #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover { text-decoration: underline; }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       /* A struck System Message (superseded or un-recommended; per-Event —
          ADR-0007): strike the whole sentence, leaving the timestamp legible.
@@ -898,7 +899,7 @@
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         color: inherit; text-decoration: none;
       }
-      #${SECTION_ID} .ytb-hs-card-title:hover,
+      #${SECTION_ID} .ytb-hs-card-title:hover { text-decoration: underline; }
       #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-watched { margin-top: 0; font-size: 11px; color: var(--ytb-ink-muted); }
       /* Dismiss control: a dark scrim + light glyph over the thumbnail image,
@@ -918,7 +919,9 @@
         transition: opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
       }
       #${SECTION_ID} .ytb-hs-remove svg { width: 14px; height: 14px; }
-      #${SECTION_ID} .ytb-hs-card:hover .ytb-hs-remove,
+      /* Card hover only reveals the Dismiss control; the ring is keyboard
+         focus's alone (#171). */
+      #${SECTION_ID} .ytb-hs-card:hover .ytb-hs-remove { opacity: 1; }
       #${SECTION_ID} .ytb-hs-remove:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-remove:disabled { opacity: 0.4; cursor: default; }
       #${SECTION_ID} .ytb-hs-pair { display: flex; flex-direction: column; gap: 8px; }
