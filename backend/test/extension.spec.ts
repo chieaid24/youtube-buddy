@@ -1767,7 +1767,7 @@ describe('Controls Hold (the refcounted chrome-awake core)', () => {
 	type Hold = { acquire: () => () => void; holders: () => number };
 	const makeHold = () => {
 		const dispatch = vi.fn();
-		const setTimer = vi.fn(() => 'timer-1' as unknown);
+		const setTimer = vi.fn((_fn: () => void, _ms: number): unknown => 'timer-1');
 		const clearTimer = vi.fn();
 		const hold: Hold = window.YTB.createControlsHold({ dispatch, tickMs: 1500, setTimer, clearTimer });
 		return { hold, dispatch, setTimer, clearTimer };
@@ -1798,7 +1798,7 @@ describe('Controls Hold (the refcounted chrome-awake core)', () => {
 	it('each tick feeds the dispatch with an advancing counter (the jitter seam)', () => {
 		const { hold, dispatch, setTimer } = makeHold();
 		hold.acquire();
-		const tick = setTimer.mock.calls[0][0] as () => void;
+		const tick = setTimer.mock.calls[0][0];
 		tick();
 		tick();
 		expect(dispatch.mock.calls.map(([n]) => n)).toEqual([0, 1, 2]);
@@ -1833,7 +1833,7 @@ describe('Controls Hold (the refcounted chrome-awake core)', () => {
 	it('never dispatches after the last release, even for an already-queued tick', () => {
 		const { hold, dispatch, setTimer } = makeHold();
 		const release = hold.acquire();
-		const tick = setTimer.mock.calls[0][0] as () => void;
+		const tick = setTimer.mock.calls[0][0];
 
 		release();
 		dispatch.mockClear();
