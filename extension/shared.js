@@ -1352,6 +1352,39 @@ const YTB = {
 			.sort((a, b) => (Number(b.addedAt) || 0) - (Number(a.addedAt) || 0));
 	},
 
+	/**
+	 * The watch-page Recommend Control's state for one video: the Room's
+	 * authoritative `addedBy`, with the member's pending Recommend Intent
+	 * overlaid (see CONTEXT.md "Recommend Intent"). The overlay is what keeps
+	 * the optimistic pill still through a Room read that raced the write; a
+	 * Buddy's `addedBy` outranks a pending 'mine' (recommending a video a Buddy
+	 * already recommended is a server no-op onto THEIR item, so the pill
+	 * settles to "Recommended to you" — a correction, not a flicker).
+	 * @param {{addedBy?: string, myClientId?: string, pending?: 'mine'|'absent'}} args
+	 * @returns {'idle'|'added'|'recommended'}
+	 */
+	recommendPillState({ addedBy, myClientId, pending }) {
+		const effective = pending === 'mine' ? (addedBy === undefined ? myClientId : addedBy) : pending === 'absent' ? undefined : addedBy;
+		if (effective === undefined) return 'idle';
+		return myClientId && effective === myClientId ? 'recommended' : 'added';
+	},
+
+	/**
+	 * Has a Room read caught up with a pending Recommend Intent, so the intent
+	 * can be dropped and the pill driven purely by Room data again?
+	 *   'mine'   settles once ANY `addedBy` exists — mine, or the Buddy whose
+	 *            item my add turned out to be a no-op onto;
+	 *   'absent' settles once `addedBy` is gone.
+	 * No pending intent is vacuously settled (nothing to hold).
+	 * @param {{addedBy?: string, myClientId?: string, pending?: 'mine'|'absent'}} args
+	 * @returns {boolean}
+	 */
+	recommendIntentSettled({ addedBy, myClientId: _myClientId, pending }) {
+		if (pending === 'mine') return addedBy !== undefined;
+		if (pending === 'absent') return addedBy === undefined;
+		return true;
+	},
+
 	// --- Dismissed Recommendations (ADR-0007) ---
 	// A Dismiss hides one Recommendation from this viewer's Recommended-for-you
 	// grid only. Stored per install in chrome.storage.local, Room-scoped and
