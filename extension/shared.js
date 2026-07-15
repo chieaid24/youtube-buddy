@@ -779,15 +779,21 @@ const YTB = {
 	},
 
 	/**
-	 * Route an overlay-open click without touching DOM or playback. A Picture
-	 * Click is consumed and means play unconditionally; player chrome closes the
-	 * overlay but leaves the control to YouTube; an off-player click keeps the
-	 * existing Pause Hold semantics.
-	 * @param {{overlayOpen: boolean, region: 'picture'|'chrome'|'outside', pauseHold: boolean, withinGrace: boolean}} state
+	 * Route an overlay-open click without touching DOM or playback. A gesture
+	 * whose Press Origin was the overlay remains the overlay's interaction: its
+	 * tail click is consumed so the host cannot toggle playback, but YTB changes
+	 * no overlay or playback state. Otherwise a Picture Click is consumed and
+	 * means play unconditionally; player chrome closes the overlay but leaves the
+	 * control to YouTube; an off-player click keeps the existing Pause Hold
+	 * semantics.
+	 * @param {{overlayOpen: boolean, region: 'picture'|'chrome'|'outside', pressOrigin: 'overlay'|'elsewhere', pauseHold: boolean, withinGrace: boolean}} state
 	 * @returns {{close: boolean, consume: boolean, play: boolean, cancelArrivalGrace: boolean}}
 	 */
-	pictureClickAction({ overlayOpen, region, pauseHold, withinGrace }) {
+	pictureClickAction({ overlayOpen, region, pressOrigin, pauseHold, withinGrace }) {
 		if (!overlayOpen) return { close: false, consume: false, play: false, cancelArrivalGrace: false };
+		if (pressOrigin === 'overlay') {
+			return { close: false, consume: true, play: false, cancelArrivalGrace: false };
+		}
 		if (region === 'picture') {
 			return { close: true, consume: true, play: true, cancelArrivalGrace: Boolean(withinGrace) };
 		}

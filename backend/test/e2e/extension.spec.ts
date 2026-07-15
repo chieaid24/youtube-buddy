@@ -1833,6 +1833,118 @@ test('an open Expanded Note or Note Composer takes the Picture Click as the sing
 	}
 });
 
+test('Expanded Note prose selects, while overlay-origin drags leave both overlays and playback unchanged', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {
+			notes: roomNotes,
+			replies: [
+				{
+					id: 'r-selectable',
+					noteId: 'n-text',
+					clientId: 'buddy-1',
+					name: 'Buddy',
+					body: 'reply prose',
+					createdAt: 2,
+				},
+			],
+		});
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const video = page.locator('video');
+		const panel = page.locator('#ytb-note-panel');
+		const composer = page.locator('#ytb-note-composer');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0 && v.seekable.length && v.seekable.end(0) >= v.duration - 0.5);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(3, { timeout: 700 }));
+
+		await video.evaluate((v: HTMLVideoElement) => {
+			v.pause();
+			v.currentTime = 1;
+		});
+		await page.locator('.ytb-note-dot-text').click();
+		await expect(panel).toBeVisible();
+
+		const userSelect = (selector: string) => panel.locator(selector).evaluate((element) => getComputedStyle(element).userSelect);
+		for (const selector of [
+			'.ytb-panel-body',
+			'.ytb-panel-author',
+			'.ytb-panel-time',
+			'.ytb-panel-posted',
+			'.ytb-panel-reply-body',
+			'.ytb-panel-reply-author',
+			'.ytb-panel-reply-time',
+		]) {
+			expect(await userSelect(selector), selector).toBe('text');
+		}
+		expect(await userSelect('.ytb-panel-gohere')).toBe('none');
+
+		// A double-click selects the Note body as normal prose.
+		await panel.locator('.ytb-panel-body').dblclick({ position: { x: 10, y: 10 } });
+		expect(await page.evaluate(() => getSelection()?.toString())).toBe('hello');
+
+		// Drag from the Note body beyond the panel onto the Video Picture. The
+		// resulting click belongs to the overlay's Press Origin: selection stays,
+		// the panel stays open, and the paused video stays paused.
+		const bodyBox = await panel.locator('.ytb-panel-body').boundingBox();
+		const videoBox = await video.boundingBox();
+		expect(bodyBox).not.toBeNull();
+		expect(videoBox).not.toBeNull();
+		await page.mouse.move(bodyBox!.x + 3, bodyBox!.y + bodyBox!.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(videoBox!.x + 8, videoBox!.y + 8, { steps: 8 });
+		await page.mouse.up();
+		await expect(panel).toBeVisible();
+		expect((await page.evaluate(() => getSelection()?.toString() || '')).length).toBeGreaterThan(0);
+		expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+
+		await page.keyboard.press('Escape');
+		await page.locator('.ytb-note-dot-locked').click();
+		await expect(panel.locator('.ytb-panel-spoiler')).toHaveCSS('user-select', 'none');
+		await page.keyboard.press('Escape');
+		await page.locator('.ytb-note-dot-reaction').click();
+		await expect(panel.locator('.ytb-panel-emoji')).toHaveCSS('user-select', 'none');
+		await expect(panel.locator('.ytb-panel-emoji-author')).toHaveCSS('user-select', 'text');
+		await page.keyboard.press('Escape');
+
+		// The Note Composer consumes the same Press Origin rule. Selecting out of
+		// its textarea neither discards the draft nor changes playback.
+		await page.locator('#ytb-note-button').click();
+		await expect(composer).toBeVisible();
+		const textarea = composer.locator('textarea');
+		await textarea.fill('select this draft');
+		const textareaBox = await textarea.boundingBox();
+		expect(textareaBox).not.toBeNull();
+		await page.mouse.move(textareaBox!.x + textareaBox!.width - 8, textareaBox!.y + textareaBox!.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(videoBox!.x + 8, videoBox!.y + 8, { steps: 8 });
+		await page.mouse.up();
+		await expect(composer).toBeVisible();
+		await expect(textarea).toHaveValue('select this draft');
+		const textareaSelection = await textarea.evaluate((element: HTMLTextAreaElement) => ({
+			start: element.selectionStart,
+			end: element.selectionEnd,
+		}));
+		expect(textareaSelection.end).toBeGreaterThan(textareaSelection.start);
+		expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('an Unseen Mention pulses its Note Dot; hovering Acknowledges it and a reload keeps it clear', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

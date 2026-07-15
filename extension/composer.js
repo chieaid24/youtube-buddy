@@ -26,6 +26,7 @@
 	let currentVideoId = null;
 	let openToken = 0;
 	let pauseLeaseActive = false; // opening the composer paused a playing video
+	let composerPressOrigin = 'elsewhere'; // capture-time origin for the next click (ADR-0011)
 	// The open composer's Controls Hold (CONTEXT.md): the same YTB.controlsHold
 	// refcount notes.js consumes, so YouTube's chrome stays awake while the
 	// viewer composes (the composer swallows the pointer activity that would).
@@ -178,6 +179,7 @@
 		openToken += 1;
 		holdRelease?.(); // hand the autohide timer back to YouTube
 		holdRelease = null;
+		composerPressOrigin = 'elsewhere';
 		document.getElementById(COMPOSER_ID)?.remove();
 		if (resume && pauseLeaseActive) {
 			const video = document.querySelector('video');
@@ -466,6 +468,23 @@
 	document.addEventListener('keydown', (event) => {
 		if (event.key === 'Escape') closeComposer();
 	});
+	// Record the Press Origin before the composer's descendants see pointerdown.
+	// A textarea selection dragged onto the picture later clicks a common player
+	// ancestor, but the shared routing matrix still treats it as composer-owned.
+	document.addEventListener(
+		'pointerdown',
+		(event) => {
+			const composerOpen = Boolean(document.getElementById(COMPOSER_ID));
+			if (!composerOpen) {
+				composerPressOrigin = 'elsewhere';
+				return;
+			}
+			const path = event.composedPath ? event.composedPath() : [event.target];
+			composerPressOrigin = path.some((target) => target instanceof Element && target.id === COMPOSER_ID) ? 'overlay' : 'elsewhere';
+		},
+		true,
+	);
+
 	// Share the capture-phase Picture Click rule with the Expanded Note. Composer
 	// controls and the Add Note toggle keep their own handlers. Everything else
 	// routes through the pure decision seam before YouTube can arm its deferred
@@ -473,6 +492,8 @@
 	document.addEventListener(
 		'click',
 		(event) => {
+			const pressOrigin = composerPressOrigin;
+			composerPressOrigin = 'elsewhere';
 			const composerOpen = Boolean(document.getElementById(COMPOSER_ID));
 			if (!composerOpen) return;
 			const path = event.composedPath ? event.composedPath() : [];
@@ -484,14 +505,15 @@
 			const route = YTB.pictureClickAction({
 				overlayOpen: composerOpen,
 				region: YTB.pictureClickRegion(event.target),
+				pressOrigin,
 				pauseHold: pauseLeaseActive,
 				withinGrace: YTB.withinArrivalGrace(),
 			});
-			if (!route.close) return;
 			if (route.consume) {
 				event.preventDefault();
 				event.stopPropagation();
 			}
+			if (!route.close) return;
 			if (route.cancelArrivalGrace) YTB.cancelArrivalGrace();
 			closeComposer({ resume: false });
 			if (route.play) document.querySelector('video')?.play();
