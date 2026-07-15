@@ -74,8 +74,9 @@
 
 	const CONVERSATION_POLL_MS = 5000; // focused Expanded Note freshness
 	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
-	const NOTE_CARD_MS = 4000; // text-note Playback Notification lifetime
-	const REACTION_BURST_MS = 2000; // Reaction float-and-fade lifetime
+	// Playback Notification lifetimes are the shared client seam's rule, keyed on
+	// kind AND trigger (YTB.notificationLifetime): a Post Echo lives half a
+	// crossing's. This file is the executor — it applies the number, never picks it.
 	// Concurrent crossings enter one-per-beat on this stagger, in timestamp order,
 	// instead of all at once — a staggered entrance, not serialization (each
 	// notification's own lifetime still starts at its own entrance).
@@ -371,7 +372,7 @@
 		if (Number.isFinite(timestamp)) {
 			lastPlaybackTime = lastPlaybackTime === null ? timestamp : Math.max(lastPlaybackTime, timestamp);
 		}
-		alertQueue.push(note);
+		alertQueue.push({ note, trigger: 'echo' });
 		scheduleAlertDrain();
 	}
 
@@ -1651,9 +1652,10 @@
 		return Math.min(top, Math.max(16, hostRect.height / 2));
 	}
 
-	function showNoteCard(note) {
+	function showNoteCard(note, trigger) {
 		const wrap = alertsContainer();
 		if (!wrap) return;
+		const lifetime = YTB.notificationLifetime(note.kind, trigger);
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const card = document.createElement('button');
 		card.type = 'button';
@@ -1679,12 +1681,13 @@
 		setTimeout(() => {
 			card.classList.remove('show');
 			setTimeout(() => card.remove(), 250);
-		}, NOTE_CARD_MS);
+		}, lifetime);
 	}
 
-	function showReactionBurst(note) {
+	function showReactionBurst(note, trigger) {
 		const wrap = alertsContainer();
 		if (!wrap) return;
+		const lifetime = YTB.notificationLifetime(note.kind, trigger);
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const burst = document.createElement('div');
 		burst.className = 'ytb-alert-burst';
@@ -1699,8 +1702,13 @@
 		// legible; own bursts stay the default white "You".
 		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		burst.append(emoji, author);
+		// The keyframes are percentage-based, so a per-element animation-duration
+		// scales the WHOLE float-and-fade — a short echo compresses, never truncates
+		// mid-flight. The reduced-motion variant swaps only the animation NAME, so it
+		// inherits this same duration.
+		burst.style.animationDuration = `${lifetime}ms`;
 		wrap.append(burst);
-		setTimeout(() => burst.remove(), REACTION_BURST_MS);
+		setTimeout(() => burst.remove(), lifetime);
 	}
 
 	// Natural forward crossings only: every ordinary playback crossing triggers
@@ -1729,7 +1737,7 @@
 			// Queue the entrance (drained one-per-beat, in timestamp order) but
 			// Acknowledge NOW: the crossing itself is the ADR-0010 trigger, not the
 			// staggered reveal — a no-op unless the dot was Unseen.
-			alertQueue.push(note);
+			alertQueue.push({ note, trigger: 'crossing' });
 			acknowledgeDot(note.id);
 		}
 		scheduleAlertDrain();
@@ -1744,13 +1752,14 @@
 	}
 
 	function drainNextAlert() {
-		const note = alertQueue.shift();
-		if (!note) {
+		const entry = alertQueue.shift();
+		if (!entry) {
 			alertDrainTimer = null;
 			return;
 		}
-		if (note.kind === 'emoji') showReactionBurst(note);
-		else showNoteCard(note);
+		const { note, trigger } = entry;
+		if (note.kind === 'emoji') showReactionBurst(note, trigger);
+		else showNoteCard(note, trigger);
 		alertDrainTimer = setTimeout(drainNextAlert, ENTRANCE_STAGGER_MS);
 	}
 
@@ -2369,7 +2378,12 @@
       .ytb-alert-burst {
         pointer-events: none;
         text-align: center;
-        animation: ytb-burst ${REACTION_BURST_MS}ms ease-out forwards;
+        /* Duration is set per element (showReactionBurst) so a Post Echo's short
+           lifetime compresses the whole float-and-fade; longhands here leave that
+           duration untouched and let the reduced-motion rule swap only the name. */
+        animation-name: ytb-burst;
+        animation-timing-function: ease-out;
+        animation-fill-mode: forwards;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
       .ytb-alert-burst-emoji { font-size: 34px; line-height: 1.1; }

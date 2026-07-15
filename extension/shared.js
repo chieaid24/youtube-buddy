@@ -759,6 +759,29 @@ const YTB = {
 		return { action: 'open' };
 	},
 
+	// A Playback Notification's FULL lifetime (a natural forward crossing), by
+	// kind: a text card breathes longer than a Reaction burst. A Post Echo lives
+	// half these — see notificationLifetime, the ONE rule below.
+	NOTE_CARD_MS: 4000, // text-note card lifetime
+	REACTION_BURST_MS: 2000, // Reaction float-and-fade lifetime
+
+	/**
+	 * A Playback Notification's lifetime in ms, keyed on the record kind and the
+	 * trigger — the ONE rule, so the Note presentation layer stays the executor
+	 * and there are no per-kind magic numbers at the call site. A crossing fires
+	 * the FULL lifetime whoever authored the Note; a Post Echo ('echo') lives
+	 * HALF that (the author already knows what they wrote — the receipt clears the
+	 * player fast). Keyed on the trigger, never on authorship, so replaying across
+	 * your own Note after a rewind behaves exactly like a Buddy's.
+	 * @param {string} kind the record kind ('emoji' for a Reaction, else a text card)
+	 * @param {'crossing'|'echo'} trigger what fired the notification
+	 * @returns {number} lifetime in ms
+	 */
+	notificationLifetime(kind, trigger) {
+		const full = kind === 'emoji' ? YTB.REACTION_BURST_MS : YTB.NOTE_CARD_MS;
+		return trigger === 'echo' ? full / 2 : full;
+	},
+
 	/**
 	 * Classify a click relative to YouTube's player. Known controls and other
 	 * interactive player elements are chrome; the remaining player surface is
