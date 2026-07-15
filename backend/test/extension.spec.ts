@@ -1023,6 +1023,63 @@ describe('room home section helpers', () => {
 		expect(window.YTB.watchedByLabel(progress, 'unwatched', me, undefined, buddiesOnly)).toBe('');
 	});
 
+	it('derives a Watch Status: round to the nearest 5% first, then one number decides the word', () => {
+		const s = (t: number, d: number) => window.YTB.watchStatus(t, d);
+		// The full rounding table from issue #176 (duration 100 so timestamp = raw %).
+		expect(s(2, 100)).toBe('5%'); // floor: a record never reads "0%"
+		expect(s(43, 100)).toBe('45%');
+		expect(s(77, 100)).toBe('75%');
+		expect(s(78, 100)).toBe('Watched'); // rounds to 80 — one number decides both
+		expect(s(80, 100)).toBe('Watched');
+		expect(s(99, 100)).toBe('Watched');
+		// Boundaries: an exact 5% stays "5%"; a 0-position record still floors up.
+		expect(s(5, 100)).toBe('5%');
+		expect(s(0, 100)).toBe('5%');
+		// >100% (a slight overrun past the end) still reads "Watched", never "105%".
+		expect(s(130, 100)).toBe('Watched');
+		// No usable duration -> no status (name alone), and never "NaN%"/"0%".
+		expect(s(50, 0)).toBeNull();
+		expect(s(50, undefined as unknown as number)).toBeNull();
+		expect(s(50, NaN)).toBeNull();
+		expect(s(50, Infinity)).toBeNull();
+		expect(s(NaN, 100)).toBeNull();
+	});
+
+	it('builds the Watched-By Dots rows: buddies only, newest first, name + Watch Status per dot', () => {
+		const progress = [
+			// The viewer's own record never grows a row (their state is the red Watched Bar's).
+			{ clientId: me, name: 'Aidan', videoId: 'v', timestamp: 90, duration: 100, updatedAt: 500 },
+			{ clientId: 'b1', name: 'Sam', videoId: 'v', timestamp: 2, duration: 100, updatedAt: 100 },
+			// An older record for Sam must lose to his latest (higher updatedAt).
+			{ clientId: 'b1', name: 'Sam', videoId: 'v', timestamp: 99, duration: 100, updatedAt: 50 },
+			{ clientId: 'b2', name: 'Mo', videoId: 'v', timestamp: 43, duration: 100, updatedAt: 300 },
+			{ clientId: 'b3', name: 'Big', videoId: 'v', timestamp: 80, duration: 100, updatedAt: 200 },
+			// A missing-duration record shows the name with no status.
+			{ clientId: 'b4', name: 'Nyx', videoId: 'v', timestamp: 50, duration: 0, updatedAt: 400 },
+			// A different video is ignored.
+			{ clientId: 'b5', name: 'Gus', videoId: 'other', timestamp: 50, duration: 100, updatedAt: 999 },
+		];
+		const rows = window.YTB.watchedByRows(progress, 'v', me);
+		// Newest first: Nyx(400), Mo(300), Big(200), Sam(100 — latest, not the 50 record).
+		expect(rows.map((r) => r.clientId)).toEqual(['b4', 'b2', 'b3', 'b1']);
+		expect(rows.map((r) => r.name)).toEqual(['Nyx', 'Mo', 'Big', 'Sam']);
+		expect(rows.map((r) => r.status)).toEqual([null, '45%', 'Watched', '5%']);
+		// A video only the viewer watched, and an unwatched video, both yield no rows.
+		expect(window.YTB.watchedByRows([{ clientId: me, videoId: 'v5', timestamp: 5, duration: 100, updatedAt: 1 }], 'v5', me)).toEqual([]);
+		expect(window.YTB.watchedByRows(progress, 'unwatched', me)).toEqual([]);
+	});
+
+	it('renders the Watched-By Dots accessible name from the rows: names + statuses, name-only when absent', () => {
+		const rows = [
+			{ clientId: 'b4', name: 'Nyx', status: null },
+			{ clientId: 'b2', name: 'Mo', status: '45%' },
+			{ clientId: 'b3', name: 'Big', status: 'Watched' },
+		];
+		expect(window.YTB.watchedByAriaLabel(rows)).toBe('Watched by Nyx, Mo 45%, Big Watched');
+		expect(window.YTB.watchedByAriaLabel([{ clientId: 'b', name: 'Solo', status: '20%' }])).toBe('Watched by Solo 20%');
+		expect(window.YTB.watchedByAriaLabel([])).toBe('');
+	});
+
 	it('builds the personalized Feed: replies to mine, mentions of me, and System Messages', () => {
 		const base = new Date(2026, 6, 4, 12, 0, 0).getTime(); // local noon — no midnight straddle
 		const notes = [
@@ -1946,6 +2003,14 @@ declare global {
 				roster?: Array<{ clientId: string; name?: string }>,
 				options?: { buddiesOnly?: boolean },
 			): string;
+			watchStatus(timestamp: number, duration: number): string | null;
+			watchedByRows(
+				progress: object[],
+				videoId: string,
+				myClientId: string,
+				roster?: Array<{ clientId: string; name?: string }>,
+			): Array<{ clientId: string; name: string; status: string | null }>;
+			watchedByAriaLabel(rows: Array<{ name: string; status: string | null }>): string;
 			buildFeed(
 				records: object,
 				myClientId: string,

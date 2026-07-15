@@ -38,6 +38,12 @@
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
 	const THUMB_DOTS_CLASS = 'ytb-thumb-dots'; // Watched-By Dots cluster on a thumbnail
 	const THUMB_DOT_CLASS = 'ytb-thumb-dot'; // one flat Buddy-colored dot
+	// The cluster's tooltip is one row per dot (#176): a Buddy Color swatch, the
+	// Display Name, and the Watch Status.
+	const TOOLTIP_ROW_CLASS = 'ytb-thumb-row';
+	const TOOLTIP_SWATCH_CLASS = 'ytb-thumb-swatch';
+	const TOOLTIP_NAME_CLASS = 'ytb-thumb-name';
+	const TOOLTIP_STATUS_CLASS = 'ytb-thumb-status';
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
@@ -386,10 +392,11 @@
 
 	/**
 	 * Build (or reconcile) one Watched-By Dots cluster inside `box`: one flat
-	 * dot per Buddy record, newest first, plus the single dark tooltip. Shared
-	 * by the per-tile pass and the preview mirror. Reconciles IN PLACE: a pass
-	 * that changes nothing writes nothing beyond the color repaint, so a stable
-	 * cluster is never removed-and-re-added (#174).
+	 * dot per Buddy record, newest first, plus the dark tooltip carrying one row
+	 * per dot (swatch + Display Name + Watch Status, #176). Shared by the
+	 * per-tile pass and the preview mirror. Reconciles IN PLACE: a pass that
+	 * changes nothing writes nothing beyond the color/text repaint, so a stable
+	 * cluster and its tooltip are never removed-and-re-added mid-hover (#174).
 	 * @param {Element} box the positioning parent the cluster must stay inside
 	 * @param {?Element} cluster the existing cluster in `box`, if any
 	 * @param {string} videoId
@@ -397,8 +404,10 @@
 	 * @returns {Element} the cluster kept by this pass (for the caller's claim)
 	 */
 	function renderDotsCluster(box, cluster, videoId, records) {
-		// Most-recent watcher first — the same order watchedByLabel names them.
-		const watchers = records.slice().sort((a, b) => b.updatedAt - a.updatedAt || (a.clientId < b.clientId ? -1 : 1));
+		// One row per Buddy with a record — the viewer excluded, newest first —
+		// the SAME order the dots render in (the pure derivation owns the sort,
+		// so dots and rows never drift). Row i pairs dot i.
+		const rows = YTB.watchedByRows(records, videoId, myClientId, roster);
 
 		if (!cluster) {
 			// The thumbnail box must establish a positioning context; only mutate
@@ -417,33 +426,60 @@
 			box.appendChild(cluster);
 		}
 
-		// Label first (cheap, and names can change without the watcher set
-		// changing): the Buddies-only variant — never a "You" entry. Guarded so
-		// an unchanged pass performs no write (setting equal textContent still
-		// replaces the text node — childList churn for nothing).
-		const label = 'Watched by ' + YTB.watchedByLabel(watchers, videoId, myClientId, roster, { buddiesOnly: true });
+		// The accessible name mirrors the visual rows (names + statuses), so a
+		// screen reader and a keyboard-focus user get what the pointer shows.
+		// Guarded so an unchanged pass performs no write (a text-node replace is
+		// childList churn for nothing).
+		const label = YTB.watchedByAriaLabel(rows);
 		if (cluster.getAttribute('aria-label') !== label) cluster.setAttribute('aria-label', label);
-		const tooltipEl = cluster.querySelector(':scope > .' + TOOLTIP_CLASS);
-		if (tooltipEl.textContent !== label) tooltipEl.textContent = label;
+		const tooltip = cluster.querySelector(':scope > .' + TOOLTIP_CLASS);
 
-		// Rebuild the dots only when the video or its watcher set changed.
-		const sig = videoId + '|' + watchers.map((w) => w.clientId).join(',');
+		// Rebuild the dots AND the tooltip rows only when the video or its
+		// (ordered) watcher set changed — the signature carries order, so a
+		// recency flip rebuilds both together and they stay aligned. Status text
+		// and colors, which can change with the set unchanged, are reconciled
+		// every pass below, so a no-op poll tears nothing down mid-hover.
+		const sig = videoId + '|' + rows.map((r) => r.clientId).join(',');
 		if (cluster.dataset.ytbSig !== sig) {
 			for (const dot of cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS)) dot.remove();
-			const tooltip = cluster.querySelector(':scope > .' + TOOLTIP_CLASS);
-			for (const w of watchers) {
+			tooltip.replaceChildren();
+			for (const row of rows) {
 				const dot = document.createElement('div');
 				dot.className = THUMB_DOT_CLASS;
-				dot.dataset.ytbCid = w.clientId;
+				dot.dataset.ytbCid = row.clientId;
 				cluster.insertBefore(dot, tooltip);
+
+				const rowEl = document.createElement('div');
+				rowEl.className = TOOLTIP_ROW_CLASS;
+				const swatch = document.createElement('span');
+				swatch.className = TOOLTIP_SWATCH_CLASS;
+				const name = document.createElement('span');
+				name.className = TOOLTIP_NAME_CLASS;
+				const status = document.createElement('span');
+				status.className = TOOLTIP_STATUS_CLASS;
+				rowEl.append(swatch, name, status);
+				tooltip.appendChild(rowEl);
 			}
 			cluster.dataset.ytbSig = sig;
 		}
 
-		// Colors every pass — never behind the signature guard (see above).
-		for (const dot of cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS)) {
-			dot.style.background = YTB.buddyColor(dot.dataset.ytbCid);
-		}
+		// Reconcile color + text every pass — a Buddy Color pick, a renamed
+		// Buddy, or a Buddy advancing all change these without changing the set.
+		// Colors are set unconditionally (a style write is no childList churn);
+		// text is guarded (a text-node replace would be). Dot i pairs row i.
+		const dotEls = cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS);
+		const rowEls = tooltip.querySelectorAll(':scope > .' + TOOLTIP_ROW_CLASS);
+		rows.forEach((row, i) => {
+			const color = YTB.buddyColor(row.clientId);
+			dotEls[i].style.background = color;
+			const rowEl = rowEls[i];
+			rowEl.querySelector(':scope > .' + TOOLTIP_SWATCH_CLASS).style.background = color;
+			const nameEl = rowEl.querySelector(':scope > .' + TOOLTIP_NAME_CLASS);
+			if (nameEl.textContent !== row.name) nameEl.textContent = row.name;
+			const statusEl = rowEl.querySelector(':scope > .' + TOOLTIP_STATUS_CLASS);
+			const statusText = row.status || '';
+			if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
+		});
 
 		return cluster;
 	}
@@ -590,10 +626,36 @@
         height: ${DOT_SIZE}px;
         border-radius: 50%;
         background: ${fallback};
+        /* Hover/focus settles the dots up ~1.25x (DESIGN.md section 2:
+           transform + opacity only, never layout). The cluster's own padded
+           box — the 24px hit target — is untouched, since a transform never
+           reflows, and a 1px growth per side keeps the dots inside the box. */
+        transform-origin: center;
+        transition:
+          transform var(--ytb-dur-quick, 140ms) var(--ytb-ease-spring, cubic-bezier(0.34, 1.3, 0.64, 1)),
+          opacity var(--ytb-dur-quick, 140ms) var(--ytb-ease-out, cubic-bezier(0.22, 1, 0.36, 1));
       }
-      /* The cluster's single dark tooltip opens below the dots, left-aligned
-         (the box clips at overflow: hidden, so it must open inward), wrapping
-         instead of clipping when the name list runs long. */
+      .${THUMB_DOTS_CLASS}:hover > .${THUMB_DOT_CLASS},
+      .${THUMB_DOTS_CLASS}:focus-visible > .${THUMB_DOT_CLASS} {
+        transform: scale(1.25);
+      }
+      /* Reduced motion: no scale. The dots rest slightly dimmed so hover/focus
+         has somewhere to go — a brightness lift via opacity instead. */
+      @media (prefers-reduced-motion: reduce) {
+        .${THUMB_DOT_CLASS} {
+          opacity: 0.82;
+          transition: opacity var(--ytb-dur-quick, 140ms) var(--ytb-ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+        }
+        .${THUMB_DOTS_CLASS}:hover > .${THUMB_DOT_CLASS},
+        .${THUMB_DOTS_CLASS}:focus-visible > .${THUMB_DOT_CLASS} {
+          transform: none;
+          opacity: 1;
+        }
+      }
+      /* The cluster's dark tooltip opens below the dots, left-aligned (the box
+         clips at overflow: hidden, so it must open inward), one row per dot in
+         the same order: a Buddy Color swatch, the Display Name (wraps, never
+         clips), and the Watch Status pinned to the right edge. */
       .${THUMB_DOTS_CLASS} > .${TOOLTIP_CLASS} {
         top: 100%;
         bottom: auto;
@@ -602,6 +664,39 @@
         white-space: normal;
         width: max-content;
         max-width: 220px;
+        padding: 5px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        text-align: left;
+      }
+      .${TOOLTIP_ROW_CLASS} {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .${TOOLTIP_SWATCH_CLASS} {
+        flex: 0 0 auto;
+        width: ${DOT_SIZE}px;
+        height: ${DOT_SIZE}px;
+        border-radius: 50%;
+        background: ${fallback};
+      }
+      .${TOOLTIP_NAME_CLASS} {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .${TOOLTIP_STATUS_CLASS} {
+        flex: 0 0 auto;
+        margin-left: 12px;
+        color: rgba(255, 255, 255, 0.72);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      /* A record with no Watch Status shows the name alone; drop the gutter. */
+      .${TOOLTIP_STATUS_CLASS}:empty {
+        margin-left: 0;
       }
       .${THUMB_DOTS_CLASS}:hover > .${TOOLTIP_CLASS},
       .${THUMB_DOTS_CLASS}:focus-visible > .${TOOLTIP_CLASS} {
