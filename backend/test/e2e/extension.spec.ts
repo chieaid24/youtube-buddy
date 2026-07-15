@@ -235,6 +235,9 @@ const watchedByDotsFixture = `<!doctype html>
     <a id="classic-anchor" href="/watch?v=vid-classic" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
       <img alt="" style="display: block; width: 100%; height: 100%">
     </a>
+    <a id="dup-anchor" href="/watch?v=vid-lockup" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
+      <img alt="" style="display: block; width: 100%; height: 100%">
+    </a>
     <ytd-video-preview id="preview-host" style="display: none; position: fixed; left: 24px; top: 340px; width: 480px; height: 270px; z-index: 2200; background: #000">
       <a id="preview-anchor" href="/watch?v=vid-lockup" style="display: block; width: 100%; height: 100%">
         <img alt="" style="display: block; width: 100%; height: 100%">
@@ -268,7 +271,7 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
 		const clusters = page.locator('.ytb-thumb-dots');
-		await nudgeUntil(page, () => expect(clusters).toHaveCount(3, { timeout: 700 }));
+		await nudgeUntil(page, () => expect(clusters).toHaveCount(4, { timeout: 700 }));
 
 		// The retired Progress Bar renders nowhere.
 		await expect(page.locator('.ytb-thumb-bar')).toHaveCount(0);
@@ -381,10 +384,34 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 		await expect(previewTip).toHaveText('Watched by Kim and Sam');
 		await expect.poll(() => previewTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 		await page.mouse.move(0, 0);
+
+		// Ownership (#174), pairing half: the host at its fixture spot shares
+		// vid-lockup with two tiles but geometrically covers NEITHER, so both
+		// keep their own dots — same videoId alone never cedes a cluster.
+		await expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveCount(1);
+		await expect(page.locator('#dup-anchor .ytb-thumb-dots')).toHaveCount(1);
+
+		// Ownership (#174), covering half: sat over the lockup tile, the mirror
+		// OWNS that video's cluster — the covered tile's own dots are REMOVED
+		// (not merely buried), while the duplicate of the same videoId elsewhere
+		// in the feed keeps its own.
+		await page.evaluate(() => {
+			const host = document.querySelector<HTMLElement>('#preview-host')!;
+			const tile = document.querySelector('#lockup-thumb')!.getBoundingClientRect();
+			host.style.left = `${tile.left - 74}px`;
+			host.style.top = `${tile.top - 37}px`;
+		});
+		await nudgeUntil(page, () => expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveCount(0, { timeout: 700 }));
+		await expect(previewCluster).toHaveCount(1);
+		await expect(page.locator('#dup-anchor .ytb-thumb-dots')).toHaveCount(1);
+
+		// The preview going away sweeps the mirror and hands the cluster back to
+		// the tile.
 		await page.evaluate(() => {
 			document.querySelector<HTMLElement>('#preview-host')!.style.display = 'none';
 		});
 		await nudgeUntil(page, () => expect(previewCluster).toHaveCount(0, { timeout: 700 }));
+		await nudgeUntil(page, () => expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveCount(1, { timeout: 700 }));
 
 		// Recycle safety: a mutation pass over unchanged data must not rebuild
 		// the cluster (the signature guard) — a probe property survives the nudge.
@@ -412,7 +439,7 @@ test('the Watched-By Dots sit top-left inside the thumbnail box, label their Bud
 		await popup.evaluate(() => chrome.storage.local.set({ buddyProgressHidden: true }));
 		await expect(clusters).toHaveCount(0);
 		await popup.evaluate(() => chrome.storage.local.set({ buddyProgressHidden: false }));
-		await nudgeUntil(page, () => expect(clusters).toHaveCount(3, { timeout: 700 }));
+		await nudgeUntil(page, () => expect(clusters).toHaveCount(4, { timeout: 700 }));
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

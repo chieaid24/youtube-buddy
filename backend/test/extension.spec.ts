@@ -639,6 +639,74 @@ describe('note presentation helpers', () => {
 	});
 });
 
+describe('own churn + Watched-By ownership (#174)', () => {
+	// `window.YTB.ytbOwnedChurn` / `previewOwnsTile` surface as `any` (classic-
+	// script globals; ADR-0001); the wrappers pin the boolean the specs assert.
+	const ytbOwnedChurn = (records: object[]): boolean => window.YTB.ytbOwnedChurn(records);
+	const previewOwnsTile = (preview: object | null, tile: object | null): boolean => window.YTB.previewOwnsTile(preview, tile);
+
+	// Duck-typed DOM: shared.js walks only nodeType/id/classList/parentNode.
+	type MockNode = { nodeType: number; id?: string; classList?: string[]; parentNode?: MockNode | null };
+	const el = (classList: string[] = [], id = '', parentNode: MockNode | null = null): MockNode => ({
+		nodeType: 1,
+		id,
+		classList,
+		parentNode,
+	});
+	const text = (parentNode: MockNode | null = null): MockNode => ({ nodeType: 3, parentNode });
+	const record = (target: MockNode, addedNodes: MockNode[] = [], removedNodes: MockNode[] = []) => ({
+		target,
+		addedNodes,
+		removedNodes,
+	});
+	const ytTile = () => el(['ytd-rich-item-renderer']);
+
+	it('owns mounting and unmounting YTB roots in YouTube DOM, by class or id prefix', () => {
+		expect(ytbOwnedChurn([record(ytTile(), [el(['ytb-thumb-dots'])])])).toBe(true);
+		expect(ytbOwnedChurn([record(ytTile(), [], [el(['ytb-thumb-dots'])])])).toBe(true);
+		expect(ytbOwnedChurn([record(ytTile(), [el([], 'ytb-home-section')])])).toBe(true);
+	});
+
+	it('owns churn whose target sits inside a YTB element (tooltip text, dots in a cluster)', () => {
+		const tooltip = el(['ytb-watch-tooltip'], '', el(['ytb-thumb-dots'], '', ytTile()));
+		expect(ytbOwnedChurn([record(tooltip, [text(tooltip)], [text()])])).toBe(true);
+
+		// An added node with no marker of its own is owned through its ancestors.
+		const cluster = el(['ytb-thumb-dots'], '', ytTile());
+		expect(ytbOwnedChurn([record(cluster, [el([], '', cluster)])])).toBe(true);
+	});
+
+	it("never owns YouTube's churn, a mixed batch, an empty batch, or a record moving nothing", () => {
+		expect(ytbOwnedChurn([record(ytTile(), [el(['style-scope'])])])).toBe(false);
+		expect(ytbOwnedChurn([record(ytTile(), [el(['ytb-thumb-dots'])]), record(ytTile(), [el(['style-scope'])])])).toBe(false);
+		expect(ytbOwnedChurn([])).toBe(false);
+		expect(ytbOwnedChurn([record(ytTile())])).toBe(false);
+		// A detached unmarked node (a text node whose old parent is gone) is
+		// ambiguous — the failure mode must be a redundant pass, not a missed one.
+		expect(ytbOwnedChurn([record(ytTile(), [], [text()])])).toBe(false);
+	});
+
+	it('pairs the preview to the tile it covers, and never to a neighbour clipping its overhang', () => {
+		// The measured live geometry (issue #174): a 524x304 host centred over a
+		// 360x202 thumbnail box — full cover.
+		const host = { left: 0, top: 0, right: 524, bottom: 304 };
+		expect(previewOwnsTile(host, { left: 82, top: 51, right: 442, bottom: 253 })).toBe(true);
+		// The next tile over intersects only the host's ~82px overhang: under
+		// half its own area, so it keeps its own dots.
+		expect(previewOwnsTile(host, { left: 458, top: 51, right: 818, bottom: 253 })).toBe(false);
+		expect(previewOwnsTile(host, { left: 600, top: 400, right: 960, bottom: 602 })).toBe(false);
+	});
+
+	it('takes exactly half coverage, and rejects degenerate rects', () => {
+		const host = { left: 0, top: 0, right: 100, bottom: 100 };
+		expect(previewOwnsTile(host, { left: 50, top: 0, right: 150, bottom: 100 })).toBe(true);
+		expect(previewOwnsTile(host, { left: 51, top: 0, right: 151, bottom: 100 })).toBe(false);
+		expect(previewOwnsTile(host, { left: 40, top: 40, right: 40, bottom: 40 })).toBe(false);
+		expect(previewOwnsTile(null, { left: 0, top: 0, right: 10, bottom: 10 })).toBe(false);
+		expect(previewOwnsTile(host, null)).toBe(false);
+	});
+});
+
 describe('shared playlist client API', () => {
 	it('posts a Playlist add with the canonical payload and returns the complete item', async () => {
 		storage = { code: 'silly-otters' };
