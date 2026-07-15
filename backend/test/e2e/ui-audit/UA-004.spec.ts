@@ -1,17 +1,19 @@
 // UA-004: Note Dots are interactive (click opens the Expanded Note) but their
 // hit area is the painted 6x6 circle - far below the 24x24 minimum
 // (DESIGN.md 1.3). The fix extends the hit box invisibly; the painted dot
-// must stay 6px and dots must keep swallowing events from the player.
+// must stay 6px and dots must keep swallowing events from the player. #173
+// raised the box to the Note Band's 40 tall x 32 wide (the 24px minimum is a
+// floor, not a ceiling), so the probes below assert the full band reach.
 //
 // The extender grows UPWARD off the dot's bottom edge, not outward from its
 // centre (#158): centred, its lower half hung inside YouTube's progress bar and
-// swallowed every press near a Note's timestamp. So the 24px reach is asserted
+// swallowed every press near a Note's timestamp. So the reach is asserted
 // above and to the sides, and the bar's own band is asserted to be OURS NO
 // LONGER - the dot must not answer a hit test at or below its own bottom edge.
 import { expect, test } from '@playwright/test';
 import { launchExtension, makeData, nudgeUntil, playbackFixture, routeBackend, seedPaired } from './harness';
 
-test('UA-004: every Note Dot offers a >= 24x24 hit area around a 6px glyph', async () => {
+test('UA-004: every Note Dot offers the Note Band 40x32 hit area around a 6px glyph', async () => {
 	const context = await launchExtension();
 	try {
 		const d = makeData(Date.now());
@@ -34,14 +36,14 @@ test('UA-004: every Note Dot offers a >= 24x24 hit area around a 6px glyph', asy
 					const el = document.elementFromPoint(cx + dx, cy + dy);
 					return el === dot || dot.contains(el);
 				};
-				// 11px to each side, and 11px then 20px UP: a 24px-wide box that
-				// reaches a full 24px above the dot's bottom edge (1px of rounding
+				// 15px to each side, and 20px then 36px UP: a 32px-wide box that
+				// reaches a full 40px above the dot's bottom edge (1px of rounding
 				// margin), all of it clear of the bar.
 				const reach = [
-					{ dx: -11, dy: 0 },
-					{ dx: 11, dy: 0 },
-					{ dx: 0, dy: -11 },
+					{ dx: -15, dy: 0 },
+					{ dx: 15, dy: 0 },
 					{ dx: 0, dy: -20 },
+					{ dx: 0, dy: -36 },
 				].map(({ dx, dy }) => ({ dx, dy, hit: hitAt(dx, dy) }));
 				// The dot's bottom edge sits 3px above the bar; 7px below its centre
 				// is INSIDE the bar, and must belong to YouTube's scrubber (#158).

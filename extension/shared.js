@@ -1167,6 +1167,63 @@ const YTB = {
 		return { clusters: clusters.map((cluster) => cluster.map((i) => dots[i].index)), offsets, gap };
 	},
 
+	// --- Note Band geometry (pure — tested at the shared.js seam) ---
+
+	/**
+	 * The Note Band's numbers (#173; CONTEXT.md: the strip of player pixels
+	 * directly ABOVE the Video Timeline's top edge that the Note layer owns).
+	 * The ONE place they live: notes.js builds its injected CSS from these, and
+	 * the pure helpers below derive from them, so a change here carries every
+	 * dependent surface — the hit extender, its clearance gate, the Expanded
+	 * Note's anchor — along together instead of letting them silently
+	 * re-collide.
+	 */
+	NOTE_BAND: {
+		dotLift: 6, // px from the bar's top edge up to a dot's bottom edge (#162)
+		dotDiameter: 6, // the painted glyph
+		hitWidth: 32, // the invisible hit extender's width, centred on the glyph
+		hitHeight: 40, // its height — bottom-anchored at the dot's bottom edge, growing upward only (#158)
+		panelGap: 8, // breathing room between the dot glyphs' tops and the Expanded Note's bottom edge
+	},
+
+	/**
+	 * The clearance gate (#173): which Note Dots earn the invisible hit
+	 * extender. A dot gets one only when its nearest neighbour (at rest, across
+	 * ALL dots on the bar) is at least the extender's WIDTH away — any closer
+	 * and one dot's box could shadow another dot's glyph. Denser dots keep the
+	 * Dot Cluster fan as their reach affordance instead: their true timestamps
+	 * are never displaced at rest, and the fan is what makes a covered dot
+	 * individually hittable.
+	 * @param {number[]} xs each dot's px offset from the bar's left edge, at rest
+	 * @param {number} boxWidth the extender's width in px (the gate tracks it)
+	 * @returns {boolean[]} per dot, in input order: whether it earns the extender
+	 */
+	dotExtenderGate(xs, boxWidth) {
+		const px = (xs || []).map((x) => Number(x) || 0);
+		const width = Number(boxWidth) || 0;
+		return px.map((x, i) => {
+			let nearest = Infinity;
+			for (let j = 0; j < px.length; j++) {
+				if (j !== i) nearest = Math.min(nearest, Math.abs(px[j] - x));
+			}
+			return nearest >= width;
+		});
+	},
+
+	/**
+	 * How far above the bar's top edge the Expanded Note's bottom edge rests,
+	 * derived from the dot geometry itself — the dots' lift, plus their glyph,
+	 * plus the Note Band's breathing room — rather than a hardcoded offset, so
+	 * a future change to the dots' lift carries the panel with it instead of
+	 * landing its bottom edge on the lifted glyphs (#173).
+	 * @param {{dotLift?: number, dotDiameter?: number, panelGap?: number}} band
+	 * @returns {number} px above the bar's top edge
+	 */
+	panelBarClearance(band) {
+		const geometry = band || {};
+		return (Number(geometry.dotLift) || 0) + (Number(geometry.dotDiameter) || 0) + (Number(geometry.panelGap) || 0);
+	},
+
 	// --- Own-churn + Watched-By ownership (pure — tested at the shared.js seam) ---
 
 	/**
