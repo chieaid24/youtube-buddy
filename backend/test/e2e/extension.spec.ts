@@ -667,9 +667,10 @@ test('the progress bar stays seekable directly beneath a Note Dot: every surface
 		await expect(page.locator('.ytb-note-dot-roomy')).toHaveCount(1); // only the isolated dot earns the hit extender
 
 		// Hit-test the bar under a dot: sweep its full 6px height across the dot's
-		// whole 24px hit width. Nothing of ours may answer — elementFromPoint is
-		// the same hit test the browser runs to route a press, and it skips our
-		// pointer-events:none layers exactly as a real click would.
+		// whole 32px hit width (the Note Band's box, #173). Nothing of ours may
+		// answer — elementFromPoint is the same hit test the browser runs to
+		// route a press, and it skips our pointer-events:none layers exactly as
+		// a real click would.
 		const sweepUnder = (id: string) =>
 			page.evaluate((noteId) => {
 				const dot = document.querySelector(`[data-ytb-note-id="${noteId}"]`) as HTMLElement;
@@ -677,7 +678,7 @@ test('the progress bar stays seekable directly beneath a Note Dot: every surface
 				const box = dot.getBoundingClientRect();
 				const cx = box.left + box.width / 2;
 				const ours: string[] = [];
-				for (const dx of [-11, -6, 0, 6, 11]) {
+				for (const dx of [-15, -8, 0, 8, 15]) {
 					for (const y of [bar.top + 0.5, bar.top + 3, bar.bottom - 0.5]) {
 						const hit = document.elementFromPoint(cx + dx, y) as HTMLElement | null;
 						if (hit?.closest('.ytb-note-dot, .ytb-dot-cluster, .ytb-note-preview')) {
@@ -763,10 +764,126 @@ test('the progress bar stays seekable directly beneath a Note Dot: every surface
 		expect(seen.suppressed).toBe(false);
 		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
 
-		// The band ABOVE the bar still belongs to the dot: a click 20px up — inside
-		// its 24px hit target, nowhere near the glyph — opens the Expanded Note.
-		await page.mouse.click(dotX, barY - 23);
+		// The band ABOVE the bar still belongs to the dot: a click 40px above the
+		// bar and 14px to the side — inside the Note Band's 40x32 hit box (#173),
+		// nowhere near the glyph — opens the Expanded Note.
+		await page.mouse.click(dotX + 14, barY - 43);
 		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+// The sized bar plus YouTube's scrubber knob, rebuilt with the stacking the
+// real player CSS assigns (measured live, #173): the grab pad
+// .ytp-progress-bar-padding at z-index 28 and the knob's
+// .ytp-scrubber-container at z-index 43 — above the Dot Cluster's old 41,
+// which is exactly how the knob swallowed every click on a dot near the
+// playhead. The knob carries YouTube's big-mode 20px disc and hover-time
+// scale(1.67), whose upper arc reaches ~15px above the bar's top edge — well
+// into the Note Band and over the dot's glyph. Its 90px left centres it on
+// x = 100, the fixture Note's own timestamp. The player is tall enough that
+// the Expanded Note keeps its RESTING anchor (a short player deliberately
+// slides the panel down over the control bar instead).
+const scrubberBarFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube scrubber-bar fixture</title></head>
+  <body style="margin: 0">
+    <main id="movie_player" class="html5-video-player" style="position: relative; width: 400px; height: 500px; background: #000">
+      <video style="width: 400px; height: 500px"></video>
+      <div class="ytp-chrome-bottom" style="position: absolute; left: 0; right: 0; bottom: 0; height: 40px">
+        <div class="ytp-progress-bar" style="position: relative; width: 400px; height: 6px; background: #444">
+          <div class="ytp-progress-bar-padding" style="position: absolute; width: 100%; height: 16px; bottom: 0; z-index: 28"></div>
+          <div class="ytp-scrubber-container" style="position: absolute; top: -8px; left: 90px; z-index: 43">
+            <div class="ytp-scrubber-button" style="height: 20px; width: 20px; border-radius: 10px; background: #f00; transform: scale(1.67)"></div>
+          </div>
+        </div>
+        <div class="ytp-left-controls"></div>
+      </div>
+    </main>
+  </body>
+</html>`;
+
+test('a Note Dot outranks the scrubber knob inside the Note Band, and the knob keeps the bar', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: scrubberBarFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
+
+		await page.evaluate(() => {
+			const bar = document.querySelector('.ytp-progress-bar') as HTMLElement;
+			for (const type of ['mousedown', 'mouseup']) {
+				bar.dataset[type] = '0';
+				bar.addEventListener(type, () => {
+					bar.dataset[type] = String(Number(bar.dataset[type]) + 1);
+				});
+			}
+		});
+		await loadMedia(page, silentWavDataUri(40));
+		// One Note at 10s: x = 100 on the 400px bar, dead on the parked knob.
+		await pushNotes(page, [
+			{ id: 'parked', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 10, kind: 'text', body: 'here', createdAt: 1 },
+		]);
+		await expect(page.locator('.ytb-note-dot')).toHaveCount(1);
+		await expect(page.locator('.ytb-note-dot-roomy')).toHaveCount(1);
+
+		// The collision is real in this fixture: the knob's disc covers the dot's
+		// glyph centre — and yet the hit test resolves to the dot, by stacking
+		// order, with the knob's pointer events untouched.
+		const contested = await page.evaluate(() => {
+			const dot = document.querySelector('[data-ytb-note-id="parked"]') as HTMLElement;
+			const knob = (document.querySelector('.ytp-scrubber-button') as HTMLElement).getBoundingClientRect();
+			const box = dot.getBoundingClientRect();
+			const x = box.left + box.width / 2;
+			const y = box.top + box.height / 2;
+			const covered = x >= knob.left && x <= knob.right && y >= knob.top && y <= knob.bottom;
+			const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+			return { covered, oursWins: hit === dot || dot.contains(hit), x, y };
+		});
+		expect(contested.covered).toBe(true); // the knob really is on top of the glyph here
+		expect(contested.oursWins).toBe(true);
+
+		// A real click on the glyph opens the Expanded Note — it does not seek:
+		// the dot swallows the press, so the bar (and the knob bubbling through
+		// it) sees nothing.
+		await page.mouse.click(contested.x, contested.y);
+		await expect(page.locator('#ytb-note-panel')).toBeVisible();
+		const pressed = await page.evaluate(() => {
+			const bar = document.querySelector('.ytp-progress-bar') as HTMLElement;
+			return Number(bar.dataset.mousedown);
+		});
+		expect(pressed).toBe(0);
+
+		// The panel's resting anchor is derived from the dot geometry (#173): its
+		// bottom edge clears the lifted glyph by the Note Band's breathing room.
+		// Polled: the panel scales in from the dot (origin below the card), so a
+		// mid-entrance measure reads its bottom edge low.
+		const clearance = () =>
+			page.evaluate(() => {
+				const panel = document.getElementById('ytb-note-panel')!.getBoundingClientRect();
+				const dot = document.querySelector('[data-ytb-note-id="parked"]')!.getBoundingClientRect();
+				return dot.top - panel.bottom;
+			});
+		await expect.poll(clearance).toBeGreaterThanOrEqual(7);
+
+		// Only the knob's overlap INTO the band is conceded (#158): ON the bar,
+		// at the very same x, the knob still answers the hit test — scrubbing is
+		// never lost, a drag still starts from its body and from the bar.
+		const onBar = await page.evaluate(() => {
+			const bar = (document.querySelector('.ytp-progress-bar') as HTMLElement).getBoundingClientRect();
+			const hit = document.elementFromPoint(100, bar.top + 3) as HTMLElement | null;
+			return { knob: Boolean(hit?.closest('.ytp-scrubber-container')), ours: Boolean(hit?.closest('.ytb-dot-cluster')) };
+		});
+		expect(onBar.knob).toBe(true);
+		expect(onBar.ours).toBe(false);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

@@ -62,11 +62,15 @@
 	const CLUSTER_CLASS = 'ytb-dot-cluster'; // wrapper owning a Cluster's hover/fan (#123)
 	const CLUSTER_PINNED_CLASS = 'ytb-dot-cluster-pinned'; // stays fanned while its Note's panel is open
 	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
-	const DOT_DIAMETER = 6; // px — matches the .ytb-note-dot circle; drives clustering + clamp
+	// The Note Band's geometry (#173) — dot lift, glyph, hit extender box, and
+	// the Expanded Note's clearance all live in shared.js so the pure helpers
+	// (dotExtenderGate, panelBarClearance) derive from the same numbers this
+	// file styles with.
+	const BAND = YTB.NOTE_BAND;
+	const DOT_DIAMETER = BAND.dotDiameter; // px — matches the .ytb-note-dot circle; drives clustering + clamp
 	const CLUSTER_FAN_GAP = 14; // px — the Fan Gap's IDEAL; it shrinks toward DOT_DIAMETER on a crowded bar
-	const DOT_HIT_DIAMETER = 24; // px — min hit target (DESIGN.md 1.3); granted only to dots with that much clearance
 	const UNSEEN_RING_GAP = '#0f0f0f'; // separates the reduced-motion Unseen ring from the Buddy-colored fill (UA-026)
-	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible 24px hit extender (UA-004)
+	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible hit extender (UA-004; sized by BAND)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -456,16 +460,12 @@
 			dotDiameter: DOT_DIAMETER,
 		});
 
-		// Nearest-neighbour clearance per dot (at-rest px, across ALL dots): a
-		// dot earns the 24px hit extender only when no other dot's glyph could
-		// fall inside it (UA-004).
-		const clearanceByIndex = px.map((value, i) => {
-			let nearest = Infinity;
-			for (let j = 0; j < px.length; j++) {
-				if (j !== i) nearest = Math.min(nearest, Math.abs(px[j] - value));
-			}
-			return nearest;
-		});
+		// The clearance gate (#173): a dot earns the invisible hit extender only
+		// when no other dot's glyph could fall inside its box, so the threshold
+		// tracks the box's WIDTH. Denser dots keep the Cluster fan as their reach
+		// affordance (pure rule — YTB.dotExtenderGate, tested at the shared.js
+		// seam).
+		const roomy = YTB.dotExtenderGate(px, BAND.hitWidth);
 
 		// Reconcile Cluster wrappers keyed by their exact membership. A steady poll
 		// (unchanged membership) reuses each wrapper and never re-parents a dot,
@@ -519,7 +519,7 @@
 				const fan = offsets[cluster[k]]; // solved for the whole bar, read per dot
 				const dot = existing.get(id) || buildDot(id);
 				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
-				dot.classList.toggle(DOT_ROOMY_CLASS, clearanceByIndex[cluster[k]] >= DOT_HIT_DIAMETER);
+				dot.classList.toggle(DOT_ROOMY_CLASS, roomy[cluster[k]]);
 				dot.style.left = basePx.toFixed(2) + 'px';
 				dot.style.setProperty('--ytb-fan', fan.toFixed(2) + 'px');
 				updateDot(dot, id, desired.get(id));
@@ -1386,9 +1386,13 @@
 		const width = Math.min(300, Math.max(220, hostRect.width - 24));
 		panel.style.width = width + 'px';
 
+		// The resting anchor clears the lifted dot glyphs: the bottom edge sits
+		// panelBarClearance (lift + glyph + breathing room) above the bar's top
+		// edge, derived from the Note Band geometry itself so a future change to
+		// the dots' lift carries the panel with it instead of re-colliding (#173).
 		const bar = document.querySelector('.ytp-progress-bar');
 		const barRect = bar ? bar.getBoundingClientRect() : null;
-		const bottom = barRect ? Math.max(12, hostRect.bottom - barRect.top + 12) : 72;
+		const bottom = barRect ? Math.max(12, hostRect.bottom - barRect.top + YTB.panelBarClearance(BAND)) : 72;
 		panel.style.bottom = Math.min(bottom, Math.max(12, hostRect.height - 40)) + 'px';
 
 		const dot = openNote && dotFor(openNote.id);
@@ -1850,19 +1854,33 @@
          EVERY interactive surface we own on the player lives STRICTLY ABOVE the
          progress bar's top edge (#158), so the bar stays seekable under a Note —
          at a Note's exact timestamp included. The wrapper's bottom edge is that
-         boundary (6px above the bar since #162 lifted the dots), and the keeper
-         below, the dots' hit extender, and the preview's hover bridge all stop at
-         or before it. */
+         boundary (the Note Band's dot lift above the bar since #162 lifted the
+         dots), and the keeper below, the dots' hit extender, and the preview's
+         hover bridge all stop at or before it.
+
+         Inside the Note Band our surfaces outrank YouTube's own affordances
+         that reach up into it (#173): the scrubber knob's upper arc is far
+         larger than a Note Dot and, stacked above us, swallowed every click on
+         a dot near the playhead. Measured live against YouTube's player CSS,
+         the bar's children stack at .ytp-progress-bar-padding 28 (the grab
+         pad), .ytp-chapters-container 32, .ytp-timed-markers-container 40, and
+         .ytp-scrubber-container 43 — so 44 wins the band honestly, by stacking
+         order, with the knob's pointer events untouched (disabling them would
+         break drag-scrub). The knob stays fully grabbable on the bar itself,
+         where nothing of ours exists (#158); only its overlap INTO the band is
+         conceded, so with a Note within a hit box of the playhead a drag cannot
+         start from the top of the knob — its body, and the whole bar, still
+         start one. */
       .${CLUSTER_CLASS} {
         position: absolute;
-        bottom: calc(100% + 6px);
+        bottom: calc(100% + ${BAND.dotLift}px);
         width: 0;
-        height: 6px;
-        z-index: 41;
+        height: ${DOT_DIAMETER}px;
+        z-index: 44;
         pointer-events: none;
       }
-      /* Hover keeper: it reaches from above the dots down across the whole 6px
-         clearance and stops FLUSH with the bar's top edge — the furthest it can go
+      /* Hover keeper: it reaches from above the dots down across the whole dot
+         lift and stops FLUSH with the bar's top edge — the furthest it can go
          while still claiming none of the bar (#158). That leaves no dead strip
          between bar and dots, so travelling up off the scrubber into a fan never
          crosses a gap that would collapse it (#162), and a press on the bar under
@@ -1874,7 +1892,7 @@
         transform: translateX(-50%);
         width: var(--ytb-fan-extent, 0px);
         top: -4px;
-        bottom: -6px;
+        bottom: -${BAND.dotLift}px;
         pointer-events: none;
       }
       .${CLUSTER_CLASS}:hover::before { pointer-events: auto; }
@@ -1909,29 +1927,33 @@
         transform: translateX(0);
         transition: transform var(--ytb-dur-base) var(--ytb-ease-spring);
       }
-      /* Invisible hit extender (UA-004): the painted circle stays 6px, but
-         the interactive target reaches 24x24 (DESIGN.md 1.3). Dots already
-         swallow presses and hovers from the player by design, so the larger
-         box widens that established behavior, not a new one. Only dots with
-         24px of clearance get it (renderDots toggles the class): closer
-         neighbours would shadow each other's glyphs, and those dense dots
-         keep the Cluster fan as their reach affordance — their exact
-         timestamp position is essential and never displaced at rest.
+      /* Invisible hit extender (UA-004, resized by #173): the painted circle
+         stays 6px, but the interactive target reaches the Note Band's hit box
+         (40 tall x 32 wide — DESIGN.md's 24px minimum is a floor, not a
+         ceiling, and a ~6px circle is not a click target; the band above it is
+         ours to spend). Dots already swallow presses and hovers from the
+         player by design, so the larger box widens that established behavior,
+         not a new one. Only dots whose nearest neighbour is at least the box
+         WIDTH away get it (renderDots toggles the class through the pure
+         dotExtenderGate): closer neighbours would shadow each other's glyphs,
+         and those dense dots keep the Cluster fan as their reach affordance —
+         their exact timestamp position is essential and never displaced at
+         rest.
 
          It grows UPWARD off the dot's bottom edge (#158) rather than centring
-         on the glyph: a centred box (inset: -9px) hung 9px below the dot, which
-         is 6px INTO the 6px bar — it covered the whole bar and stole every press
-         near a Note's timestamp. Bottom-anchored, the 24px target keeps its full
-         size while ending exactly where the dot does, 3px clear of the bar. What
-         it claims instead is 24px of the band above the bar (YouTube's 10px grab
-         pad included) — the accepted trade for dots that keep hugging the bar. */
+         on the glyph: a centred box hung below the dot, INTO the bar — it
+         covered the whole bar and stole every press near a Note's timestamp.
+         Bottom-anchored, the target keeps its full size while ending exactly
+         where the dot does, the dot lift clear of the bar. What it claims
+         instead is the band above the bar (YouTube's grab pad included) — the
+         accepted trade for dots that keep hugging the bar. */
       .${DOT_ROOMY_CLASS}::after {
         content: '';
         position: absolute;
-        left: -9px;
-        right: -9px;
+        left: ${-(BAND.hitWidth - DOT_DIAMETER) / 2}px;
+        right: ${-(BAND.hitWidth - DOT_DIAMETER) / 2}px;
         bottom: 0;
-        height: ${DOT_HIT_DIAMETER}px;
+        height: ${BAND.hitHeight}px;
       }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {
