@@ -8,7 +8,11 @@
 //      distinct from YouTube's Save. On a video the viewer recommended it
 //      shows an "Unrecommend" toggle state — the action it offers, not the
 //      state it reports; clicking it un-recommends (the author-only point
-//      delete that removes the Recommendation for everyone).
+//      delete that removes the Recommendation for everyone). The pill is
+//      OPTIMISTIC (CONTEXT.md "Recommend Intent"): a click flips it at once —
+//      no "Recommending..." label, no disabled state — and only a failure
+//      moves it again, reverting to the true state with the reason in the
+//      transient feedback popover. The label is a state, never a message.
 //   2. Any thumbnail: a "Recommend to Buddies" row appended to the tile's
 //      three-dots menu, next to YouTube's own Save-to-playlist items.
 //
@@ -30,13 +34,30 @@
 	const STYLE_ID = 'ytb-playlist-add-style';
 	const FEEDBACK_ID = 'ytb-playlist-feedback';
 	const FEEDBACK_MS = 2000;
+	// The invisible per-video click cooldown (CONTEXT.md "Recommend Intent"):
+	// clicks within this window of the last accepted one are silently ignored,
+	// with no dimming, no disabled attribute, no cursor change.
+	const CLICK_COOLDOWN_MS = 1000;
 
 	let currentVideoId = null;
-	// From ytb:room-data: videoId -> the recommending member's clientId
+	// From ok ytb:room-data reads: videoId -> the recommending member's clientId
 	// (addedBy). Powers the pill's three states: absent = idle ("Recommend to
 	// Buddies"), mine = "Unrecommend" (click to un-recommend), a Buddy's =
-	// "Recommended to you".
+	// "Recommended to you". A failed read never rewrites it — emptiness is not
+	// truth (the renderer retains its caches the same way).
 	let recommenderByVideoId = new Map();
+	// The member's just-clicked, not-yet-confirmed Recommend Intents:
+	// videoId -> { intent: 'mine'|'absent', title }. Overlaid on every Room
+	// read by YTB.recommendPillState so a read that raced the write cannot flip
+	// the pill back; dropped when an ok read agrees (YTB.recommendIntentSettled)
+	// or when the write fails (the pill reverts).
+	const recommendIntents = new Map();
+	// videoId -> epoch ms of the last accepted pill click (the cooldown gate).
+	let lastPillClickAt = new Map();
+	// videoIds with a playlist write in flight — at most one per video; a
+	// toggle made mid-flight goes out as a single delta once the write settles.
+	const writesInFlight = new Set();
+	let activeRoomCode = null; // a Room change orphans the old Room's intents
 	let myClientId = null;
 	let hasRoomCode = false;
 	let feedbackTimer = null;
@@ -86,92 +107,123 @@
 			button = document.createElement('button');
 			button.id = BUTTON_ID;
 			button.type = 'button';
-			button.addEventListener('click', async (event) => {
+			button.addEventListener('click', (event) => {
 				event.stopPropagation();
 				const state = button.dataset.ytbState;
 				const videoId = currentVideoId;
-				if (state === 'idle') {
-					setButtonState(button, 'busy');
-					const result = await addToPlaylist(videoId, YTB.watchTitle(document));
-					if (!button.isConnected) return;
-					if (result.ok) {
-						syncWatchButton(button);
-					} else {
-						const message = errorLabel(result.category);
-						flashButton(button, result.category === 'network' ? STATE_LABELS.idle : message, message);
-					}
-				} else if (state === 'recommended') {
-					// Un-recommend (ADR-0007): the author-only point delete that
-					// removes this Recommendation for EVERYONE (and emits no event).
-					setButtonState(button, 'busy', 'Unrecommending...');
-					const clientId = await YTB.ensureClientId();
-					if (!YTB.isContextActive()) return;
-					const result = await YTB.deletePlaylistItem({ clientId, videoId });
-					if (!button.isConnected) return;
-					if (result.ok) {
-						recommenderByVideoId.delete(videoId);
-						syncWatchButton(button);
-					} else {
-						const message = result.category === 'network' ? errorLabel(result.category) : "Couldn't unrecommend";
-						flashButton(button, result.category === 'network' ? STATE_LABELS.recommended : message, message);
-					}
-				}
+				if (!videoId || (state !== 'idle' && state !== 'recommended')) return;
+				const now = Date.now();
+				if (now - (lastPillClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent — no visual lockout
+				lastPillClickAt.set(videoId, now);
+				// Optimistic: record the Recommend Intent and flip the pill NOW; the
+				// write goes out underneath (ADR-0007 un-recommend is the author-only
+				// point delete that removes the Recommendation for everyone).
+				recommendIntents.set(videoId, { intent: state === 'idle' ? 'mine' : 'absent', title: YTB.watchTitle(document) });
+				syncWatchButton(button);
+				pumpWrites(videoId);
 			});
 		}
 		if (button.parentElement !== actions) actions.appendChild(button);
-		if (!feedbackTimer) syncWatchButton(button);
+		syncWatchButton(button);
 	}
 
 	const STATE_LABELS = {
 		idle: 'Recommend to Buddies',
-		busy: 'Recommending...',
 		added: 'Recommended to you', // a Buddy's Recommendation — nothing to toggle
 		recommended: 'Unrecommend', // mine — the action offered, click to un-recommend
 	};
 
-	function setButtonState(button, state, label) {
+	function setButtonState(button, state) {
 		button.dataset.ytbState = state;
-		button.textContent = label || STATE_LABELS[state] || STATE_LABELS.idle;
-		button.removeAttribute('aria-describedby');
-		button.disabled = state === 'busy';
+		button.textContent = STATE_LABELS[state] || STATE_LABELS.idle;
 		button.classList.toggle('is-added', state === 'added');
 		button.classList.toggle('is-recommended', state === 'recommended');
 		button.title = state === 'recommended' ? 'You recommended this to your Buddies. Click to remove it for everyone.' : '';
 	}
 
 	function pillState() {
-		const addedBy = recommenderByVideoId.get(currentVideoId);
-		if (addedBy === undefined) return 'idle';
-		return myClientId && addedBy === myClientId ? 'recommended' : 'added';
+		const held = recommendIntents.get(currentVideoId);
+		return YTB.recommendPillState({
+			addedBy: recommenderByVideoId.get(currentVideoId),
+			myClientId,
+			pending: held && held.intent,
+		});
 	}
 
 	function syncWatchButton(button) {
 		setButtonState(button, pillState());
 	}
 
-	function flashButton(button, label, message = '') {
-		document.getElementById(FEEDBACK_ID)?.remove();
-		setButtonState(button, 'error', label);
-		if (message && message !== label) {
-			const feedback = document.createElement('span');
-			feedback.id = FEEDBACK_ID;
-			feedback.className = 'ytb-playlist-feedback';
-			feedback.setAttribute('role', 'status');
-			feedback.textContent = message;
-			(document.body || document.documentElement).append(feedback);
-			button.setAttribute('aria-describedby', FEEDBACK_ID);
-			const anchor = button.getBoundingClientRect();
-			const width = feedback.offsetWidth;
-			const height = feedback.offsetHeight;
-			feedback.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, anchor.right - width)) + 'px';
-			const below = anchor.bottom + 8;
-			feedback.style.top = (below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 8)) + 'px';
+	/**
+	 * Drive one video's pending Recommend Intent to the backend: at most one
+	 * write in flight per videoId, re-examined when it settles, so a toggle
+	 * made mid-flight goes out as a single delta and a late response can never
+	 * overwrite a newer intent. A failed write drops the intent (the pill
+	 * reverts to the true state) and puts the reason in the feedback popover.
+	 */
+	async function pumpWrites(videoId) {
+		if (writesInFlight.has(videoId)) return;
+		const held = recommendIntents.get(videoId);
+		if (!held) return;
+		const addedBy = recommenderByVideoId.get(videoId);
+		// The confirmed state already matches (a prior write landed): nothing to
+		// send. The intent stays held until an ok Room read agrees (ytb:room-data).
+		if (held.intent === 'mine' ? addedBy !== undefined : addedBy === undefined) return;
+		writesInFlight.add(videoId);
+		let result;
+		if (held.intent === 'mine') {
+			result = await addToPlaylist(videoId, held.title);
+		} else {
+			const clientId = await YTB.ensureClientId();
+			result = YTB.isContextActive() ? await YTB.deletePlaylistItem({ clientId, videoId }) : { ok: false, category: 'unexpected' };
+			if (result.ok) recommenderByVideoId.delete(videoId);
 		}
+		writesInFlight.delete(videoId);
+		if (!YTB.isContextActive()) return;
+		if (result.ok) {
+			// The intent may have moved while this write flew; send the delta.
+			pumpWrites(videoId);
+		} else {
+			// Revert: a failed write leaves the true state exactly where it was —
+			// and if the member toggled mid-flight, that toggle asked for the
+			// pre-write state, so dropping the whole intent honors it too.
+			recommendIntents.delete(videoId);
+			showWriteFailure(videoId, held.intent, result.category);
+		}
+		const button = document.getElementById(BUTTON_ID);
+		if (button) syncWatchButton(button);
+	}
+
+	function showWriteFailure(videoId, intent, category) {
+		if (videoId !== currentVideoId) return; // navigated away — the revert lands silently
+		const button = document.getElementById(BUTTON_ID);
+		if (!button) return;
+		const message = intent === 'absent' && category !== 'network' ? "Couldn't unrecommend" : errorLabel(category);
+		showFeedback(button, message);
+	}
+
+	/** The transient feedback popover — the ONLY failure surface the pill owns.
+	 * The label itself is a state, never a message, so it is left alone here. */
+	function showFeedback(button, message) {
+		document.getElementById(FEEDBACK_ID)?.remove();
+		const feedback = document.createElement('span');
+		feedback.id = FEEDBACK_ID;
+		feedback.className = 'ytb-playlist-feedback';
+		feedback.setAttribute('role', 'status');
+		feedback.textContent = message;
+		(document.body || document.documentElement).append(feedback);
+		button.setAttribute('aria-describedby', FEEDBACK_ID);
+		const anchor = button.getBoundingClientRect();
+		const width = feedback.offsetWidth;
+		const height = feedback.offsetHeight;
+		feedback.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, anchor.right - width)) + 'px';
+		const below = anchor.bottom + 8;
+		feedback.style.top = (below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 8)) + 'px';
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = setTimeout(() => {
 			feedbackTimer = null;
 			document.getElementById(FEEDBACK_ID)?.remove();
-			if (button.isConnected) syncWatchButton(button);
+			if (button.isConnected) button.removeAttribute('aria-describedby');
 		}, FEEDBACK_MS);
 	}
 
@@ -353,6 +405,7 @@
 		document.getElementById(FEEDBACK_ID)?.remove();
 		currentVideoId = (event.detail && event.detail.videoId) || null;
 		pendingKebab = null;
+		lastPillClickAt = new Map(); // the click cooldown resets on navigation
 		const { code } = await YTB.getConfig();
 		hasRoomCode = Boolean(code);
 		ensureWatchButton();
@@ -369,9 +422,29 @@
 		const detail = (event && event.detail) || {};
 		hasRoomCode = Boolean(detail.roomCode);
 		myClientId = detail.myClientId || myClientId;
-		recommenderByVideoId = new Map((detail.playlist || []).map((item) => [item.videoId, item.addedBy]));
+		if (detail.roomCode !== activeRoomCode) {
+			// A Room change orphans the previous Room's optimistic state.
+			activeRoomCode = detail.roomCode;
+			recommendIntents.clear();
+			lastPillClickAt = new Map();
+		}
+		if (detail.ok) {
+			recommenderByVideoId = new Map((detail.playlist || []).map((item) => [item.videoId, item.addedBy]));
+			// Drop each Recommend Intent this read agrees with; the rest keep
+			// overlaying (a read that raced the write is not the truth yet).
+			for (const [videoId, held] of recommendIntents) {
+				if (YTB.recommendIntentSettled({ addedBy: recommenderByVideoId.get(videoId), myClientId, pending: held.intent })) {
+					recommendIntents.delete(videoId);
+				}
+			}
+		} else if (detail.locked) {
+			// Locked out of a full Room: nothing of ours can be on the list.
+			recommenderByVideoId = new Map();
+			recommendIntents.clear();
+		}
+		// A plain failed read (ok: false) rewrites nothing — emptiness is not truth.
 		const button = document.getElementById(BUTTON_ID);
-		if (button && !feedbackTimer) syncWatchButton(button);
+		if (button) syncWatchButton(button);
 		if (!hasRoomCode) document.getElementById(BUTTON_ID)?.remove();
 	});
 
@@ -416,7 +489,6 @@
       #${BUTTON_ID}.is-added { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); cursor: default; line-height: 34px; }
       #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); line-height: 34px; }
       #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
-      #${BUTTON_ID}:disabled { opacity: 0.7; cursor: default; }
 	  #${FEEDBACK_ID} {
 		position: fixed;
 		z-index: 2147483647;

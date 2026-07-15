@@ -1395,6 +1395,68 @@ describe('recommended for you helpers (ADR-0007)', () => {
 	});
 });
 
+describe('the optimistic Recommend Control (Recommend Intent overlay)', () => {
+	const me = 'me111111';
+	const buddy = 'bob22222';
+	const state = (args: object) => window.YTB.recommendPillState(args);
+	const settled = (args: object) => window.YTB.recommendIntentSettled(args);
+
+	it('renders the three Room-driven states with no pending intent', () => {
+		expect(state({ addedBy: undefined, myClientId: me })).toBe('idle');
+		expect(state({ addedBy: me, myClientId: me })).toBe('recommended');
+		expect(state({ addedBy: buddy, myClientId: me })).toBe('added');
+		// An unknown own clientId can never claim a Recommendation as ours.
+		expect(state({ addedBy: buddy, myClientId: null })).toBe('added');
+	});
+
+	it("overlays a pending 'mine' so a stale Room read cannot flip the pill back", () => {
+		// The just-clicked recommend shows Unrecommend before any response...
+		expect(state({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe('recommended');
+		// ...and a Room read that already carries my item changes nothing.
+		expect(state({ addedBy: me, myClientId: me, pending: 'mine' })).toBe('recommended');
+	});
+
+	it("overlays a pending 'absent' so a stale Room read still shows the un-recommend", () => {
+		// The Room read that raced the DELETE still carries my item; the pill
+		// must keep offering to recommend again, not flash back to Unrecommend.
+		expect(state({ addedBy: me, myClientId: me, pending: 'absent' })).toBe('idle');
+		expect(state({ addedBy: undefined, myClientId: me, pending: 'absent' })).toBe('idle');
+	});
+
+	it("lets the server's addedBy win the Buddy-already-recommended reconcile", () => {
+		// My add was a no-op onto the Buddy's item: their addedBy outranks the
+		// optimistic guess — the pill corrects to "Recommended to you".
+		expect(state({ addedBy: buddy, myClientId: me, pending: 'mine' })).toBe('added');
+	});
+
+	it("settles 'mine' once ANY addedBy exists — mine or the no-op'd Buddy's", () => {
+		expect(settled({ addedBy: me, myClientId: me, pending: 'mine' })).toBe(true);
+		expect(settled({ addedBy: buddy, myClientId: me, pending: 'mine' })).toBe(true);
+		// A read without the item has not caught up: keep overlaying.
+		expect(settled({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe(false);
+	});
+
+	it("settles 'absent' only once the addedBy is gone", () => {
+		expect(settled({ addedBy: undefined, myClientId: me, pending: 'absent' })).toBe(true);
+		expect(settled({ addedBy: me, myClientId: me, pending: 'absent' })).toBe(false);
+		expect(settled({ addedBy: buddy, myClientId: me, pending: 'absent' })).toBe(false);
+	});
+
+	it('treats no pending intent as vacuously settled (nothing to hold)', () => {
+		expect(settled({ addedBy: me, myClientId: me })).toBe(true);
+		expect(settled({ addedBy: undefined, myClientId: me, pending: undefined })).toBe(true);
+	});
+
+	it('Feed-mirror no-drift: after a settle the pill is driven purely by Room data', () => {
+		// The exact sequence the pill lives through: optimistic flip, stale read
+		// (overlay holds), fresh read (settle), then Room data alone.
+		expect(state({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe('recommended');
+		expect(settled({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe(false);
+		expect(settled({ addedBy: me, myClientId: me, pending: 'mine' })).toBe(true);
+		expect(state({ addedBy: me, myClientId: me })).toBe('recommended');
+	});
+});
+
 describe('the single buddyColors storage subscription (live Buddy Color repaint)', () => {
 	it('registers exactly one listener, refreshes the cache, and rebroadcasts ytb:buddy-colors', () => {
 		// shared.js is the ONE owner of the subscription: loading it (beforeAll)

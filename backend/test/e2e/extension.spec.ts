@@ -1487,8 +1487,10 @@ test('foreground write failures distinguish an unreachable backend from server r
 		await expect(panel.locator('.ytb-panel-error')).toHaveText(networkCopy);
 
 		await pill.click();
-		await expect(pill).toHaveText('Recommend to Buddies');
+		// Optimistic pill: the label flips at once, then the failed write rolls it
+		// back with the reason in the popover — never in the label itself.
 		await expect(page.locator('#ytb-playlist-feedback')).toHaveText(networkCopy);
+		await expect(pill).toHaveText('Recommend to Buddies');
 		expect(errors).toHaveLength(3);
 		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
 		errors.length = 0;
@@ -1509,8 +1511,13 @@ test('foreground write failures distinguish an unreachable backend from server r
 		await expect(panel.locator('.ytb-panel-error')).toHaveText('This note already has 10 replies.');
 
 		await expect(pill).toHaveAttribute('data-ytb-state', 'idle', { timeout: 2500 });
+		// Playwright reaches this click well inside the pill's 1s cooldown from the
+		// network-phase click above; a swallowed click is by design, so wait it out.
+		await page.waitForTimeout(1100);
 		await pill.click();
-		await expect(pill).toHaveText('Room list full');
+		// The category copy goes to the popover; the reverted label never carries it.
+		await expect(page.locator('#ytb-playlist-feedback')).toHaveText('Room list full');
+		await expect(pill).toHaveText('Recommend to Buddies');
 		expect(errors).toHaveLength(3);
 		expect(errors.every((error) => error.includes('409 (Conflict)'))).toBe(true);
 	} finally {
@@ -2587,13 +2594,101 @@ test('watch pill offers Unrecommend on an own Recommendation and un-recommends f
 		const pill = page.locator('#ytb-playlist-add-button');
 		await nudgeUntil(page, () => expect(pill).toHaveText('Unrecommend', { timeout: 700 }));
 
-		// Clicking un-recommends: one DELETE /playlist attributed to the viewer,
-		// after which the pill offers to recommend again.
+		// Clicking un-recommends: the label flips optimistically (before the wire
+		// write), then exactly one DELETE /playlist goes out, attributed to the viewer.
 		await pill.click();
 		await expect(pill).toHaveText('Recommend to Buddies');
+		await expect.poll(() => calls.filter((call) => call.startsWith('DELETE ')).length).toBe(1);
 		const deletes = calls.filter((call) => call.startsWith('DELETE '));
-		expect(deletes).toHaveLength(1);
 		expect(deletes[0]).toContain('/playlist?code=roome2e&clientId=viewer-e2e&videoId=fixture-video');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('the Recommend pill is optimistic: flips before the write lands, absorbs the cooldown, coalesces a mid-flight toggle', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		let releaseAdd: (() => void) | null = null;
+		let addSettled = false;
+		await context.route('http://localhost:8787/**', async (route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			calls.push(`${request.method()} ${url.pathname}`);
+			if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			if (request.method() === 'GET') {
+				return route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					headers: CORS,
+					body: JSON.stringify({ progress: [], presence: [], notes: [], replies: [], playlist: [], events: [] }),
+				});
+			}
+			if (request.method() === 'POST' && url.pathname === '/playlist') {
+				// Hold the add open until the test releases it: everything the pill
+				// does before then happens with the response still in flight.
+				await new Promise<void>((resolve) => {
+					releaseAdd = resolve;
+				});
+				addSettled = true;
+				return route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					headers: CORS,
+					body: JSON.stringify({
+						ok: true,
+						item: { videoId: 'fixture-video', title: 'Fixture Video', addedBy: 'viewer-e2e', addedAt: 1000 },
+					}),
+				});
+			}
+			return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const pill = page.locator('#ytb-playlist-add-button');
+		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
+
+		// The click flips the label immediately — the POST is still in flight —
+		// with no "Recommending..." label and no disabled lockout.
+		await pill.click();
+		await expect(pill).toHaveText('Unrecommend');
+		expect(addSettled).toBe(false);
+		await expect(pill).not.toBeDisabled();
+
+		// A second click inside the 1s cooldown is silently ignored: the label
+		// holds, with no visual sign of the cooldown.
+		await pill.click();
+		await expect(pill).toHaveText('Unrecommend');
+		await expect(pill).not.toBeDisabled();
+		expect(await pill.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
+
+		// Past the cooldown, a genuine toggle while the add is still in flight is
+		// accepted — optimistically, again...
+		await page.waitForTimeout(1100);
+		await pill.click();
+		await expect(pill).toHaveText('Recommend to Buddies');
+		expect(addSettled).toBe(false);
+		// ...but at most one write per video flies: still one POST, no DELETE yet.
+		expect(calls.filter((c) => c.startsWith('POST /playlist'))).toHaveLength(1);
+		expect(calls.filter((c) => c.startsWith('DELETE '))).toHaveLength(0);
+
+		// Release the add: the moved intent goes out as a single delta DELETE and
+		// the pill keeps the newest intent's state — the late response never wins.
+		await expect.poll(() => releaseAdd !== null).toBe(true);
+		releaseAdd!();
+		await expect.poll(() => calls.filter((c) => c.startsWith('DELETE /playlist')).length).toBe(1);
+		expect(calls.filter((c) => c.startsWith('POST /playlist'))).toHaveLength(1);
+		await expect(pill).toHaveText('Recommend to Buddies');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
