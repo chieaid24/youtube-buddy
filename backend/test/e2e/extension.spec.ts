@@ -170,7 +170,9 @@ test('loads the unpacked extension and runs every content script', async () => {
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
 
-		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		// The Add Note (+) button is gated on Room membership (#194): this fixture is
+		// Unpaired, so it never mounts — though composer.js still ran (styles below).
+		await expect(page.locator('#ytb-note-button')).toHaveCount(0);
 		await expect(page.locator('#ytb-theme')).toHaveCount(1);
 		await expect(page.locator('#ytb-renderer-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
@@ -498,7 +500,10 @@ test('Note Dots float above the bar at their true timestamps and swallow hover f
 		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		// The extension is up once notes.js injects its styles (its ytb:room-data
+		// listener attaches in the same synchronous load), so the dispatch below
+		// lands. The Add Note (+) button is Room-gated now (#194); this is Unpaired.
+		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 
 		// Render two Note dots half a second apart. The content scripts run in an
 		// isolated world, so a main-world `Object.defineProperty(video, 'duration',
@@ -642,7 +647,10 @@ test('the progress bar stays seekable directly beneath a Note Dot: every surface
 		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		// The extension is up once notes.js injects its styles (its ytb:room-data
+		// listener attaches in the same synchronous load), so the dispatch below
+		// lands. The Add Note (+) button is Room-gated now (#194); this is Unpaired.
+		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 
 		// Count the press/hover family the page world sees on the bar — the events
 		// YouTube's own seek and storyboard logic run on.
@@ -816,7 +824,10 @@ test('a Note Dot outranks the scrubber knob inside the Note Band, and the knob k
 		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		// The extension is up once notes.js injects its styles (its ytb:room-data
+		// listener attaches in the same synchronous load), so the dispatch below
+		// lands. The Add Note (+) button is Room-gated now (#194); this is Unpaired.
+		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 
 		await page.evaluate(() => {
 			const bar = document.querySelector('.ytp-progress-bar') as HTMLElement;
@@ -901,7 +912,10 @@ test('the Note Preview widens for its corner timestamp: body and time never over
 		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		await expect(page.locator('#ytb-note-button')).toBeVisible();
+		// The extension is up once notes.js injects its styles (its ytb:room-data
+		// listener attaches in the same synchronous load), so the dispatch below
+		// lands. The Add Note (+) button is Room-gated now (#194); this is Unpaired.
+		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 		await loadMedia(page, silentWavDataUri(40));
 
 		// The timestamp is rendered from the Note, so a moment past the fixture's
@@ -1770,6 +1784,11 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 		await expect(panel).toBeVisible();
 		await expect(panel.locator('.ytb-panel-body')).toContainText('hello');
 		await expect(panel.locator('.ytb-panel-time')).toHaveText('@0:04');
+		// Sharing is off (seedPairedRoom leaves it off), yet the Reply composer is
+		// present with no "Turn on Sharing" message — Sharing no longer gates Reply
+		// writing (#194); a Room is all it needs.
+		await expect(panel.locator('.ytb-panel-reply-input')).toHaveCount(1);
+		await expect(panel.locator('.ytb-panel-reply-note')).toHaveCount(0);
 		s = await state();
 		expect(s.currentTime).toBeCloseTo(1, 1);
 		expect(s.paused).toBe(true);
@@ -2430,7 +2449,7 @@ test("a Post Echo fires the author's own Playback Notification on posting — pa
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true })); // posting a Note requires Sharing
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -2592,7 +2611,7 @@ test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native,
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true })); // posting a Note requires Sharing
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -3464,7 +3483,7 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 			return route.fulfill({ status: 200, contentType: 'text/html', body });
 		});
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true })); // posting a Note requires Sharing
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
 
 		// Posting: the composer freezes the watch page's title into the Note. The
 		// fixture has no metadata heading, so this also exercises the tab-title
@@ -3876,7 +3895,9 @@ test('@live loads on YouTube without content-script errors', async () => {
 	try {
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ', { waitUntil: 'domcontentloaded' });
-		await expect(page.locator('#ytb-note-button')).toBeAttached({ timeout: 20_000 });
+		// Unpaired, so the Add Note (+) button is intentionally absent (#194); assert
+		// composer.js still mounted on real YouTube via its injected styles instead.
+		await expect(page.locator('#ytb-composer-styles')).toBeAttached({ timeout: 20_000 });
 		const extensions = await context.newPage();
 		await expect((await extensionItem(extensions)).locator('#errors-button')).toHaveCount(0);
 		// Live YouTube's own console noise, none of it ours: resource-load

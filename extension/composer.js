@@ -33,14 +33,21 @@
 	let holdRelease = null;
 
 	// Settings (live via chrome.storage.onChanged): the Spoiler Default seeds
-	// the composer's checkbox on each open, and Notes Visibility off removes
-	// the Add Note (+) button entirely (the player carries zero YTB Note UI).
+	// the composer's checkbox on each open. The Add Note (+) button is removed
+	// entirely while Notes Visibility is off OR while Unpaired (no Room Code) —
+	// you need a Room to read Notes, so you need one to write them.
 	let spoilerDefault = true;
 	let notesHidden = false;
+	let hasRoomCode = false; // Room membership gates the + button (Unpaired hides it)
 
 	YTB.getSettings().then((settings) => {
 		spoilerDefault = settings.spoilerDefault;
 		notesHidden = settings.notesHidden;
+		ensureButton();
+	});
+
+	YTB.getConfig().then(({ code }) => {
+		hasRoomCode = Boolean(code);
 		ensureButton();
 	});
 
@@ -50,6 +57,11 @@
 		if (changes.notesHidden) {
 			notesHidden = changes.notesHidden.newValue === true;
 			if (notesHidden) closeComposer(); // dismissal semantics: lease-aware resume
+			ensureButton();
+		}
+		if (changes.code) {
+			hasRoomCode = Boolean(changes.code.newValue);
+			if (!hasRoomCode) closeComposer(); // leaving the Room dismisses an open composer
 			ensureButton();
 		}
 	});
@@ -161,7 +173,6 @@
       #${COMPOSER_ID} .ytb-note-post:active:not(:disabled) { transform: scale(0.97); }
       #${COMPOSER_ID} .ytb-note-post:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${COMPOSER_ID} .ytb-note-post:disabled { background: var(--ytb-surface-sunk); color: var(--ytb-ink-faint); cursor: default; }
-      #${COMPOSER_ID} .ytb-note-message { margin: 0 0 8px; color: var(--ytb-accent-800); font-weight: 600; }
       #${COMPOSER_ID} .ytb-note-error { min-height: 18px; margin-top: 8px; color: var(--ytb-danger-text); font-size: 11px; font-weight: 600; }
       @media (prefers-reduced-motion: reduce) {
         #${COMPOSER_ID} { animation: none; }
@@ -245,19 +256,10 @@
 		head.append(title, time, close);
 		composer.append(head);
 
-		if (!config.sharing) {
-			const message = document.createElement('p');
-			message.className = 'ytb-note-message';
-			message.textContent = 'Turn on Sharing in YouTube Buddy to post a Note.';
-			composer.append(message);
-			const disabled = document.createElement('button');
-			disabled.className = 'ytb-note-post';
-			disabled.disabled = true;
-			disabled.textContent = 'Post';
-			composer.append(disabled);
-		} else {
-			buildForm(composer, config, timestamp);
-		}
+		// Sharing does not gate Note writes (CONTEXT.md): in a Room the composer
+		// always builds its form, whether Sharing is on or off. (The + button that
+		// opens this only exists inside a Room, so config always carries a code.)
+		buildForm(composer, config, timestamp);
 
 		// Keep composer interactions inside the composer: no player seeks/pauses,
 		// and the document-level outside-click dismissal never sees these events.
@@ -418,7 +420,7 @@
 	function ensureButton() {
 		if (!YTB.isContextActive()) return;
 		ensureStyles();
-		if (!currentVideoId || notesHidden) {
+		if (!currentVideoId || notesHidden || !hasRoomCode) {
 			closeComposer({ resume: false });
 			document.getElementById(BUTTON_ID)?.remove();
 			return;
