@@ -196,14 +196,28 @@ describe('extension member API', () => {
 			category: 'unexpected',
 		});
 
+		// Sharing does not gate Note/Reply writes: with a Room Code set, posting
+		// succeeds regardless of the Sharing toggle (CONTEXT.md — Sharing covers
+		// Progress Record reporting only).
 		storage = { code: 'silly-otters', sharing: false };
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, note: {} }) }));
+		await expect(window.YTB.postNote({ clientId: 'a', videoId: 'v', timestamp: 1, kind: 'text', body: 'x' })).resolves.toMatchObject({
+			ok: true,
+		});
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, reply: {} }) }));
+		await expect(window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x' })).resolves.toMatchObject({
+			ok: true,
+		});
+
+		// The one remaining client-side guard is Unpaired (no Room Code).
+		storage = {};
 		await expect(window.YTB.postNote({ clientId: 'a', videoId: 'v', timestamp: 1, kind: 'text', body: 'x' })).resolves.toEqual({
 			ok: false,
-			category: 'sharing_off',
+			category: 'unpaired',
 		});
 		await expect(window.YTB.postReply({ clientId: 'a', noteId: 'n', body: 'x' })).resolves.toEqual({
 			ok: false,
-			category: 'sharing_off',
+			category: 'unpaired',
 		});
 	});
 

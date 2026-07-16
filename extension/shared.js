@@ -492,14 +492,15 @@ const YTB = {
 	 * Post a text Note or curated-emoji Reaction at a playback position.
 	 * Resolves to `{ ok: true, note }` carrying the COMPLETE server-authoritative
 	 * record (insert it into the active Video Timeline immediately), or
-	 * `{ ok: false, category }`. Sharing gates all writes client-side.
+	 * `{ ok: false, category }`. Requires a Room Code; Sharing does NOT gate Note
+	 * writes (CONTEXT.md: Sharing covers Progress Record reporting only).
 	 * `videoTitle` is the video's title captured at post time (see watchTitle);
 	 * omitted when the page had none, and never a reason for the post to fail.
 	 * @returns {Promise<{ok: true, note: object}|{ok: false, category: string}>}
 	 */
 	async postNote({ clientId, name, videoId, videoTitle, timestamp, kind, body, spoiler, mentions }) {
-		const { code, sharing } = await YTB.getConfig();
-		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
+		const { code } = await YTB.getConfig();
+		if (!code) return { ok: false, category: 'unpaired' };
 		return YTB._postJson('/notes?code=' + encodeURIComponent(code), {
 			clientId,
 			name,
@@ -518,13 +519,13 @@ const YTB = {
 	/**
 	 * Post a Reply to an existing text Note. Resolves to `{ ok: true, reply }`
 	 * with the complete server record (append it to the open conversation), or
-	 * `{ ok: false, category }` — notably 'reply_cap', 'missing_parent',
-	 * 'room_full', or 'sharing_off'.
+	 * `{ ok: false, category }` — notably 'reply_cap', 'missing_parent', or
+	 * 'room_full'. Requires a Room Code; Sharing does NOT gate Reply writes.
 	 * @returns {Promise<{ok: true, reply: object}|{ok: false, category: string}>}
 	 */
 	async postReply({ clientId, name, noteId, body, mentions }) {
-		const { code, sharing } = await YTB.getConfig();
-		if (!code || !sharing) return { ok: false, category: 'sharing_off' };
+		const { code } = await YTB.getConfig();
+		if (!code) return { ok: false, category: 'unpaired' };
 		return YTB._postJson('/replies?code=' + encodeURIComponent(code), {
 			clientId,
 			name,

@@ -891,14 +891,11 @@
 		removePanel(); // replacement: drop the old panel, keep the lease
 
 		openNote = note;
-		const config = await YTB.getConfig();
-		if (!YTB.isContextActive() || openNote !== note) return; // stopped/replaced while awaiting config
-
 		// The playhead is stable now (opening paused it): it fixes both the panel
 		// variant (a Spoiler's lock state) and whether Go here is near the moment.
 		const playhead = video ? Number(video.currentTime) : Infinity;
 		const variant = YTB.notePanelVariant(note, playhead);
-		const panel = buildPanel(note, config, playhead, variant);
+		const panel = buildPanel(note, playhead, variant);
 		host.appendChild(panel);
 		// Hover-scope the panel's Controls Hold: it keeps YouTube's chrome (and the
 		// panel's own anchor dot) awake ONLY while the pointer hovers the Expanded
@@ -936,7 +933,7 @@
 	 * Every variant pins the corner timestamp and offers Go here unless the
 	 * paused playhead already sits near the moment.
 	 */
-	function buildPanel(note, config, playhead, variant) {
+	function buildPanel(note, playhead, variant) {
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const panel = document.createElement('section');
 		panel.id = PANEL_ID;
@@ -1018,7 +1015,7 @@
 
 		// Seed instantly from the last Room read, then poll for freshness.
 		renderReplies(panel, repliesFor(note.id));
-		updateReplyArea(panel, note, config.sharing, replyCount(note.id));
+		updateReplyArea(panel, note, replyCount(note.id));
 		refreshConversation(panel);
 		return panel;
 	}
@@ -1202,19 +1199,21 @@
 		if (panelHost) positionPanel(panelHost);
 	}
 
-	/** The bottom of the panel: Reply composer, or the sharing/cap states. */
-	function updateReplyArea(panel, note, sharing, count) {
+	/** The bottom of the panel: Reply composer, or the Reply-cap state. */
+	function updateReplyArea(panel, note, count) {
 		const area = panel.querySelector('.ytb-panel-reply-area');
 		if (!area) return;
-		const state = !sharing ? 'sharing-off' : count >= YTB.MAX_REPLIES ? 'capped' : 'composer';
+		// Sharing does not gate Reply writes (CONTEXT.md); the Reply composer only
+		// exists inside a Room, so the sole non-composer state is the 10-Reply cap.
+		const state = count >= YTB.MAX_REPLIES ? 'capped' : 'composer';
 		if (area.dataset.ytbState === state) return;
 		area.dataset.ytbState = state;
 		area.replaceChildren();
 
-		if (state === 'sharing-off' || state === 'capped') {
+		if (state === 'capped') {
 			const message = document.createElement('p');
 			message.className = 'ytb-panel-reply-note';
-			message.textContent = state === 'capped' ? 'Reply limit reached' : 'Turn on Sharing to reply';
+			message.textContent = 'Reply limit reached';
 			area.append(message);
 			return;
 		}
@@ -1302,7 +1301,7 @@
 		}
 		error.textContent = YTB.errorCopy(result.category, 'reply');
 		if (result.category === 'reply_cap') {
-			updateReplyArea(panel, note, true, YTB.MAX_REPLIES);
+			updateReplyArea(panel, note, YTB.MAX_REPLIES);
 			refreshConversation(panel); // pull the replies we didn't know about
 		} else if (result.category === 'missing_parent') {
 			removeNoteEverywhere(note);
@@ -1322,7 +1321,7 @@
 		const wrap = panel.querySelector('.ytb-panel-replies');
 		if (wrap) wrap.scrollTop = wrap.scrollHeight;
 		if (replyCount(note.id) >= YTB.MAX_REPLIES) {
-			updateReplyArea(panel, note, true, YTB.MAX_REPLIES);
+			updateReplyArea(panel, note, YTB.MAX_REPLIES);
 		}
 		renderDots(); // Reply count on the Note Preview updates immediately
 	}
@@ -1356,9 +1355,7 @@
 			recomputeUnseen();
 			acknowledgeDot(note.id);
 			renderReplies(panel, result.replies);
-			const { sharing } = await YTB.getConfig();
-			if (!YTB.isContextActive()) return;
-			if (openNote === note) updateReplyArea(panel, note, sharing, result.replies.length);
+			if (openNote === note) updateReplyArea(panel, note, result.replies.length);
 			renderDots();
 			return;
 		}
