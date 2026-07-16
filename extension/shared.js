@@ -937,6 +937,38 @@ const YTB = {
 	},
 
 	/**
+	 * Hover-scope a Controls Hold onto one overlay element: keep YouTube's chrome
+	 * awake ONLY while a real pointer hover sits on the element, handing the timer
+	 * straight back on mouseleave. HOVER ONLY -- never keyboard focus: the Note
+	 * Composer and the Expanded Note both auto-focus on open, so a focus-scoped
+	 * hold would pin the chrome for their whole open lifetime and re-create the
+	 * autohide flicker (fade-then-pop) this scoping exists to kill. (The Note Dot
+	 * / Dot Cluster take the focus side too, via notes.js bindControlsHold; these
+	 * two surfaces do not.) At most one hold is live at a time, and the mouseleave
+	 * release is one-shot, so a stray duplicate event can never underflow the count.
+	 *
+	 * Returns a one-shot teardown that releases any live hover hold -- the caller's
+	 * own close path (closeComposer / removePanel) must call it, because the element
+	 * usually leaves the DOM without a final mouseleave.
+	 * @param {Element} element the overlay whose hover scopes the hold
+	 * @returns {() => void}
+	 */
+	bindHoverHold(element) {
+		let release = null;
+		element.addEventListener('mouseenter', () => {
+			release ||= YTB.controlsHold.acquire();
+		});
+		element.addEventListener('mouseleave', () => {
+			release?.();
+			release = null;
+		});
+		return () => {
+			release?.();
+			release = null;
+		};
+	},
+
+	/**
 	 * Which Expanded Note variant a Note opens into at panel-open, given the
 	 * viewer's playhead — the pure routing behind the panel's three shapes:
 	 * - 'spoiler': a locked Spoiler (spoiler + playhead before its moment) — body

@@ -27,9 +27,13 @@
 	let openToken = 0;
 	let pauseLeaseActive = false; // opening the composer paused a playing video
 	let composerPressOrigin = 'elsewhere'; // capture-time origin for the next click (ADR-0011)
-	// The open composer's Controls Hold (CONTEXT.md): the same YTB.controlsHold
-	// refcount notes.js consumes, so YouTube's chrome stays awake while the
-	// viewer composes (the composer swallows the pointer activity that would).
+	// The composer's HOVER-SCOPED Controls Hold (CONTEXT.md): the same
+	// YTB.controlsHold refcount notes.js consumes, held ONLY while the pointer
+	// hovers the open composer panel -- not for its whole open lifetime, and NOT
+	// on keyboard focus (the textarea auto-focuses on open; a focus-scoped hold
+	// would pin YouTube's chrome and flicker its timeline when the pointer left
+	// the video). YTB.bindHoverHold wires it; this holds the teardown closeComposer
+	// calls to release any hold still live on dismissal.
 	let holdRelease = null;
 
 	// Settings (live via chrome.storage.onChanged): the Spoiler Default seeds
@@ -266,10 +270,10 @@
 		}
 
 		host.append(composer);
-		// The open composer takes a Controls Hold; closeComposer (every dismissal
-		// path funnels through it) releases.
-		holdRelease?.();
-		holdRelease = YTB.controlsHold.acquire();
+		// Hover-scope the Controls Hold onto the composer panel: it keeps YouTube's
+		// chrome awake only while the pointer hovers, and closeComposer (every
+		// dismissal path funnels through it) releases any hold still live on close.
+		holdRelease = YTB.bindHoverHold(composer);
 		positionComposer(composer, button);
 		composer.querySelector('textarea')?.focus();
 	}
