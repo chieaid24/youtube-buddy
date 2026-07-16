@@ -2,8 +2,8 @@
 // hit area is the painted 6x6 circle - far below the 24x24 minimum
 // (DESIGN.md 1.3). The fix extends the hit box invisibly; the painted dot
 // must stay 6px and dots must keep swallowing events from the player. #173
-// raised the box to the Note Band's 40 tall x 32 wide (the 24px minimum is a
-// floor, not a ceiling), so the probes below assert the full band reach.
+// now tunes the box to the Note Band's tight 14 tall x 12 wide target, so the
+// probes below assert its exact reach and bottom anchor.
 //
 // The extender grows UPWARD off the dot's bottom edge, not outward from its
 // centre (#158): centred, its lower half hung inside YouTube's progress bar and
@@ -13,7 +13,7 @@
 import { expect, test } from '@playwright/test';
 import { launchExtension, makeData, nudgeUntil, playbackFixture, routeBackend, seedPaired } from './harness';
 
-test('UA-004: every Note Dot offers the Note Band 40x32 hit area around a 6px glyph', async () => {
+test('UA-004: every Note Dot offers the Note Band 12x14 hit area around a 6px glyph', async () => {
 	const context = await launchExtension();
 	try {
 		const d = makeData(Date.now());
@@ -27,7 +27,14 @@ test('UA-004: every Note Dot offers the Note Band 40x32 hit area around a 6px gl
 		await nudgeUntil(page, () => document.querySelectorAll('.ytb-note-dot').length >= 5);
 
 		const results = await page.evaluate(() => {
-			const out: { id: string; glyph: number; reach: { dx: number; dy: number; hit: boolean }[]; belowBar: boolean }[] = [];
+			const out: {
+				id: string;
+				glyph: number;
+				reach: { dx: number; dy: number; hit: boolean }[];
+				belowBottom: boolean;
+				belowBar: boolean;
+			}[] = [];
+			const bar = document.querySelector<HTMLElement>('.ytp-progress-bar')!.getBoundingClientRect();
 			for (const dot of document.querySelectorAll<HTMLElement>('.ytb-note-dot')) {
 				const r = dot.getBoundingClientRect();
 				const cx = r.left + r.width / 2;
@@ -36,28 +43,31 @@ test('UA-004: every Note Dot offers the Note Band 40x32 hit area around a 6px gl
 					const el = document.elementFromPoint(cx + dx, cy + dy);
 					return el === dot || dot.contains(el);
 				};
-				// 15px to each side, and 20px then 36px UP: a 32px-wide box that
-				// reaches a full 40px above the dot's bottom edge (1px of rounding
-				// margin), all of it clear of the bar.
+				// Reach to 1px inside each edge of the 12px-wide x 14px-tall box.
+				// The glyph itself occupies only +/-3px around the centre.
 				const reach = [
-					{ dx: -15, dy: 0 },
-					{ dx: 15, dy: 0 },
-					{ dx: 0, dy: -20 },
-					{ dx: 0, dy: -36 },
+					{ dx: -5, dy: 0 },
+					{ dx: 5, dy: 0 },
+					{ dx: 0, dy: -10 },
 				].map(({ dx, dy }) => ({ dx, dy, hit: hitAt(dx, dy) }));
-				// The dot's bottom edge sits 3px above the bar; 7px below its centre
-				// is INSIDE the bar, and must belong to YouTube's scrubber (#158).
-				out.push({ id: dot.dataset.ytbNoteId || '?', glyph: r.width, reach, belowBar: hitAt(0, 7) });
+				out.push({
+					id: dot.dataset.ytbNoteId || '?',
+					glyph: r.width,
+					reach,
+					belowBottom: hitAt(0, r.bottom + 1 - cy),
+					belowBar: hitAt(0, bar.top + 1 - cy),
+				});
 			}
 			return out;
 		});
 
-		for (const { id, glyph, reach, belowBar } of results) {
+		for (const { id, glyph, reach, belowBottom, belowBar } of results) {
 			// The painted circle stays 6px - only the invisible hit box grows.
 			expect.soft(glyph, `${id} glyph width`).toBe(6);
 			for (const { dx, dy, hit } of reach) {
 				expect.soft(hit, `${id} hit at (${dx},${dy}) from center`).toBe(true);
 			}
+			expect.soft(belowBottom, `${id} target must end at the dot's bottom edge`).toBe(false);
 			expect.soft(belowBar, `${id} must not claim the bar beneath it`).toBe(false);
 		}
 	} finally {

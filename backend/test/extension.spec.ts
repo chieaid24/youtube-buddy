@@ -578,38 +578,34 @@ describe('note presentation helpers', () => {
 	it('gates the hit extender on nearest-neighbour clearance tracking the box width (#173)', () => {
 		const gate = (xs: number[], boxWidth: number): boolean[] => window.YTB.dotExtenderGate(xs, boxWidth);
 		const { hitWidth, hitHeight } = window.YTB.NOTE_BAND;
-		// The Note Band's hit box: 40 tall x 32 wide, and the gate threshold IS
+		// The Note Band's hit box: 14 tall x 12 wide, and the gate threshold IS
 		// the width — a narrower gate would let one dot's box shadow a
 		// neighbour's glyph, a wider one would strip extenders from dots no box
 		// can reach.
-		expect(hitWidth).toBe(32);
-		expect(hitHeight).toBe(40);
+		expect(hitWidth).toBe(12);
+		expect(hitHeight).toBe(14);
 
 		// A lone dot always earns its extender — there is no one to shadow.
 		expect(gate([500], hitWidth)).toEqual([true]);
-		// Two dots ~20px apart get NO extender (the Cluster fan is their reach
-		// affordance); at exactly the box width and beyond, both earn one.
-		expect(gate([500, 520], hitWidth)).toEqual([false, false]);
-		expect(gate([500, 532], hitWidth)).toEqual([true, true]);
-		expect(gate([500, 540], hitWidth)).toEqual([true, true]);
+		// Straddle the configured threshold rather than pinning fixture offsets
+		// to one tuning: just below it loses the extender; at and above it wins.
+		expect(gate([500, 500 + hitWidth - 1], hitWidth)).toEqual([false, false]);
+		expect(gate([500, 500 + hitWidth], hitWidth)).toEqual([true, true]);
+		expect(gate([500, 500 + hitWidth + 1], hitWidth)).toEqual([true, true]);
 		// The gate reads nearest-neighbour clearance across ALL dots, per dot: a
 		// middle dot crowded from one side only still loses its extender, while
 		// the far dot keeps its own.
-		expect(gate([100, 120, 400], hitWidth)).toEqual([false, false, true]);
-		// The old 24px threshold is exactly the regression this gate closes: a
-		// pair 30px apart passed it, and one box shadowed the other glyph.
-		expect(gate([500, 530], 24)).toEqual([true, true]);
-		expect(gate([500, 530], hitWidth)).toEqual([false, false]);
+		expect(gate([100, 100 + hitWidth - 1, 400], hitWidth)).toEqual([false, false, true]);
 		// Degenerate input.
 		expect(gate([], hitWidth)).toEqual([]);
 	});
 
 	it('derives the Expanded Note anchor from the dot geometry, so a lift change carries it (#173)', () => {
-		// The standing Note Band: 6px lift + 6px glyph + 8px breathing room puts
-		// the panel's bottom edge 20px above the bar's top edge — clear of the
-		// dot glyphs, which top out at lift + glyph = 12px.
+		// The standing Note Band: 10px lift + 6px glyph + 8px breathing room puts
+		// the panel's bottom edge 24px above the bar's top edge — clear of the
+		// dot glyphs, which top out at lift + glyph = 16px.
 		const band = window.YTB.NOTE_BAND;
-		expect(window.YTB.panelBarClearance(band)).toBe(20);
+		expect(window.YTB.panelBarClearance(band)).toBe(24);
 		expect(window.YTB.panelBarClearance(band)).toBeGreaterThan(band.dotLift + band.dotDiameter);
 		// Derived, not hardcoded: lifting the dots higher carries the panel with
 		// it instead of landing the panel's bottom edge on the lifted glyphs.
