@@ -1938,24 +1938,22 @@
       }
       /* Invisible hit extender (UA-004, resized by #173): the painted circle
          stays 6px, but the interactive target reaches the Note Band's hit box
-         (40 tall x 32 wide — DESIGN.md's 24px minimum is a floor, not a
-         ceiling, and a ~6px circle is not a click target; the band above it is
-         ours to spend). Dots already swallow presses and hovers from the
-         player by design, so the larger box widens that established behavior,
-         not a new one. Only dots whose nearest neighbour is at least the box
-         WIDTH away get it (renderDots toggles the class through the pure
-         dotExtenderGate): closer neighbours would shadow each other's glyphs,
-         and those dense dots keep the Cluster fan as their reach affordance —
-         their exact timestamp position is essential and never displaced at
-         rest.
+         (14 tall x 12 wide): a tight, dot-like target with about 3px beside
+         the glyph and 8px above it. Dots already swallow presses and hovers
+         from the player by design, so the box extends that established
+         behavior, not a new one. Only dots whose nearest neighbour is at least
+         the box WIDTH away get it (renderDots toggles the class through the
+         pure dotExtenderGate): closer neighbours would shadow each other's
+         glyphs, and those dense dots keep the Cluster fan as their reach
+         affordance — their exact timestamp position is essential and never
+         displaced at rest.
 
          It grows UPWARD off the dot's bottom edge (#158) rather than centring
          on the glyph: a centred box hung below the dot, INTO the bar — it
          covered the whole bar and stole every press near a Note's timestamp.
          Bottom-anchored, the target keeps its full size while ending exactly
          where the dot does, the dot lift clear of the bar. What it claims
-         instead is the band above the bar (YouTube's grab pad included) — the
-         accepted trade for dots that keep hugging the bar. */
+         instead is the band above the bar (YouTube's grab pad included). */
       .${DOT_ROOMY_CLASS}::after {
         content: '';
         position: absolute;

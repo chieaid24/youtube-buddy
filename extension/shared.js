@@ -1202,10 +1202,10 @@ const YTB = {
 	 * re-collide.
 	 */
 	NOTE_BAND: {
-		dotLift: 6, // px from the bar's top edge up to a dot's bottom edge (#162)
+		dotLift: 10, // px from the bar's top edge up to a dot's bottom edge (#162)
 		dotDiameter: 6, // the painted glyph
-		hitWidth: 32, // the invisible hit extender's width, centred on the glyph
-		hitHeight: 40, // its height — bottom-anchored at the dot's bottom edge, growing upward only (#158)
+		hitWidth: 12, // the invisible hit extender's width, centred on the glyph
+		hitHeight: 14, // its height — bottom-anchored at the dot's bottom edge, growing upward only (#158)
 		panelGap: 8, // breathing room between the dot glyphs' tops and the Expanded Note's bottom edge
 	},
 

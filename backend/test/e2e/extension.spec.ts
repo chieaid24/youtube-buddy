@@ -764,10 +764,10 @@ test('the progress bar stays seekable directly beneath a Note Dot: every surface
 		expect(seen.suppressed).toBe(false);
 		await expect(page.locator('#ytb-note-panel')).toHaveCount(0);
 
-		// The band ABOVE the bar still belongs to the dot: a click 40px above the
-		// bar and 14px to the side — inside the Note Band's 40x32 hit box (#173),
-		// nowhere near the glyph — opens the Expanded Note.
-		await page.mouse.click(dotX + 14, barY - 43);
+		// The band ABOVE the bar still belongs to the dot: a click 5px to the side
+		// and about 13px above the bar sits inside the Note Band's 12x14 hit box
+		// (#173), outside the painted glyph, and opens the Expanded Note.
+		await page.mouse.click(dotX + 5, barY - 14);
 		await expect(page.locator('#ytb-note-panel')).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
