@@ -135,7 +135,7 @@
 	// its mouseleave/focusout (a re-render, or YouTube rebuilding the bar) can
 	// never leak one: sweepControlsHolds releases any disconnected key.
 	const holdBySurface = new Map(); // wrapper Element -> { hover: release|null, focus: release|null }
-	let panelHoldRelease = null; // the open Expanded Note's own hold
+	let panelHoldRelease = null; // teardown for the Expanded Note's hover-scoped hold
 
 	injectStyle();
 
@@ -900,11 +900,12 @@
 		const variant = YTB.notePanelVariant(note, playhead);
 		const panel = buildPanel(note, config, playhead, variant);
 		host.appendChild(panel);
-		// The open panel takes its own Controls Hold: the pointer sits on the
-		// panel — whose containment swallows its events — so nothing else keeps
-		// the chrome (and the panel's own anchor dot) awake. removePanel releases.
-		panelHoldRelease?.();
-		panelHoldRelease = YTB.controlsHold.acquire();
+		// Hover-scope the panel's Controls Hold: it keeps YouTube's chrome (and the
+		// panel's own anchor dot) awake ONLY while the pointer hovers the Expanded
+		// Note — not for its whole open lifetime, and not on keyboard focus (the
+		// panel auto-focuses on open, which would pin the chrome). removePanel
+		// releases any hold still live on close or replacement.
+		panelHoldRelease = YTB.bindHoverHold(panel);
 		positionPanel(panel);
 		// The reply list seeded while the panel was detached (zero heights), so
 		// renderReplies' bottom-pin could not engage. Pin once now that the panel

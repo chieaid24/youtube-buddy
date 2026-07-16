@@ -1693,6 +1693,124 @@ test('foreground write failures distinguish an unreachable backend from server r
 	}
 });
 
+test('the Note Composer and Expanded Note hold the chrome only while hovered, never on focus alone', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0);
+		});
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot-text')).toHaveCount(1, { timeout: 700 }));
+
+		// The Controls Hold's only observable feed is nudgePlayerControls: a
+		// synthetic mousemove dispatched ON the player root (an immediate one on the
+		// first acquire, then a ~1.5s ticker) for as long as a hold is held. Count
+		// those player-targeted moves from the page's main world -- the content
+		// script dispatches them on a node both worlds share. The test never moves
+		// the real pointer inside a measurement window and drives hover via
+		// dispatched enter/leave, so the only player mousemoves in a quiet window are
+		// the ticker's. Hover-scoped means: zero feeds while the pointer is off the
+		// surface (even while it holds keyboard focus), a feed the instant it is hovered.
+		const TICK = 1700; // one 1.5s ticker interval, with margin, to catch a leaked hold
+		await page.evaluate(() => {
+			const player = document.querySelector('#movie_player, .html5-video-player') as HTMLElement;
+			player.dataset.ytbFeeds = '0';
+			document.addEventListener(
+				'mousemove',
+				(e) => {
+					const target = e.target as Node;
+					if (target === player || player.contains(target)) player.dataset.ytbFeeds = String(Number(player.dataset.ytbFeeds) + 1);
+				},
+				true,
+			);
+		});
+		const feeds = () =>
+			page.evaluate(() => Number((document.querySelector('#movie_player, .html5-video-player') as HTMLElement).dataset.ytbFeeds));
+		const resetFeeds = () =>
+			page.evaluate(() => ((document.querySelector('#movie_player, .html5-video-player') as HTMLElement).dataset.ytbFeeds = '0'));
+		// Dispatch a bare pointer event onto a YTB surface: the hold binding listens
+		// for enter/leave regardless of where the real pointer is, so this exercises
+		// the hover scope without moving (and thus feeding) the player.
+		const dispatch = (selector: string, type: 'mouseenter' | 'mouseleave' | 'click') =>
+			page.evaluate(
+				({ selector, type }) => document.querySelector(selector)!.dispatchEvent(new MouseEvent(type, { bubbles: type === 'click' })),
+				{
+					selector,
+					type,
+				},
+			);
+
+		// --- Note Composer ---
+		await page.locator('#ytb-note-button').click();
+		const composer = page.locator('#ytb-note-composer');
+		await expect(composer).toBeVisible();
+		// It auto-focuses its textarea on open: focus is present, and must NOT hold.
+		expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('TEXTAREA');
+
+		// Open + focused + unhovered: no hold, so the ticker never feeds the player.
+		await resetFeeds();
+		await page.waitForTimeout(TICK);
+		expect(await feeds(), 'an open but unhovered composer (focused) must not hold the chrome').toBe(0);
+
+		// A real pointer hover takes the hold: the first acquire feeds immediately.
+		await resetFeeds();
+		await dispatch('#ytb-note-composer', 'mouseenter');
+		expect(await feeds(), 'hovering the composer keeps the chrome awake').toBeGreaterThan(0);
+
+		// mouseleave releases it: no further feeds.
+		await dispatch('#ytb-note-composer', 'mouseleave');
+		await resetFeeds();
+		await page.waitForTimeout(TICK);
+		expect(await feeds(), 'leaving the composer hands the timer back').toBe(0);
+
+		// Closing while still hovered must not leak the live hover hold.
+		await dispatch('#ytb-note-composer', 'mouseenter');
+		await page.keyboard.press('Escape');
+		await expect(composer).toHaveCount(0);
+		await resetFeeds();
+		await page.waitForTimeout(TICK);
+		expect(await feeds(), 'closing the composer releases any live hover hold').toBe(0);
+
+		// --- Expanded Note ---
+		// Dispatch the dot's click so no real pointer or focus lands on its Cluster
+		// (whose own hover/focus hold would otherwise feed the ticker) -- this
+		// isolates the panel's own hold.
+		await dispatch('.ytb-note-dot-text', 'click');
+		const panel = page.locator('#ytb-note-panel');
+		await expect(panel).toBeVisible();
+
+		// Open + focused (openPanel calls panel.focus()) + unhovered: no hold.
+		await resetFeeds();
+		await page.waitForTimeout(TICK);
+		expect(await feeds(), 'an open but unhovered Expanded Note must not hold the chrome').toBe(0);
+
+		await resetFeeds();
+		await dispatch('#ytb-note-panel', 'mouseenter');
+		expect(await feeds(), 'hovering the Expanded Note keeps the chrome awake').toBeGreaterThan(0);
+
+		await dispatch('#ytb-note-panel', 'mouseleave');
+		await resetFeeds();
+		await page.waitForTimeout(TICK);
+		expect(await feeds(), 'leaving the Expanded Note hands the timer back').toBe(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('every Note Dot opens its Expanded Note variant; the click never seeks or changes playback', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
