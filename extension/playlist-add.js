@@ -38,6 +38,14 @@
 	// clicks within this window of the last accepted one are silently ignored,
 	// with no dimming, no disabled attribute, no cursor change.
 	const CLICK_COOLDOWN_MS = 1000;
+	// The Recommend Celebration (CONTEXT.md): on a member's own idle -> recommend
+	// click the pill shows "Recommended!" with a one-shot apricot confetti burst,
+	// then crossfades to the resting "Unrecommend" after this beat. Purely
+	// cosmetic — the optimistic flip underneath is unchanged.
+	const CELEBRATION_MS = 1200;
+	const CELEBRATION_LABEL = 'Recommended!';
+	const CONFETTI_COUNT = 14;
+	const CONFETTI_COLORS = ['--ytb-accent-500', '--ytb-accent-600', '--ytb-accent-800'];
 
 	let currentVideoId = null;
 	// From ok ytb:room-data reads: videoId -> the recommending member's clientId
@@ -63,6 +71,11 @@
 	let feedbackTimer = null;
 	// The tile whose kebab was last clicked; consumed when its menu popup opens.
 	let pendingKebab = null; // { videoId, title, at }
+	// The live Recommend Celebration on the watch pill, or null: fired ONLY from
+	// the local idle -> recommend click. Holds the settle timer and its confetti
+	// node so any exit (settle, failure revert, navigation, context loss) cuts it
+	// cleanly — no lingering "Recommended!" label or particles.
+	let celebration = null; // { videoId, timer, confetti }
 
 	injectStyle();
 
@@ -119,6 +132,9 @@
 				// write goes out underneath (ADR-0007 un-recommend is the author-only
 				// point delete that removes the Recommendation for everyone).
 				recommendIntents.set(videoId, { intent: state === 'idle' ? 'mine' : 'absent', title: YTB.watchTitle(document) });
+				// Only the local idle -> recommend gesture celebrates (CONTEXT.md
+				// "Recommend Celebration"); un-recommend stays plain.
+				if (state === 'idle') startCelebration(button, videoId);
 				syncWatchButton(button);
 				pumpWrites(videoId);
 			});
@@ -133,12 +149,25 @@
 		recommended: 'Unrecommend', // mine — the action offered, click to un-recommend
 	};
 
-	function setButtonState(button, state) {
+	/** The pill's text lives in its own span so the Recommend Celebration can
+	 * crossfade the label without touching the button's own opacity. */
+	function pillLabel(button) {
+		let label = button.querySelector('.ytb-pill-label');
+		if (!label) {
+			label = document.createElement('span');
+			label.className = 'ytb-pill-label';
+			button.appendChild(label);
+		}
+		return label;
+	}
+
+	function setButtonState(button, state, celebrating) {
 		button.dataset.ytbState = state;
-		button.textContent = STATE_LABELS[state] || STATE_LABELS.idle;
+		pillLabel(button).textContent = celebrating ? CELEBRATION_LABEL : STATE_LABELS[state] || STATE_LABELS.idle;
 		button.classList.toggle('is-added', state === 'added');
 		button.classList.toggle('is-recommended', state === 'recommended');
-		button.title = state === 'recommended' ? 'You recommended this to your Buddies. Click to remove it for everyone.' : '';
+		button.classList.toggle('is-celebrating', Boolean(celebrating));
+		button.title = state === 'recommended' && !celebrating ? 'You recommended this to your Buddies. Click to remove it for everyone.' : '';
 	}
 
 	function pillState() {
@@ -151,7 +180,91 @@
 	}
 
 	function syncWatchButton(button) {
-		setButtonState(button, pillState());
+		const state = pillState();
+		// The celebration is a cosmetic overlay on the mine-state ONLY: any exit
+		// from 'recommended' — a failed write reverting to idle, or a Room read
+		// correcting to a Buddy's item — cuts it cleanly here.
+		const celebrating = Boolean(celebration) && celebration.videoId === currentVideoId && state === 'recommended';
+		if (celebration && !celebrating) endCelebration();
+		setButtonState(button, state, celebrating);
+	}
+
+	// --- Recommend Celebration (CONTEXT.md): a purely cosmetic beat on the local
+	// idle -> recommend click. The optimistic flip happens regardless; this only
+	// overlays "Recommended!" + an apricot confetti burst, then crossfades to the
+	// resting "Unrecommend". ---
+
+	function prefersReducedMotion() {
+		return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+	}
+
+	function startCelebration(button, videoId) {
+		endCelebration(); // a fresh click supersedes any running beat
+		const c = { videoId, timer: null, confetti: null };
+		celebration = c;
+		if (!prefersReducedMotion()) c.confetti = spawnConfetti(button);
+		c.timer = setTimeout(() => crossfadeToResting(button, c), CELEBRATION_MS);
+	}
+
+	function endCelebration() {
+		if (!celebration) return;
+		clearTimeout(celebration.timer);
+		removeConfetti(celebration);
+		celebration = null;
+	}
+
+	/** End of the beat: fade the "Recommended!" label out, swap to the resting
+	 * "Unrecommend", fade back in. Reduced motion (or no WAAPI) swaps instantly. */
+	function crossfadeToResting(button, c) {
+		if (celebration !== c) return; // superseded or already cut
+		removeConfetti(c);
+		const finish = () => {
+			if (celebration === c) celebration = null;
+			const b = document.getElementById(BUTTON_ID);
+			if (b) syncWatchButton(b);
+		};
+		const label = button && button.isConnected && button.querySelector('.ytb-pill-label');
+		if (!label || prefersReducedMotion() || typeof label.animate !== 'function') {
+			finish();
+			return;
+		}
+		label
+			.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing: 'ease' })
+			.finished.then(() => {
+				finish();
+				if (label.isConnected) label.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'ease' });
+			})
+			.catch(() => finish()); // a cancelled fade still lands on the resting label
+	}
+
+	/** One-shot apricot burst from the pill: fixed-positioned at its centre,
+	 * pointer-events none, transform/opacity only, self-removing. */
+	function spawnConfetti(button) {
+		const rect = button.getBoundingClientRect();
+		const box = document.createElement('div');
+		box.className = 'ytb-recommend-confetti';
+		box.style.left = rect.left + rect.width / 2 + 'px';
+		box.style.top = rect.top + rect.height / 2 + 'px';
+		for (let i = 0; i < CONFETTI_COUNT; i++) {
+			const p = document.createElement('span');
+			const angle = (i / CONFETTI_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+			const dist = 28 + Math.random() * 30;
+			p.style.setProperty('--ytb-cf-dx', (Math.cos(angle) * dist).toFixed(1) + 'px');
+			p.style.setProperty('--ytb-cf-dy', (Math.sin(angle) * dist - 12).toFixed(1) + 'px');
+			p.style.setProperty('--ytb-cf-rot', Math.round(Math.random() * 540 - 270) + 'deg');
+			p.style.background = 'var(' + CONFETTI_COLORS[i % CONFETTI_COLORS.length] + ', #f6a96b)';
+			p.style.animationDuration = Math.round(720 + Math.random() * 260) + 'ms';
+			box.appendChild(p);
+		}
+		(document.body || document.documentElement).appendChild(box);
+		return { box, timer: setTimeout(() => box.remove(), 1100) };
+	}
+
+	function removeConfetti(c) {
+		if (!c || !c.confetti) return;
+		clearTimeout(c.confetti.timer);
+		c.confetti.box.remove();
+		c.confetti = null;
 	}
 
 	/**
@@ -403,6 +516,7 @@
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = null;
 		document.getElementById(FEEDBACK_ID)?.remove();
+		endCelebration(); // navigating away mid-beat cleans up
 		currentVideoId = (event.detail && event.detail.videoId) || null;
 		pendingKebab = null;
 		lastPillClickAt = new Map(); // the click cooldown resets on navigation
@@ -451,6 +565,7 @@
 	YTB.onContextInvalidated(() => {
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = null;
+		endCelebration();
 		document.getElementById(FEEDBACK_ID)?.remove();
 		document.getElementById(BUTTON_ID)?.remove();
 		for (const item of document.querySelectorAll('.' + KEBAB_ITEM_CLASS)) item.remove();
@@ -489,6 +604,40 @@
       #${BUTTON_ID}.is-added { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); cursor: default; line-height: 34px; }
       #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); line-height: 34px; }
       #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
+      /* Recommend Celebration (CONTEXT.md): during the beat the pill fills apricot
+       * again for a celebratory pop, then transitions back to the outline resting
+       * state via the button's own background transition. */
+      #${BUTTON_ID} .ytb-pill-label { display: inline-block; }
+      /* The :hover variant is load-bearing: the resting mine-state's
+       * .is-recommended:hover outranks a single-class .is-celebrating, so without
+       * it a hovered pill (every mouse click leaves the pointer here) would keep
+       * the outline look and hide the dark celebration label. */
+      #${BUTTON_ID}.is-celebrating,
+      #${BUTTON_ID}.is-celebrating:hover { background: var(--ytb-accent-500, #f6a96b); border-color: transparent; color: var(--ytb-on-accent, #3a2e28); }
+      /* The apricot burst: a fixed, non-interactive layer at the pill's centre,
+       * animating transform/opacity only, particles tinted from the --ytb-* tokens
+       * (theme.js) and fully removed when the beat ends. */
+      .ytb-recommend-confetti { position: fixed; z-index: 2147483646; width: 0; height: 0; pointer-events: none; }
+      .ytb-recommend-confetti > span {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 8px;
+        height: 8px;
+        margin: -4px 0 0 -4px;
+        border-radius: 2px;
+        pointer-events: none;
+        will-change: transform, opacity;
+        animation-name: ytb-recommend-confetti-pop;
+        animation-timing-function: cubic-bezier(0.22, 0.7, 0.3, 1);
+        animation-fill-mode: forwards;
+      }
+      @keyframes ytb-recommend-confetti-pop {
+        0% { transform: translate(0, 0) scale(0.3) rotate(0deg); opacity: 1; }
+        70% { opacity: 1; }
+        100% { transform: translate(var(--ytb-cf-dx, 0), var(--ytb-cf-dy, -30px)) scale(1) rotate(var(--ytb-cf-rot, 180deg)); opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) { .ytb-recommend-confetti { display: none; } }
 	  #${FEEDBACK_ID} {
 		position: fixed;
 		z-index: 2147483647;

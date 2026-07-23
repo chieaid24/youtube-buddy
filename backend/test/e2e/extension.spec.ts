@@ -3075,17 +3075,20 @@ test('the Recommend pill is optimistic: flips before the write lands, absorbs th
 		const pill = page.locator('#ytb-playlist-add-button');
 		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
 
-		// The click flips the label immediately — the POST is still in flight —
-		// with no "Recommending..." label and no disabled lockout.
+		// The click flips the pill's state immediately — the POST is still in
+		// flight — with no "Recommending..." label and no disabled lockout. The own
+		// idle -> recommend click also plays the Recommend Celebration, so the label
+		// reads "Recommended!" through the beat before it settles to "Unrecommend".
 		await pill.click();
-		await expect(pill).toHaveText('Unrecommend');
+		await expect(pill).toHaveAttribute('data-ytb-state', 'recommended');
+		await expect(pill).toHaveText('Recommended!');
 		expect(addSettled).toBe(false);
 		await expect(pill).not.toBeDisabled();
 
-		// A second click inside the 1s cooldown is silently ignored: the label
+		// A second click inside the 1s cooldown is silently ignored: the state
 		// holds, with no visual sign of the cooldown.
 		await pill.click();
-		await expect(pill).toHaveText('Unrecommend');
+		await expect(pill).toHaveAttribute('data-ytb-state', 'recommended');
 		await expect(pill).not.toBeDisabled();
 		expect(await pill.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
 
@@ -3106,6 +3109,94 @@ test('the Recommend pill is optimistic: flips before the write lands, absorbs th
 		await expect.poll(() => calls.filter((c) => c.startsWith('DELETE /playlist')).length).toBe(1);
 		expect(calls.filter((c) => c.startsWith('POST /playlist'))).toHaveLength(1);
 		await expect(pill).toHaveText('Recommend to Buddies');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('idle -> recommend celebrates: "Recommended!" beat + apricot confetti, then settles to Unrecommend; un-recommend stays plain', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const pill = page.locator('#ytb-playlist-add-button');
+		const confetti = page.locator('.ytb-recommend-confetti');
+		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
+		const idleFill = await pill.evaluate((b) => getComputedStyle(b).backgroundColor);
+
+		// The local idle -> recommend click celebrates: the label swaps to
+		// "Recommended!" with a one-shot apricot confetti burst.
+		await pill.click();
+		await expect(pill).toHaveText('Recommended!');
+		// The celebrating pill fills apricot for a readable label — the same fill as
+		// the idle pill — even though the click leaves the pointer hovering it (the
+		// resting mine-state's :hover must not win over the celebration).
+		expect(await pill.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(idleFill);
+		await expect(confetti).toHaveCount(1);
+		expect(await confetti.locator('span').count()).toBeGreaterThan(0);
+		// The burst is non-interactive and tinted from an --ytb-* accent token, so
+		// it never blocks a click and never reads as transparent.
+		expect(await confetti.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+		expect(
+			await confetti
+				.locator('span')
+				.first()
+				.evaluate((el) => getComputedStyle(el).backgroundColor),
+		).not.toBe('rgba(0, 0, 0, 0)');
+		// The beat lives on the label and the burst layer; the button's own opacity
+		// is never touched (it is not a loading or disabled state).
+		expect(await pill.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
+
+		// It settles to the resting "Unrecommend" and the confetti is fully removed.
+		await expect(pill).toHaveText('Unrecommend', { timeout: 3000 });
+		await expect(confetti).toHaveCount(0, { timeout: 3000 });
+
+		// Un-recommend (mine -> idle) is plain: no "Recommended!", no burst.
+		await page.waitForTimeout(1100); // clear the 1s click cooldown
+		await pill.click();
+		await expect(pill).toHaveText('Recommend to Buddies');
+		await expect(confetti).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('the Recommend Celebration honors prefers-reduced-motion: the label still swaps, no confetti burst', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		const pill = page.locator('#ytb-playlist-add-button');
+		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
+
+		await pill.click();
+		// The label still celebrates "Recommended!"...
+		await expect(pill).toHaveText('Recommended!');
+		// ...but no particle burst is ever spawned...
+		await expect(page.locator('.ytb-recommend-confetti')).toHaveCount(0);
+		// ...and it still settles to the resting label.
+		await expect(pill).toHaveText('Unrecommend', { timeout: 3000 });
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
