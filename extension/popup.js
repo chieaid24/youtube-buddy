@@ -1,4 +1,4 @@
-// popup.js -- identity, Room Code, and the Sharing pill.
+// popup.js -- identity, Room Code, and Sharing controls.
 // Consumes the frozen `window.YTB` contract from shared.js. The popup is the only
 // UI surface; all persisted state lives in chrome.storage.local (via YTB) so it
 // survives a browser restart. See CONTEXT.md for terminology and DESIGN.md for the
@@ -265,8 +265,7 @@ function wireHandlers() {
 	el.setSpoiler.addEventListener('click', () => saveSettings({ spoilerDefault: !currentSettings.spoilerDefault }));
 	el.setHome.addEventListener('click', () => saveSettings({ homeSectionHidden: !currentSettings.homeSectionHidden }));
 
-	// Room actions relocated into Settings: stopping keeps its confirm dialog,
-	// starting stays instant.
+	// Sharing stops with confirmation and starts immediately.
 	el.settingsSharing.addEventListener('click', () => {
 		if (currentSharing) {
 			openConfirm({
@@ -579,12 +578,10 @@ function renderSettingsControls() {
 	updateSettingsRoomControls();
 }
 
-// The Room group in Settings: hidden while Unpaired; the sharing button
-// mirrors the current state (guarded stop / instant start).
+// The Room group holds only Leave room and is hidden while Unpaired.
 function updateSettingsRoomControls() {
 	el.settingsRoom.hidden = !activeRoomCode;
-	el.settingsSharing.textContent = currentSharing ? 'Stop sharing' : 'Start sharing';
-	el.settingsSharing.className = 'btn ' + (currentSharing ? 'btn-neutral' : 'btn-primary');
+	setSwitch(el.settingsSharing, currentSharing);
 }
 
 // --- view switching ----------------------------------------------------------
@@ -631,10 +628,7 @@ async function refreshStatus(code) {
 
 	const { sharing } = await YTB.getConfig();
 	currentSharing = sharing;
-	// The active Room Code is LOCAL state, so claim it BEFORE the Room read: the
-	// Settings Room group (Stop sharing, Leave room) hangs off it, and gating that
-	// on the backend leaves a viewer with no way out of the room for as long as the
-	// GET is in flight — forever, if it never settles.
+	// Keep Leave room available while backend reads are pending.
 	activeRoomCode = code;
 	updateSettingsRoomControls();
 
@@ -685,7 +679,7 @@ async function refreshConnectedRoom() {
 
 // Render the status panel. Waiting and in-room states show the Sharing state:
 // a muted read-only "Sharing on" line while on (the guarded stop lives in
-// Settings), or a prominent one-click "Turn on sharing" while off. Unpaired
+// Settings), or a compact one-click "Turn on sharing" while off. Unpaired
 // and Room-full states show neither.
 function setStatus(state, text, sub, memberStates = false) {
 	el.status.dataset.state = state;

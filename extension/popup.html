@@ -611,9 +611,7 @@
 				margin-left: 22px;
 			}
 
-			/* Sharing state on the main view: a muted read-only line while Sharing
-			   is on (the interactive stop lives in Settings), or a prominent
-			   turn-on button while it is off (starting is instant, unguarded). */
+			/* Sharing state on the main view: read-only while on, compact while off. */
 			.sharing-on {
 				display: inline-flex;
 				align-items: center;
@@ -628,10 +626,11 @@
 				border-radius: var(--r-pill);
 				background: var(--c-success);
 			}
-			.btn-compact {
+			.btn-status {
 				flex: none;
-				padding: 6px 11px;
-				font-size: 13px;
+				min-height: 24px;
+				padding: 4px 9px;
+				font-size: 11px;
 			}
 
 			/* ---------- roster ---------- */
@@ -909,7 +908,7 @@
 				transform: translateX(14px);
 			}
 
-			/* Room actions relocated from the main view (confirm dialogs intact). */
+			/* Room actions. */
 			.room-actions {
 				display: flex;
 				gap: var(--sp-2);
@@ -1193,13 +1192,12 @@
 							</svg>
 							<span id="status-text"></span>
 						</span>
-						<!-- Sharing on: glanceable read-only line (stop lives in Settings).
-						     Sharing off: a prominent one-click turn-on. -->
+						<!-- Sharing on: read-only. Sharing off: compact one-click turn-on. -->
 						<span id="sharing-on" class="sharing-on" hidden>
 							<span class="sharing-dot" aria-hidden="true"></span>
 							Sharing on
 						</span>
-						<button id="sharing-turn-on" type="button" class="btn btn-primary btn-compact" hidden>Turn on sharing</button>
+						<button id="sharing-turn-on" type="button" class="btn btn-secondary btn-status" hidden>Turn on sharing</button>
 					</div>
 					<p id="status-sub" hidden></p>
 					<div id="roster" class="roster"></div>
@@ -1245,6 +1243,13 @@
 
 			<div class="set-group">
 				<h3 class="eyebrow">On video</h3>
+				<button id="settings-sharing" type="button" class="set-row" role="switch" aria-checked="true">
+					<span class="set-row-text">
+						Share video progress
+						<span class="set-sub">Let Buddies see where you left off</span>
+					</span>
+					<span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+				</button>
 				<button id="set-notes" type="button" class="set-row" role="switch" aria-checked="true">
 					<span class="set-row-text">
 						Notes
@@ -1279,11 +1284,10 @@
 				</button>
 			</div>
 
-			<!-- Room actions, relocated from the main view. Hidden while Unpaired. -->
+			<!-- Room actions. Hidden while Unpaired. -->
 			<div id="settings-room" class="set-group" hidden>
 				<h3 class="eyebrow">Room</h3>
 				<div class="room-actions">
-					<button id="settings-sharing" type="button" class="btn btn-neutral">Stop sharing</button>
 					<button id="leave-room" type="button" class="btn btn-danger">Leave room</button>
 				</div>
 			</div>
