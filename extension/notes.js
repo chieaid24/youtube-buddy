@@ -62,15 +62,15 @@
 	const CLUSTER_CLASS = 'ytb-dot-cluster'; // wrapper owning a Cluster's hover/fan (#123)
 	const CLUSTER_PINNED_CLASS = 'ytb-dot-cluster-pinned'; // stays fanned while its Note's panel is open
 	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
-	// The Note Band's geometry (#173) — dot lift, glyph, hit extender box, and
+	// The Note Band's geometry (#173) — dot lift, glyph, hit extender, and
 	// the Expanded Note's clearance all live in shared.js so the pure helpers
-	// (dotExtenderGate, panelBarClearance) derive from the same numbers this
+	// (dotHitReaches, panelBarClearance) derive from the same numbers this
 	// file styles with.
 	const BAND = YTB.NOTE_BAND;
 	const DOT_DIAMETER = BAND.dotDiameter; // px — matches the .ytb-note-dot circle; drives clustering + clamp
+	const LAYOUT_UNITS_PER_PX = 64; // Chromium's subpixel layout grid
 	const CLUSTER_FAN_GAP = 14; // px — the Fan Gap's IDEAL; it shrinks toward DOT_DIAMETER on a crowded bar
 	const UNSEEN_RING_GAP = '#0f0f0f'; // separates the reduced-motion Unseen ring from the Buddy-colored fill (UA-026)
-	const DOT_ROOMY_CLASS = 'ytb-note-dot-roomy'; // carries the invisible hit extender (UA-004; sized by BAND)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
 	const ALERTS_ID = 'ytb-note-alerts';
@@ -448,7 +448,9 @@
 		const ids = [...desired.keys()];
 		const barWidth = bar.getBoundingClientRect().width || 0;
 		const segments = YTB.barSegments(bar);
-		const px = ids.map((id) => YTB.timeToX(segments, desired.get(id).timestamp, duration));
+		const px = ids.map(
+			(id) => Math.round(YTB.timeToX(segments, desired.get(id).timestamp, duration) * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX,
+		);
 
 		// Solve the fan for the WHOLE bar in one go (#162): every dot lands as close
 		// to its true moment as the Fan Gap allows, so a dot with room does not move
@@ -461,12 +463,7 @@
 			dotDiameter: DOT_DIAMETER,
 		});
 
-		// The clearance gate (#173): a dot earns the invisible hit extender only
-		// when no other dot's glyph could fall inside its box, so the threshold
-		// tracks the box's WIDTH. Denser dots keep the Cluster fan as their reach
-		// affordance (pure rule — YTB.dotExtenderGate, tested at the shared.js
-		// seam).
-		const roomy = YTB.dotExtenderGate(px, BAND.hitWidth);
+		const hitReaches = YTB.dotHitReaches(px, BAND.dotDiameter, BAND.hitMaxSideReach);
 
 		// Reconcile Cluster wrappers keyed by their exact membership. A steady poll
 		// (unchanged membership) reuses each wrapper and never re-parents a dot,
@@ -511,8 +508,8 @@
 			// has no fixed percentage to lean on); each member sits at its true px
 			// offset from that centre, and the fan is a hover-only transform layered
 			// on top. Every render re-measures, so a resize re-anchors it.
-			const center = (memberPx[0] + memberPx[memberPx.length - 1]) / 2;
-			wrapper.style.left = center.toFixed(2) + 'px';
+			const center = Math.round(((memberPx[0] + memberPx[memberPx.length - 1]) / 2) * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX;
+			wrapper.style.left = center + 'px';
 
 			let halfExtent = 0;
 			memberIds.forEach((id, k) => {
@@ -520,8 +517,13 @@
 				const fan = offsets[cluster[k]]; // solved for the whole bar, read per dot
 				const dot = existing.get(id) || buildDot(id);
 				if (dot.parentElement !== wrapper) wrapper.appendChild(dot);
-				dot.classList.toggle(DOT_ROOMY_CLASS, roomy[cluster[k]]);
-				dot.style.left = basePx.toFixed(2) + 'px';
+				const hitReach = hitReaches[cluster[k]];
+				const hitLeft = Math.floor(hitReach.left * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX;
+				const hitRight = Math.floor(hitReach.right * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX;
+				dot.style.setProperty('--ytb-hit-left', hitLeft + 'px');
+				dot.style.setProperty('--ytb-hit-right', hitRight + 'px');
+				dot.style.setProperty('--ytb-hit-height', hitLeft || hitRight ? BAND.hitHeight + 'px' : '0px');
+				dot.style.left = basePx + 'px';
 				dot.style.setProperty('--ytb-fan', fan.toFixed(2) + 'px');
 				updateDot(dot, id, desired.get(id));
 				halfExtent = Math.max(halfExtent, Math.abs(basePx + fan));
@@ -839,7 +841,10 @@
 		const spring = tokens.getPropertyValue('--ytb-ease-spring').trim() || 'ease-out';
 
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-			panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing: 'linear' });
+			panel.animate([{ opacity: 0 }, { opacity: 1 }], {
+				duration,
+				easing: 'linear',
+			});
 			return;
 		}
 		const final = panel.getBoundingClientRect();
@@ -860,7 +865,11 @@
 		const sy = sourceRect.height / final.height;
 		panel.animate(
 			[
-				{ transformOrigin: 'top left', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: 0 },
+				{
+					transformOrigin: 'top left',
+					transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`,
+					opacity: 0,
+				},
 				{ transformOrigin: 'top left', transform: 'none', opacity: 1 },
 			],
 			{ duration, easing: spring },
@@ -1920,9 +1929,9 @@
       .${DOT_CLASS} {
         position: absolute;
         bottom: 0;
-        width: 6px;
-        height: 6px;
-        margin-left: -3px;
+        width: ${DOT_DIAMETER}px;
+        height: ${DOT_DIAMETER}px;
+        margin-left: ${-DOT_DIAMETER / 2}px;
         padding: 0;
         border: 0;
         border-radius: 50%;
@@ -1934,17 +1943,9 @@
         transform: translateX(0);
         transition: transform var(--ytb-dur-base) var(--ytb-ease-spring);
       }
-      /* Invisible hit extender (UA-004, resized by #173): the painted circle
-         stays 6px, but the interactive target reaches the Note Band's hit box
-         (14 tall x 12 wide): a tight, dot-like target with about 3px beside
-         the glyph and 8px above it. Dots already swallow presses and hovers
-         from the player by design, so the box extends that established
-         behavior, not a new one. Only dots whose nearest neighbour is at least
-         the box WIDTH away get it (renderDots toggles the class through the
-         pure dotExtenderGate): closer neighbours would shadow each other's
-         glyphs, and those dense dots keep the Cluster fan as their reach
-         affordance — their exact timestamp position is essential and never
-         displaced at rest.
+      /* Invisible hit extender (UA-004, resized by #202): each horizontal side
+         stops at its nearest-neighbour midpoint and caps at the Note Band's
+         maximum side reach. A dot with no reach keeps only its glyph.
 
          It grows UPWARD off the dot's bottom edge (#158) rather than centring
          on the glyph: a centred box hung below the dot, INTO the bar — it
@@ -1952,13 +1953,13 @@
          Bottom-anchored, the target keeps its full size while ending exactly
          where the dot does, the dot lift clear of the bar. What it claims
          instead is the band above the bar (YouTube's grab pad included). */
-      .${DOT_ROOMY_CLASS}::after {
+      .${DOT_CLASS}::after {
         content: '';
         position: absolute;
-        left: ${-(BAND.hitWidth - DOT_DIAMETER) / 2}px;
-        right: ${-(BAND.hitWidth - DOT_DIAMETER) / 2}px;
+        left: calc(-1 * var(--ytb-hit-left, 0px));
+        right: calc(-1 * var(--ytb-hit-right, 0px));
         bottom: 0;
-        height: ${BAND.hitHeight}px;
+        height: var(--ytb-hit-height, 0px);
       }
       .${DOT_TEXT_CLASS} { cursor: pointer; }
       .${DOT_CLASS}:focus-visible {

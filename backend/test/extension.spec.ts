@@ -589,29 +589,47 @@ describe('note presentation helpers', () => {
 		}
 	});
 
-	it('gates the hit extender on nearest-neighbour clearance tracking the box width (#173)', () => {
-		const gate = (xs: number[], boxWidth: number): boolean[] => window.YTB.dotExtenderGate(xs, boxWidth);
-		const { hitWidth, hitHeight } = window.YTB.NOTE_BAND;
-		// The Note Band's hit box: 14 tall x 12 wide, and the gate threshold IS
-		// the width — a narrower gate would let one dot's box shadow a
-		// neighbour's glyph, a wider one would strip extenders from dots no box
-		// can reach.
-		expect(hitWidth).toBe(12);
+	it('sizes each hit-extender side to its nearest-neighbour midpoint (#202)', () => {
+		const reaches = (xs: number[]) => window.YTB.dotHitReaches(xs, window.YTB.NOTE_BAND.dotDiameter, window.YTB.NOTE_BAND.hitMaxSideReach);
+		const { dotDiameter, hitMaxSideReach, hitHeight } = window.YTB.NOTE_BAND;
+		expect(dotDiameter + 2 * hitMaxSideReach).toBe(12);
 		expect(hitHeight).toBe(14);
 
-		// A lone dot always earns its extender — there is no one to shadow.
-		expect(gate([500], hitWidth)).toEqual([true]);
-		// Straddle the configured threshold rather than pinning fixture offsets
-		// to one tuning: just below it loses the extender; at and above it wins.
-		expect(gate([500, 500 + hitWidth - 1], hitWidth)).toEqual([false, false]);
-		expect(gate([500, 500 + hitWidth], hitWidth)).toEqual([true, true]);
-		expect(gate([500, 500 + hitWidth + 1], hitWidth)).toEqual([true, true]);
-		// The gate reads nearest-neighbour clearance across ALL dots, per dot: a
-		// middle dot crowded from one side only still loses its extender, while
-		// the far dot keeps its own.
-		expect(gate([100, 100 + hitWidth - 1, 400], hitWidth)).toEqual([false, false, true]);
-		// Degenerate input.
-		expect(gate([], hitWidth)).toEqual([]);
+		expect(reaches([500])).toEqual([{ left: 3, right: 3 }]);
+		expect(reaches([100, 106])).toEqual([
+			{ left: 3, right: 0 },
+			{ left: 0, right: 3 },
+		]);
+		expect(reaches([100, 108])).toEqual([
+			{ left: 3, right: 1 },
+			{ left: 1, right: 3 },
+		]);
+		expect(reaches([100, 112])).toEqual([
+			{ left: 3, right: 3 },
+			{ left: 3, right: 3 },
+		]);
+		expect(reaches([100, 100])).toEqual([
+			{ left: 0, right: 0 },
+			{ left: 0, right: 0 },
+		]);
+		expect(reaches([])).toEqual([]);
+
+		const layouts = [
+			[100, 106],
+			[100, 108, 117],
+			[100, 112, 140],
+		];
+		for (const xs of layouts) {
+			const hit = reaches(xs);
+			const sorted = xs.map((x, i) => ({ x, i })).sort((a, b) => a.x - b.x);
+			for (let k = 1; k < sorted.length; k++) {
+				const left = sorted[k - 1];
+				const right = sorted[k];
+				const midpoint = (left.x + right.x) / 2;
+				expect(left.x + dotDiameter / 2 + hit[left.i].right).toBeLessThanOrEqual(midpoint);
+				expect(right.x - dotDiameter / 2 - hit[right.i].left).toBeGreaterThanOrEqual(midpoint);
+			}
+		}
 	});
 
 	it('derives the Expanded Note anchor from the dot geometry, so a lift change carries it (#173)', () => {
