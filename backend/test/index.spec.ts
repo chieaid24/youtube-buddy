@@ -780,12 +780,16 @@ describe('POST /playlist?code=', () => {
 	it('stores a Playlist Item with a server-set addedAt and returns the complete record', async () => {
 		const code = 'playlist-stores';
 		const before = Date.now();
-		const res = await postPlaylist(code, playlistBody({ addedAt: 1, addedBy: 'forged' }));
+		const res = await postPlaylist(code, playlistBody({ id: 'forged', addedAt: 1, addedBy: 'forged' }));
 		const after = Date.now();
 		expect(res.status).toBe(200);
 		const { ok, item } = (await res.json()) as { ok: boolean; item: Record<string, unknown> };
 		expect(ok).toBe(true);
 		expect(item).toMatchObject({ videoId: 'abc123', title: 'A Great Video', addedBy: 'a1b2c3d4', addedByName: 'aidan' });
+		// A server-minted id names the recommendation instance; a client-sent id is ignored.
+		expect(typeof item.id).toBe('string');
+		expect((item.id as string).length).toBeGreaterThan(0);
+		expect(item.id).not.toBe('forged');
 		expect(item.addedAt as number).toBeGreaterThanOrEqual(before);
 		expect(item.addedAt as number).toBeLessThanOrEqual(after);
 
@@ -805,15 +809,25 @@ describe('POST /playlist?code=', () => {
 		expect(events[0]).toMatchObject({ type: 'added', videoId: 'abc123', title: 'A Great Video', actorClientId: 'a1b2c3d4' });
 	});
 
-	it('re-adding an existing videoId is a no-op: no duplicate, no new Event', async () => {
+	it('re-adding an existing videoId is a no-op: no duplicate, no new Event, same id', async () => {
 		const code = 'playlist-dedup';
-		const first = ((await (await postPlaylist(code, playlistBody())).json()) as { item: unknown }).item;
+		const first = ((await (await postPlaylist(code, playlistBody())).json()) as { item: { id: string } }).item;
 		const res = await postPlaylist(code, playlistBody({ title: 'Renamed Attempt', clientId: 'buddy222' }));
 		expect(res.status).toBe(200);
-		// The original record survives untouched and is what the re-add returns.
+		// The original record survives untouched — same instance id — and is what the re-add returns.
 		expect(((await res.json()) as { item: unknown }).item).toEqual(first);
 		expect((await env.PROGRESS.list({ prefix: `${code}:playlist:` })).keys).toHaveLength(1);
 		expect(await listEvents(code)).toHaveLength(1);
+	});
+
+	it('recommending again after an un-recommend mints a NEW instance id', async () => {
+		const code = 'playlist-reinstance';
+		const first = ((await (await postPlaylist(code, playlistBody())).json()) as { item: { id: string } }).item;
+		await deletePlaylist(code, 'a1b2c3d4', 'abc123');
+		const second = ((await (await postPlaylist(code, playlistBody())).json()) as { item: { id: string } }).item;
+		// A fresh recommendation of the same video is a distinct instance: new id,
+		// so a viewer who Dismissed the first does not stay hiding the re-recommend.
+		expect(second.id).not.toBe(first.id);
 	});
 
 	it.each([

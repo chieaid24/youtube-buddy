@@ -204,8 +204,13 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 409, 'playlist_full', 'playlist full');
 		}
 
-		// addedAt is server-authoritative; name is optional (coerced to "").
+		// A server-minted id names one recommendation INSTANCE (ADR-0007): stable
+		// while the item stays live (the no-op re-add above returns it unchanged),
+		// freshly minted when a video is recommended again after an un-recommend
+		// (delete then add), so a viewer's identity-keyed Dismiss resurfaces on a
+		// re-recommend. addedAt is server-authoritative; name optional (-> "").
 		const item = {
+			id: crypto.randomUUID(),
 			videoId: body.videoId,
 			title: body.title,
 			addedBy: body.clientId,

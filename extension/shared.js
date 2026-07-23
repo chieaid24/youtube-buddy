@@ -140,7 +140,7 @@ const YTB = {
 	// --- storage (chrome.storage.local) ---
 	// Stored keys: name, code, clientId, sharing, homeSectionHidden, the Settings
 	// keys (theme, spoilerDefault, notificationPosition, notesHidden,
-	// buddyProgressHidden), and the Room-scoped buddyColors + dismissedVideos +
+	// buddyProgressHidden), and the Room-scoped buddyColors + dismissedRecommendations +
 	// seenItems maps.
 
 	/**
@@ -1615,17 +1615,19 @@ const YTB = {
 	/**
 	 * Each viewer's "Recommended for you" grid, derived from the Room's
 	 * Recommendations (ADR-0007): the items whose `addedBy` is NOT the viewer
-	 * (you never recommend to yourself), minus the videoIds the viewer has
-	 * Dismissed locally, newest recommendation first.
-	 * @param {Array<{videoId: string, addedBy: string, addedAt: number}>} playlist Room read items.
+	 * (you never recommend to yourself), minus the recommendation instances the
+	 * viewer has Dismissed locally, newest recommendation first. Dismiss is keyed
+	 * by the item's server-minted `id`, so a re-recommend after an un-recommend
+	 * (a new id) resurfaces even a previously Dismissed video.
+	 * @param {Array<{id: string, videoId: string, addedBy: string, addedAt: number}>} playlist Room read items.
 	 * @param {string} myClientId
-	 * @param {Iterable<string>} [dismissedVideoIds] this Room's local Dismissals.
+	 * @param {Iterable<string>} [dismissedIds] this Room's local Dismissals (item ids).
 	 * @returns {Array<object>}
 	 */
-	recommendedForYou(playlist, myClientId, dismissedVideoIds) {
-		const dismissed = new Set(dismissedVideoIds || []);
+	recommendedForYou(playlist, myClientId, dismissedIds) {
+		const dismissed = new Set(dismissedIds || []);
 		return (playlist || [])
-			.filter((item) => item && item.videoId && item.addedBy !== myClientId && !dismissed.has(item.videoId))
+			.filter((item) => item && item.videoId && item.addedBy !== myClientId && !dismissed.has(item.id))
 			.sort((a, b) => (Number(b.addedAt) || 0) - (Number(a.addedAt) || 0));
 	},
 
@@ -1665,29 +1667,47 @@ const YTB = {
 	// --- Dismissed Recommendations (ADR-0007) ---
 	// A Dismiss hides one Recommendation from this viewer's Recommended-for-you
 	// grid only. Stored per install in chrome.storage.local, Room-scoped and
-	// keyed by videoId (mirroring Buddy Color storage); it never reaches the
-	// backend, so the Room-level Recommendation stays intact for every other
-	// member. There is deliberately no un-dismiss yet.
+	// keyed by the item's server-minted `id` (mirroring the seen-set storage); it
+	// never reaches the backend, so the Room-level Recommendation stays intact for
+	// every other member. Keying by instance id — not videoId — means a video
+	// recommended again after an un-recommend (a new id) resurfaces. There is
+	// deliberately no un-dismiss yet.
 
 	/**
-	 * The videoIds this viewer has Dismissed in one Room.
+	 * The recommendation-instance ids this viewer has Dismissed in one Room.
 	 * @param {string} code Room Code (already normalized).
 	 * @returns {Promise<Array<string>>}
 	 */
-	async dismissedVideoIds(code) {
-		return roomScopedLocalLists.read('dismissedVideos', code);
+	async dismissedIds(code) {
+		return roomScopedLocalLists.read('dismissedRecommendations', code);
 	},
 
 	/**
-	 * Dismiss one Recommendation locally: persist its videoId under the Room so
+	 * Dismiss one Recommendation locally: persist its item id under the Room so
 	 * it stays hidden across reloads. Idempotent, local-only (no backend write).
 	 * @param {string} code Room Code (already normalized).
-	 * @param {string} videoId
+	 * @param {string} id the recommendation instance id.
 	 * @returns {Promise<Array<string>>} the Room's updated Dismissed list.
 	 */
-	async dismissVideo(code, videoId) {
-		if (!code || !videoId) return YTB.dismissedVideoIds(code);
-		return roomScopedLocalLists.update('dismissedVideos', code, (room) => (room.includes(videoId) ? room : [...room, videoId]));
+	async dismissRecommendation(code, id) {
+		if (!code || !id) return YTB.dismissedIds(code);
+		return roomScopedLocalLists.update('dismissedRecommendations', code, (room) => (room.includes(id) ? room : [...room, id]));
+	},
+
+	/**
+	 * Prune the Room's Dismissed set against a (successful) Room read: ids no
+	 * longer live — aged out on the 14-day TTL, or un-recommended — are dropped so
+	 * the set cannot grow without bound (mirrors pruneSeen). Never prune against a
+	 * FAILED read: its empty playlist would wipe the set and resurface every
+	 * Dismissed card.
+	 * @param {string} code Room Code (already normalized).
+	 * @param {Iterable<string>} liveIds every Playlist Item id in the read.
+	 * @returns {Promise<Array<string>>} the Room's surviving Dismissed list.
+	 */
+	async pruneDismissed(code, liveIds) {
+		if (!code) return [];
+		const live = new Set(liveIds || []);
+		return roomScopedLocalLists.update('dismissedRecommendations', code, (room) => room.filter((id) => live.has(id)));
 	},
 
 	// --- Unseen Mentions & Replies (ADR-0010) ---

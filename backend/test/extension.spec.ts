@@ -1532,19 +1532,21 @@ describe('settings (per install)', () => {
 
 describe('recommended for you helpers (ADR-0007)', () => {
 	const playlist = [
-		{ videoId: 'v1', title: 'Mine', addedBy: 'me111111', addedAt: 1000 },
-		{ videoId: 'v2', title: 'Bob 1', addedBy: 'bob22222', addedAt: 2000 },
-		{ videoId: 'v3', title: 'Ana 1', addedBy: 'ana33333', addedAt: 3000 },
-		{ videoId: 'v4', title: 'Bob 2', addedBy: 'bob22222', addedAt: 4000 },
+		{ id: 'i1', videoId: 'v1', title: 'Mine', addedBy: 'me111111', addedAt: 1000 },
+		{ id: 'i2', videoId: 'v2', title: 'Bob 1', addedBy: 'bob22222', addedAt: 2000 },
+		{ id: 'i3', videoId: 'v3', title: 'Ana 1', addedBy: 'ana33333', addedAt: 3000 },
+		{ id: 'i4', videoId: 'v4', title: 'Bob 2', addedBy: 'bob22222', addedAt: 4000 },
 	];
 
 	it('filters the grid to Buddy Recommendations minus Dismissed, newest first', () => {
 		// Own Recommendations never appear, even with nothing Dismissed.
 		expect(window.YTB.recommendedForYou(playlist, 'me111111', []).map((i: PlaylistRec) => i.videoId)).toEqual(['v4', 'v3', 'v2']);
-		// A Dismissed videoId is hidden for this viewer only (pure filter).
-		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v3']).map((i: PlaylistRec) => i.videoId)).toEqual(['v4', 'v2']);
-		// Dismissing every foreign item empties the grid.
-		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v2', 'v3', 'v4'])).toEqual([]);
+		// A Dismissed INSTANCE id is hidden for this viewer only (pure filter).
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['i3']).map((i: PlaylistRec) => i.videoId)).toEqual(['v4', 'v2']);
+		// Dismiss is keyed by item id, not videoId: a stray videoId hides nothing.
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['v3']).map((i: PlaylistRec) => i.videoId)).toEqual(['v4', 'v3', 'v2']);
+		// Dismissing every foreign instance empties the grid.
+		expect(window.YTB.recommendedForYou(playlist, 'me111111', ['i2', 'i3', 'i4'])).toEqual([]);
 		// A member with no Recommendations of their own sees the whole list.
 		expect(window.YTB.recommendedForYou(playlist, 'zoe77777', undefined).map((i: PlaylistRec) => i.videoId)).toEqual([
 			'v4',
@@ -1561,44 +1563,62 @@ describe('recommended for you helpers (ADR-0007)', () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
 
-		await expect(window.YTB.dismissedVideoIds('room-a')).resolves.toEqual([]);
-		await window.YTB.dismissVideo('room-a', 'v1');
-		await window.YTB.dismissVideo('room-a', 'v2');
-		await window.YTB.dismissVideo('room-a', 'v1'); // idempotent re-dismiss
-		await window.YTB.dismissVideo('room-b', 'v9'); // Room-scoped, like Buddy Colors
+		await expect(window.YTB.dismissedIds('room-a')).resolves.toEqual([]);
+		await window.YTB.dismissRecommendation('room-a', 'i1');
+		await window.YTB.dismissRecommendation('room-a', 'i2');
+		await window.YTB.dismissRecommendation('room-a', 'i1'); // idempotent re-dismiss
+		await window.YTB.dismissRecommendation('room-b', 'i9'); // Room-scoped, like the seen set
 
-		await expect(window.YTB.dismissedVideoIds('room-a')).resolves.toEqual(['v1', 'v2']);
-		await expect(window.YTB.dismissedVideoIds('room-b')).resolves.toEqual(['v9']);
-		expect(storage.dismissedVideos).toEqual({ 'room-a': ['v1', 'v2'], 'room-b': ['v9'] });
+		await expect(window.YTB.dismissedIds('room-a')).resolves.toEqual(['i1', 'i2']);
+		await expect(window.YTB.dismissedIds('room-b')).resolves.toEqual(['i9']);
+		expect(storage.dismissedRecommendations).toEqual({ 'room-a': ['i1', 'i2'], 'room-b': ['i9'] });
 		// A Dismiss is private and local: it never reaches the backend.
 		expect(fetchMock).not.toHaveBeenCalled();
 
 		// Unpaired (no code) reads empty and writes nothing.
-		await expect(window.YTB.dismissedVideoIds('')).resolves.toEqual([]);
-		await window.YTB.dismissVideo('', 'v1');
-		expect(storage.dismissedVideos).toEqual({ 'room-a': ['v1', 'v2'], 'room-b': ['v9'] });
+		await expect(window.YTB.dismissedIds('')).resolves.toEqual([]);
+		await window.YTB.dismissRecommendation('', 'i1');
+		expect(storage.dismissedRecommendations).toEqual({ 'room-a': ['i1', 'i2'], 'room-b': ['i9'] });
 	});
 
 	it('defaults malformed Dismissal storage and skips an idempotent write', async () => {
-		storage = { dismissedVideos: 'junk' };
-		await expect(window.YTB.dismissedVideoIds('room')).resolves.toEqual([]);
+		storage = { dismissedRecommendations: 'junk' };
+		await expect(window.YTB.dismissedIds('room')).resolves.toEqual([]);
 
-		storage = { dismissedVideos: { room: 'junk', other: ['kept'] } };
+		storage = { dismissedRecommendations: { room: 'junk', other: ['kept'] } };
 		vi.mocked(chrome.storage.local.set).mockClear();
-		await expect(window.YTB.dismissVideo('room', 'v2')).resolves.toEqual(['v2']);
-		expect(storage.dismissedVideos).toEqual({ room: ['v2'], other: ['kept'] });
+		await expect(window.YTB.dismissRecommendation('room', 'i2')).resolves.toEqual(['i2']);
+		expect(storage.dismissedRecommendations).toEqual({ room: ['i2'], other: ['kept'] });
 		expect(chrome.storage.local.set).toHaveBeenCalledOnce();
 
 		vi.mocked(chrome.storage.local.set).mockClear();
-		await expect(window.YTB.dismissVideo('room', 'v2')).resolves.toEqual(['v2']);
+		await expect(window.YTB.dismissRecommendation('room', 'i2')).resolves.toEqual(['i2']);
 		expect(chrome.storage.local.set).not.toHaveBeenCalled();
 	});
 
-	it('hides a Dismissed videoId even after a later re-recommend (keyed by videoId)', async () => {
-		storage = { dismissedVideos: { room: ['v2'] } };
-		const dismissed = await window.YTB.dismissedVideoIds('room');
-		const rerecommended = [{ videoId: 'v2', title: 'Bob 1 again', addedBy: 'bob22222', addedAt: 9000 }];
-		expect(window.YTB.recommendedForYou(rerecommended, 'me111111', dismissed)).toEqual([]);
+	it('resurfaces a video on re-recommend (a new instance id the viewer never Dismissed)', async () => {
+		storage = { dismissedRecommendations: { room: ['i-old'] } };
+		const dismissed = await window.YTB.dismissedIds('room');
+		// The still-live original instance stays hidden.
+		const original = [{ id: 'i-old', videoId: 'v2', title: 'Bob 1', addedBy: 'bob22222', addedAt: 2000 }];
+		expect(window.YTB.recommendedForYou(original, 'me111111', dismissed)).toEqual([]);
+		// Un-recommend then re-recommend mints a NEW id, so the video reappears.
+		const rerecommended = [{ id: 'i-new', videoId: 'v2', title: 'Bob 1 again', addedBy: 'bob22222', addedAt: 9000 }];
+		expect(window.YTB.recommendedForYou(rerecommended, 'me111111', dismissed).map((i: PlaylistRec) => i.videoId)).toEqual(['v2']);
+	});
+
+	it('prunes the Dismissed set against a Room read, keeping other Rooms intact', async () => {
+		storage = { dismissedRecommendations: { room: ['i1', 'i2', 'i-gone'], other: ['i9'] } };
+		// Only ids still live in the read survive; other Rooms are untouched.
+		await expect(window.YTB.pruneDismissed('room', ['i1', 'i2', 'i-new'])).resolves.toEqual(['i1', 'i2']);
+		expect(storage.dismissedRecommendations).toEqual({ room: ['i1', 'i2'], other: ['i9'] });
+		// Nothing aged out: the write is skipped and the list survives unchanged.
+		vi.mocked(chrome.storage.local.set).mockClear();
+		await expect(window.YTB.pruneDismissed('room', ['i1', 'i2'])).resolves.toEqual(['i1', 'i2']);
+		expect(chrome.storage.local.set).not.toHaveBeenCalled();
+		// Unpaired: nothing to prune, nothing written.
+		await expect(window.YTB.pruneDismissed('', ['i1'])).resolves.toEqual([]);
+		expect(storage.dismissedRecommendations).toEqual({ room: ['i1', 'i2'], other: ['i9'] });
 	});
 });
 
@@ -2021,8 +2041,9 @@ describe('extension context lifecycle', () => {
 		expect(chrome.storage.local.get).toHaveBeenCalledTimes(callsAfterInvalidation);
 
 		vi.mocked(chrome.storage.local.set).mockClear();
-		await expect(window.YTB.dismissedVideoIds('room')).resolves.toEqual([]);
-		await expect(window.YTB.dismissVideo('room', 'v1')).resolves.toEqual([]);
+		await expect(window.YTB.dismissedIds('room')).resolves.toEqual([]);
+		await expect(window.YTB.dismissRecommendation('room', 'i1')).resolves.toEqual([]);
+		await expect(window.YTB.pruneDismissed('room', ['i1'])).resolves.toEqual([]);
 		await expect(window.YTB.seenIds('room')).resolves.toEqual([]);
 		await expect(window.YTB.markSeen('room', ['n1'])).resolves.toEqual([]);
 		await expect(window.YTB.pruneSeen('room', ['n1'])).resolves.toEqual([]);
@@ -2050,12 +2071,13 @@ declare global {
 			postPlaylistAdd(item: object): Promise<WriteResult<'item', object>>;
 			deletePlaylistItem(target: { clientId: string; videoId: string }): Promise<{ ok: true } | { ok: false; category: string }>;
 			recommendedForYou(
-				playlist: Array<{ videoId: string; addedBy: string; addedAt: number }> | undefined,
+				playlist: Array<{ id: string; videoId: string; addedBy: string; addedAt: number }> | undefined,
 				myClientId: string,
-				dismissedVideoIds?: Iterable<string>,
-			): Array<{ videoId: string; addedBy: string; addedAt: number }>;
-			dismissedVideoIds(code: string): Promise<string[]>;
-			dismissVideo(code: string, videoId: string): Promise<string[]>;
+				dismissedIds?: Iterable<string>,
+			): Array<{ id: string; videoId: string; addedBy: string; addedAt: number }>;
+			dismissedIds(code: string): Promise<string[]>;
+			dismissRecommendation(code: string, id: string): Promise<string[]>;
+			pruneDismissed(code: string, liveIds: Iterable<string>): Promise<string[]>;
 			noteAddressesMe(note: { clientId?: string; mentions?: string[] } | null, myClientId: string): boolean;
 			replyAddressesMe(
 				reply: { clientId?: string; mentions?: string[] } | null,
