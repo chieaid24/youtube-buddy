@@ -3872,7 +3872,7 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 	}
 });
 
-test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, sharing relocation, home-section sync', async () => {
+test('Settings view: gear/back, live theme, visibility, sharing toggle, home-section sync', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -3893,10 +3893,12 @@ test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, shari
 		const popup = await seedPairedRoom(context);
 		await popup.reload(); // re-init the popup UI onto the seeded Room
 
-		// Sharing was seeded OFF: the main view offers the prominent turn-on and
-		// no read-only line. Turning it on is instant and flips the presentation.
+		// Sharing was seeded OFF: the main view offers a compact secondary turn-on.
 		await expect(popup.locator('#view-connected')).toBeVisible();
 		await expect(popup.locator('#sharing-turn-on')).toBeVisible();
+		await expect(popup.locator('#sharing-turn-on')).toHaveClass(/btn-secondary/);
+		await expect(popup.locator('#sharing-turn-on')).toHaveClass(/btn-status/);
+		await expect(popup.locator('#sharing-turn-on')).not.toHaveClass(/btn-primary/);
 		await expect(popup.locator('#sharing-on')).toBeHidden();
 		await popup.locator('#sharing-turn-on').click();
 		await expect(popup.locator('#sharing-on')).toBeVisible();
@@ -3906,6 +3908,12 @@ test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, shari
 		await popup.locator('#settings-open').click();
 		await expect(popup.locator('#view-settings')).toBeVisible();
 		await expect(popup.locator('#room-section')).toBeHidden();
+		const sharingToggle = popup.locator('#settings-sharing');
+		await expect(sharingToggle).toHaveRole('switch');
+		await expect(sharingToggle).toContainText('Share video progress');
+		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
+		await expect(popup.locator('#settings-room .room-actions > button')).toHaveCount(1);
+		await expect(popup.locator('#settings-room #leave-room')).toBeVisible();
 
 		// A watch page with three Note dots, a Buddy marker, and the + button.
 		const page = await context.newPage();
@@ -3971,13 +3979,19 @@ test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, shari
 		await expect(spoilerBox).not.toBeChecked();
 		await page.keyboard.press('Escape');
 
-		// Stop sharing now lives in Settings, confirm dialog intact.
-		await popup.locator('#settings-sharing').click();
+		// Turning off is guarded; cancel preserves on, confirm stores off.
+		await sharingToggle.click();
 		await expect(popup.locator('#confirm-overlay')).toBeVisible();
+		await popup.locator('#confirm-cancel').click();
+		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
+		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
+		await sharingToggle.click();
 		await popup.locator('#confirm-disconnect').click();
-		await expect(popup.locator('#settings-sharing')).toHaveText('Start sharing');
-		await popup.locator('#settings-sharing').click(); // starting is instant
-		await expect(popup.locator('#settings-sharing')).toHaveText('Stop sharing');
+		await expect(sharingToggle).toHaveAttribute('aria-checked', 'false');
+		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: false });
+		await sharingToggle.click();
+		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
+		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
 
 		// Room Home Section visibility: the popup control and the guide toggle
 		// drive the same key and stay in sync live, both directions.
@@ -3998,6 +4012,15 @@ test('Settings view: gear/back, live theme, notes-off, buddy-progress-off, shari
 		await popup.locator('#settings-back').click();
 		await expect(popup.locator('#view-settings')).toBeHidden();
 		await expect(popup.locator('#view-connected')).toBeVisible();
+
+		// The sharing preference remains available while Unpaired.
+		await popup.evaluate(() => chrome.storage.local.remove('code'));
+		await popup.reload();
+		await expect(popup.locator('#view-chooser')).toBeVisible();
+		await popup.locator('#settings-open').click();
+		await expect(sharingToggle).toBeVisible();
+		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
+		await expect(popup.locator('#settings-room')).toBeHidden();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
