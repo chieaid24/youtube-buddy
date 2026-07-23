@@ -2,8 +2,7 @@
 // hit area is the painted 6x6 circle - far below the 24x24 minimum
 // (DESIGN.md 1.3). The fix extends the hit box invisibly; the painted dot
 // must stay 6px and dots must keep swallowing events from the player. #173
-// now tunes the box to the Note Band's tight 14 tall x 12 wide target, so the
-// probes below assert its exact reach and bottom anchor.
+// now tunes the maximum box to the Note Band's tight 14 tall x 12 wide target.
 //
 // The extender grows UPWARD off the dot's bottom edge, not outward from its
 // centre (#158): centred, its lower half hung inside YouTube's progress bar and
@@ -13,7 +12,7 @@
 import { expect, test } from '@playwright/test';
 import { launchExtension, makeData, nudgeUntil, playbackFixture, routeBackend, seedPaired } from './harness';
 
-test('UA-004: every Note Dot offers the Note Band 12x14 hit area around a 6px glyph', async () => {
+test('UA-004: isolated Note Dots offer the maximum 12x14 hit area around a 6px glyph', async () => {
 	const context = await launchExtension();
 	try {
 		const d = makeData(Date.now());

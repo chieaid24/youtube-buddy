@@ -814,17 +814,43 @@ const YTB = {
 	 * @returns {{close: boolean, consume: boolean, play: boolean, cancelArrivalGrace: boolean}}
 	 */
 	pictureClickAction({ overlayOpen, region, pressOrigin, pauseHold, withinGrace }) {
-		if (!overlayOpen) return { close: false, consume: false, play: false, cancelArrivalGrace: false };
+		if (!overlayOpen)
+			return {
+				close: false,
+				consume: false,
+				play: false,
+				cancelArrivalGrace: false,
+			};
 		if (pressOrigin === 'overlay') {
-			return { close: false, consume: true, play: false, cancelArrivalGrace: false };
+			return {
+				close: false,
+				consume: true,
+				play: false,
+				cancelArrivalGrace: false,
+			};
 		}
 		if (region === 'picture') {
-			return { close: true, consume: true, play: true, cancelArrivalGrace: Boolean(withinGrace) };
+			return {
+				close: true,
+				consume: true,
+				play: true,
+				cancelArrivalGrace: Boolean(withinGrace),
+			};
 		}
 		if (region === 'chrome') {
-			return { close: true, consume: false, play: false, cancelArrivalGrace: false };
+			return {
+				close: true,
+				consume: false,
+				play: false,
+				cancelArrivalGrace: false,
+			};
 		}
-		return { close: true, consume: false, play: Boolean(pauseHold), cancelArrivalGrace: false };
+		return {
+			close: true,
+			consume: false,
+			play: Boolean(pauseHold),
+			cancelArrivalGrace: false,
+		};
 	},
 
 	/**
@@ -1166,7 +1192,11 @@ const YTB = {
 				const prev = blocks[blocks.length - 1];
 				if (prev.sum / prev.count <= block.sum / block.count) break;
 				blocks.pop();
-				block = { sum: prev.sum + block.sum, count: prev.count + block.count, start: prev.start };
+				block = {
+					sum: prev.sum + block.sum,
+					count: prev.count + block.count,
+					start: prev.start,
+				};
 			}
 			blocks.push(block);
 		}
@@ -1220,7 +1250,11 @@ const YTB = {
 			for (const i of cluster) offsets[dots[i].index] = solved[i] - dots[i].x;
 		}
 		// Report clusters in the caller's own index space, still left to right.
-		return { clusters: clusters.map((cluster) => cluster.map((i) => dots[i].index)), offsets, gap };
+		return {
+			clusters: clusters.map((cluster) => cluster.map((i) => dots[i].index)),
+			offsets,
+			gap,
+		};
 	},
 
 	// --- Note Band geometry (pure — tested at the shared.js seam) ---
@@ -1230,39 +1264,42 @@ const YTB = {
 	 * directly ABOVE the Video Timeline's top edge that the Note layer owns).
 	 * The ONE place they live: notes.js builds its injected CSS from these, and
 	 * the pure helpers below derive from them, so a change here carries every
-	 * dependent surface — the hit extender, its clearance gate, the Expanded
+	 * dependent surface — the hit extender, its per-side reach, the Expanded
 	 * Note's anchor — along together instead of letting them silently
 	 * re-collide.
 	 */
 	NOTE_BAND: {
 		dotLift: 10, // px from the bar's top edge up to a dot's bottom edge (#162)
 		dotDiameter: 6, // the painted glyph
-		hitWidth: 12, // the invisible hit extender's width, centred on the glyph
+		hitMaxSideReach: 3, // max invisible reach beyond either side of the glyph
 		hitHeight: 14, // its height — bottom-anchored at the dot's bottom edge, growing upward only (#158)
 		panelGap: 8, // breathing room between the dot glyphs' tops and the Expanded Note's bottom edge
 	},
 
 	/**
-	 * The clearance gate (#173): which Note Dots earn the invisible hit
-	 * extender. A dot gets one only when its nearest neighbour (at rest, across
-	 * ALL dots on the bar) is at least the extender's WIDTH away — any closer
-	 * and one dot's box could shadow another dot's glyph. Denser dots keep the
-	 * Dot Cluster fan as their reach affordance instead: their true timestamps
-	 * are never displaced at rest, and the fan is what makes a covered dot
-	 * individually hittable.
+	 * Per-side Note Dot hit reach (#202). Each side stops at the nearer of its
+	 * configured cap or the midpoint to that side's nearest neighbour.
 	 * @param {number[]} xs each dot's px offset from the bar's left edge, at rest
-	 * @param {number} boxWidth the extender's width in px (the gate tracks it)
-	 * @returns {boolean[]} per dot, in input order: whether it earns the extender
+	 * @param {number} dotDiameter the painted glyph's diameter in px
+	 * @param {number} maxSideReach the cap beyond either side of the glyph
+	 * @returns {{left: number, right: number}[]} per dot, in input order
 	 */
-	dotExtenderGate(xs, boxWidth) {
+	dotHitReaches(xs, dotDiameter, maxSideReach) {
 		const px = (xs || []).map((x) => Number(x) || 0);
-		const width = Number(boxWidth) || 0;
+		const radius = Math.max(0, Number(dotDiameter) || 0) / 2;
+		const cap = Math.max(0, Number(maxSideReach) || 0);
+		const reach = (gap) => Math.min(cap, Math.max(0, gap / 2 - radius));
 		return px.map((x, i) => {
-			let nearest = Infinity;
+			let leftGap = Infinity;
+			let rightGap = Infinity;
 			for (let j = 0; j < px.length; j++) {
-				if (j !== i) nearest = Math.min(nearest, Math.abs(px[j] - x));
+				if (j === i) continue;
+				const gap = px[j] - x;
+				if (gap < 0) leftGap = Math.min(leftGap, -gap);
+				else if (gap > 0) rightGap = Math.min(rightGap, gap);
+				else leftGap = rightGap = 0;
 			}
-			return nearest >= width;
+			return { left: reach(leftGap), right: reach(rightGap) };
 		});
 	},
 
@@ -2317,6 +2354,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // (dots/Clusters/Previews, the Expanded Note) and composer.js consume the SAME
 // refcount regardless of load order: the chrome stays awake until the last
 // engaged Note surface — whichever file owns it — lets go.
-YTB.controlsHold = YTB.createControlsHold({ dispatch: (tick) => YTB.nudgePlayerControls(tick) });
+YTB.controlsHold = YTB.createControlsHold({
+	dispatch: (tick) => YTB.nudgePlayerControls(tick),
+});
 
 window.YTB = YTB;

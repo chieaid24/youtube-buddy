@@ -664,15 +664,38 @@ test('the progress bar stays seekable directly beneath a Note Dot: every surface
 			}
 		});
 		await loadMedia(page, silentWavDataUri(40));
-		// One roomy dot at 10s (x = 100 on the 400px bar) and a co-timed pair at
+		// One isolated dot at 10s (x = 100 on the 400px bar) and a co-timed pair at
 		// 30s (x = 300), which cluster and fan.
 		await pushNotes(page, [
 			{ id: 'iso', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 10, kind: 'text', body: 'here', createdAt: 1 },
 			{ id: 'co-a', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 30, kind: 'text', body: 'a', createdAt: 2 },
-			{ id: 'co-b', clientId: 'buddy-2', name: 'Kim', videoId: 'fixture-video', timestamp: 30.2, kind: 'text', body: 'b', createdAt: 3 },
+			{ id: 'co-b', clientId: 'buddy-2', name: 'Kim', videoId: 'fixture-video', timestamp: 30.8, kind: 'text', body: 'b', createdAt: 3 },
 		]);
 		await expect(page.locator('.ytb-note-dot')).toHaveCount(3);
-		await expect(page.locator('.ytb-note-dot-roomy')).toHaveCount(1); // only the isolated dot earns the hit extender
+		await expect
+			.poll(() =>
+				page.locator('[data-ytb-note-id="iso"]').evaluate((dot) => ({
+					left: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-left')),
+					right: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-right')),
+				})),
+			)
+			.toEqual({ left: 3, right: 3 });
+		await expect
+			.poll(() =>
+				page.locator('[data-ytb-note-id="co-a"]').evaluate((dot) => ({
+					left: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-left')),
+					right: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-right')),
+				})),
+			)
+			.toEqual({ left: 3, right: 1 });
+		await expect
+			.poll(() =>
+				page.locator('[data-ytb-note-id="co-b"]').evaluate((dot) => ({
+					left: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-left')),
+					right: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-right')),
+				})),
+			)
+			.toEqual({ left: 1, right: 3 });
 
 		// Hit-test the bar under a dot: sweep its full 6px height across the dot's
 		// whole 32px hit width (the Note Band's box, #173). Nothing of ours may
@@ -844,7 +867,14 @@ test('a Note Dot outranks the scrubber knob inside the Note Band, and the knob k
 			{ id: 'parked', clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 10, kind: 'text', body: 'here', createdAt: 1 },
 		]);
 		await expect(page.locator('.ytb-note-dot')).toHaveCount(1);
-		await expect(page.locator('.ytb-note-dot-roomy')).toHaveCount(1);
+		await expect
+			.poll(() =>
+				page.locator('.ytb-note-dot').evaluate((dot) => ({
+					left: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-left')),
+					right: Number.parseFloat(getComputedStyle(dot).getPropertyValue('--ytb-hit-right')),
+				})),
+			)
+			.toEqual({ left: 3, right: 3 });
 
 		// The collision is real in this fixture: the knob's disc covers the dot's
 		// glyph centre — and yet the hit test resolves to the dot, by stacking
