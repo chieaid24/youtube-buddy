@@ -116,3 +116,24 @@ hover underline, no pointer cursor, no link tooltip), the sole exception to the 
 Feed's link rule. Because a line-through conveys nothing to a screen reader, a struck
 row instead carries a "No longer recommended" tooltip and a visually-hidden
 "(no longer recommended)" suffix inside the sentence.
+
+## Amendment (2026-07-23)
+
+Dismiss is now keyed by a recommendation **instance**, not by videoId — this **reverses**
+the 2026-07-08 "Consequences" line "Dismiss is keyed by videoId, so a later re-recommend
+does not resurface it".
+
+- **Each Playlist Item carries a server-minted `id`** that identifies one recommendation
+  instance. `POST /playlist` returns it. The backend's no-op re-add invariant carries it:
+  re-adding a still-live video returns the same item, hence the same id; recommending a
+  video again after an un-recommend is a delete-then-add, which mints a **new** id.
+- **A viewer's Dismiss stores the item `id`** (still `chrome.storage.local`, Room-scoped,
+  never sent to the backend); `recommendedForYou` filters by dismissed ids. So
+  recommend -> dismiss -> un-recommend -> re-recommend surfaces the video again — the
+  re-recommend is a new instance with an id the viewer has not dismissed — while a plain
+  dismiss still stays hidden across reloads and Room switches. The Dismissed set is pruned
+  against an **ok** Room read only (mirroring the Unseen `pruneSeen` pattern) so it cannot
+  grow without bound.
+
+Storage shape is otherwise unchanged: the item gains one field, un-recommends still emit no
+Event, and nothing per-recipient is stored on the backend.

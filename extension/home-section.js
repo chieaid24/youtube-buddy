@@ -74,7 +74,7 @@
 	// Room Home Toggle state: null until the stored preference has been read,
 	// so the section never flashes in before a hide preference is known.
 	let hiddenPref = null;
-	let dismissedIds = new Set(); // this Room's local Dismissals (videoIds)
+	let dismissedIds = new Set(); // this Room's local Dismissals (item ids)
 	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
 
 	// The Feed's reveal window — transient view state (a number in module
@@ -492,7 +492,8 @@
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-thumb';
 		link.href = '/watch?v=' + encodeURIComponent(item.videoId);
-		link.title = item.title;
+		// No native title= hover tooltip on the thumbnail or title (the alt below
+		// keeps the image accessible); hover shows the card wash instead.
 		const img = document.createElement('img');
 		// A normal in-page image load on youtube.com — no extra host permission.
 		img.src = 'https://i.ytimg.com/vi/' + encodeURIComponent(item.videoId) + '/mqdefault.jpg';
@@ -512,16 +513,15 @@
 		dismiss.addEventListener('click', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
-			dismissedIds.add(item.videoId); // optimistic: hide immediately
+			dismissedIds.add(item.id); // optimistic: hide this instance immediately
 			const code = lastDetail && lastDetail.roomCode;
-			if (code) YTB.dismissVideo(code, item.videoId); // persist, best-effort
+			if (code) YTB.dismissRecommendation(code, item.id); // persist, best-effort
 			render();
 		});
 
 		const title = document.createElement('a');
 		title.className = 'ytb-hs-card-title';
 		title.href = '/watch?v=' + encodeURIComponent(item.videoId);
-		title.title = item.title;
 		title.textContent = item.title;
 
 		const watched = document.createElement('div');
@@ -686,9 +686,17 @@
 			resetFeedWindow(); // a Room Code change reopens the Feed fresh
 		}
 		if (code) {
-			const persisted = await YTB.dismissedVideoIds(code);
+			// On an ok read, prune Dismissed ids no longer live (mirrors pruneSeen)
+			// so the local set stays bounded; a failed read must not wipe it.
+			let persisted;
+			if (detail && detail.ok) {
+				const liveIds = ((lastDetail && lastDetail.playlist) || []).map((it) => it && it.id).filter(Boolean);
+				persisted = await YTB.pruneDismissed(code, liveIds);
+			} else {
+				persisted = await YTB.dismissedIds(code);
+			}
 			if (dismissedRoom !== code) return; // switched Rooms mid-read
-			for (const videoId of persisted) dismissedIds.add(videoId);
+			for (const id of persisted) dismissedIds.add(id);
 		}
 
 		const section = ensureSection();
@@ -887,9 +895,25 @@
       #${SECTION_ID} .ytb-hs-pl-row {
         display: flex; gap: 12px;
         overflow-x: auto;
-        padding-bottom: 4px;
+        /* Room for the card hover wash's bleed so overflow (x:auto also clips y)
+           never crops it; the extra bottom keeps clearance for the scrollbar. */
+        padding: 8px 6px 10px;
       }
-      #${SECTION_ID} .ytb-hs-card { position: relative; flex: 0 0 132px; width: 132px; }
+      /* isolate makes the card a stacking context so the ::before wash sits
+         behind its own content (z-index -1) without escaping to the section. */
+      #${SECTION_ID} .ytb-hs-card { position: relative; isolation: isolate; flex: 0 0 132px; width: 132px; }
+      /* Pointer hover fades in a filled accent-050 wash behind the whole card
+         (thumb + title + attribution), like YouTube's home cards — the title's
+         old underline is gone (#200). Bleeds a little past the content edges but
+         stays inside the 12px row gap so adjacent washes never collide. Keyboard
+         focus keeps its rings below, never the wash. */
+      #${SECTION_ID} .ytb-hs-card::before {
+        content: ''; position: absolute; z-index: -1; inset: -6px -4px;
+        border-radius: var(--ytb-r-lg); background: var(--ytb-accent-050);
+        opacity: 0; pointer-events: none;
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${SECTION_ID} .ytb-hs-card:hover::before { opacity: 1; }
       #${SECTION_ID} .ytb-hs-thumb { display: block; border-radius: 12px; overflow: hidden; }
       #${SECTION_ID} .ytb-hs-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-thumb img { display: block; width: 132px; height: 74px; object-fit: cover; }
@@ -899,8 +923,7 @@
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         color: inherit; text-decoration: none;
       }
-      #${SECTION_ID} .ytb-hs-card-title:hover { text-decoration: underline; }
-      #${SECTION_ID} .ytb-hs-card-title:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-card-title:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-watched { margin-top: 0; font-size: 11px; color: var(--ytb-ink-muted); }
       /* Dismiss control: a dark scrim + light glyph over the thumbnail image,
          kept theme-independent on purpose (like the Note UI's over-video

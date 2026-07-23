@@ -3123,9 +3123,9 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 			context,
 			{
 				playlist: [
-					{ videoId: 'vid-own', title: 'My Own Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 1000 },
-					{ videoId: 'vid-keep', title: 'Buddy Keeper', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 2000 },
-					{ videoId: 'vid-dismiss', title: 'Buddy Dismissed', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 3000 },
+					{ id: 'rec-own', videoId: 'vid-own', title: 'My Own Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 1000 },
+					{ id: 'rec-keep', videoId: 'vid-keep', title: 'Buddy Keeper', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 2000 },
+					{ id: 'rec-dismiss', videoId: 'vid-dismiss', title: 'Buddy Dismissed', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 3000 },
 				],
 			},
 			calls,
@@ -3159,8 +3159,8 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		// ...persisted Room-scoped in chrome.storage.local (read via the popup,
 		// which shares the extension's storage)...
 		await expect
-			.poll(async () => popup.evaluate(() => chrome.storage.local.get('dismissedVideos')))
-			.toEqual({ dismissedVideos: { roome2e: ['vid-dismiss'] } });
+			.poll(async () => popup.evaluate(() => chrome.storage.local.get('dismissedRecommendations')))
+			.toEqual({ dismissedRecommendations: { roome2e: ['rec-dismiss'] } });
 
 		// ...so the video stays hidden across a full reload.
 		await page.reload();
