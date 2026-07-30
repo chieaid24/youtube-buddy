@@ -50,7 +50,7 @@ describe('Room Code helpers', () => {
 
 	it('mixes cute, color, and action descriptors without rejected vocabulary', () => {
 		const descriptors = window.YTBRoomCode.DESCRIPTORS;
-		expect(descriptors).toEqual(expect.arrayContaining(['snuggly', 'purple', 'dancing']));
+		expect(descriptors).toEqual(expect.arrayContaining(['snuggly', 'platinum', 'dancing']));
 		expect(descriptors).not.toEqual(expect.arrayContaining(['grumpy', 'derpy', 'dorky', 'pudgy']));
 	});
 
@@ -66,7 +66,7 @@ describe('Room Code helpers', () => {
 		const values = [0, 0, 0.03, 0.03, 0.06, 0.06];
 		const checkTaken = vi.fn().mockResolvedValueOnce('taken').mockResolvedValueOnce('taken').mockResolvedValueOnce('free');
 
-		await expect(window.YTBRoomCode.generateAvailable({ random: () => values.shift()!, checkTaken })).resolves.toBe('snuggly-penguins');
+		await expect(window.YTBRoomCode.generateAvailable({ random: () => values.shift()!, checkTaken })).resolves.toBe('happy-penguins');
 		expect(checkTaken).toHaveBeenCalledTimes(3);
 	});
 
