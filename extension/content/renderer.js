@@ -1,45 +1,24 @@
 // extension/renderer.js
 //
-// The renderer: draws the Buddies' Progress Records — a colored marker per Buddy
-// on the active video's player progress bar, and the Watched-By Dots (a
-// top-left cluster of flat dots in the Buddy Colors, one per Buddy with a
-// Progress Record for that video — presence only, no fraction) inside
-// thumbnail boxes across the home/recommended/search/listing surfaces.
-// Display-only (no click-to-seek).
-//
-// It is also the Room's single poller: every refresh rebroadcasts the fetched
-// Notes + Replies as `ytb:room-data` for notes.js (which owns ALL Note
-// presentation — timeline dots, Note Previews, the Expanded Note, and Playback
-// Notifications). This file renders no Note UI itself.
-//
-// Loaded as the 3rd content-script file (after shared.js + reporter.js, before
-// content.js), so `window.YTB` exists and our `ytb:*` listeners are attached
-// synchronously at top level BEFORE content.js (loaded last) fires the initial
-// ytb:navigate. Content scripts are NOT ES modules — communicate only via the
-// window.YTB global and `document` events (no import/export). See ADR-0001
-// (docs/adr/0001-content-script-owned-sync.md).
-//
-// We are a pure CONSUMER of navigation/mutation: content.js owns the single
-// observer and emits ytb:navigate / ytb:mutation; we never detect either.
-//
-// "Buddy" filter: a record is a Buddy's iff record.clientId !== myClientId. A
-// Room Code is one Room of up to YTB.MAX_MEMBERS people; when this install is
-// the locked-out 6th (Room full), we draw nothing. Reads happen regardless of
-// the Sharing toggle — Sharing only gates POSTs.
+// Draws Buddies' Progress markers on the player bar and Watched-By Dots on
+// thumbnails (display-only); also the Room's single poller, rebroadcasting
+// each read as ytb:room-data for notes.js/home-section.js/etc (this file
+// renders no Note UI itself). Loaded 3rd (after shared.js+reporter.js) so its
+// ytb:* listeners attach before content.js's first ytb:navigate (ADR-0001);
+// reads run regardless of Sharing, which only gates POSTs.
 
 (function () {
 	'use strict';
 
 	// --- constants ---
-	// Each Buddy gets a stable color from YTB.buddyColor (set inline per element);
-	// the CSS defaults below only matter before a color is assigned.
+	// Each Buddy's color comes from YTB.buddyColor; the CSS defaults below only
+	// matter before one is assigned.
 
 	const MARKER_CLASS = 'ytb-watch-marker';
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
 	const THUMB_DOTS_CLASS = 'ytb-thumb-dots'; // Watched-By Dots cluster on a thumbnail
 	const THUMB_DOT_CLASS = 'ytb-thumb-dot'; // one flat Buddy-colored dot
-	// The cluster's tooltip is one row per dot (#176): a Buddy Color swatch, the
-	// Display Name, and the Watch Status.
+	// The cluster's tooltip is one row per dot (#176): swatch + Display Name + Watch Status.
 	const TOOLTIP_ROW_CLASS = 'ytb-thumb-row';
 	const TOOLTIP_SWATCH_CLASS = 'ytb-thumb-swatch';
 	const TOOLTIP_NAME_CLASS = 'ytb-thumb-name';
@@ -65,9 +44,8 @@
 	let readFailures = 0; // consecutive failed Room reads, folded via YTB.connectionState
 	let connectionLost = false; // failures >= 2 — rides every ytb:room-data broadcast
 
-	// Buddy Progress Visibility (Settings): while hidden, draw neither markers
-	// nor thumbnail bars — but keep polling and rebroadcasting ytb:room-data
-	// (notes, the popup roster, presence, and the home section are unaffected).
+	// Buddy Progress Visibility (Settings): hidden draws neither markers nor
+	// thumbnail bars, but polling/rebroadcasting ytb:room-data continues unaffected.
 	let buddyProgressHidden = false;
 
 	injectStyle();
@@ -83,13 +61,10 @@
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * GET every record under the configured Room Code and index the Buddies'
-	 * (foreign clientId) by videoId — one latest record per Buddy per video. Bails
-	 * to an empty cache when there is no code (Unpaired) or when this install is
-	 * the locked-out 6th member (Room full — draw nothing). A FAILED read instead
-	 * retains the previous cache untouched (Connection Lost: markers stay as last
-	 * seen) while still broadcasting. Server-side TTL already drops records older
-	 * than 14 days, so no age filter is needed here.
+	 * GET every record for the Room Code, indexed by videoId -> latest record per
+	 * Buddy. Empties the cache when Unpaired or Room-full (locked out); a FAILED
+	 * read keeps the previous cache (Connection Lost) but still broadcasts. No
+	 * age filter needed — server TTL already drops records past 14 days.
 	 */
 	async function refresh() {
 		if (!YTB.isContextActive()) return;
@@ -113,11 +88,8 @@
 		readFailures = conn.failures;
 		connectionLost = conn.lost;
 		if (!records.ok) {
-			// A failed read is not truth: retain the previous cache, roster, and
-			// toast baseline exactly as last rendered — markers and thumbnail bars
-			// stay where they were through a blip or outage (no on-video indicator;
-			// see Connection Lost, PRD #137). Only the broadcast goes out, so
-			// consumers still hear about the failure and its connectionLost flag.
+			// A failed read isn't truth: keep the previous cache/roster/baseline
+			// as-is (Connection Lost, PRD #137); still broadcast so consumers see it.
 			broadcastRoomData(records, false);
 			return;
 		}
@@ -129,8 +101,7 @@
 		);
 		if (!YTB.isContextActive()) return;
 
-		// Toast new arrivals (presence OR progress). Diff against last refresh; the
-		// first read just seeds the baseline so existing Buddies never "join".
+		// Toast new arrivals; the first read only seeds the baseline (no false "joined").
 		notePresence(view.buddies);
 
 		// Locked out of a full Room: I'm not a member and 5 others already are.
@@ -140,8 +111,8 @@
 			return;
 		}
 
-		// videoId -> (clientId -> latest record), then flattened to arrays. Presence
-		// rows have no videoId, so they never produce a marker (only a toast/roster).
+		// videoId -> (clientId -> latest record), then flattened; presence rows have
+		// no videoId, so they never produce a marker (only a toast/roster).
 		const byVideo = new Map();
 		for (const r of records.progress) {
 			if (!r || r.clientId === myClientId || !r.videoId) continue;
@@ -162,13 +133,9 @@
 		broadcastRoomData(records, false);
 	}
 
-	// Hand every refreshed Room read to the other modules: notes.js (the sole
-	// Note-presentation owner) reconciles the Video Timeline, Reply counts, and
-	// Playback Notifications; home-section.js renders the Room Home Section
-	// (Feed + Recommended for you); mentions.js keeps the roster for
-	// @-autocomplete; playlist-add.js reflects the pill's recommend state. None of them
-	// polls the Room itself — this stays the single poller. Pass `null` records
-	// for the empty broadcast (no code, or locked out of a full Room).
+	// Hands each Room read to the other modules (notes.js, home-section.js,
+	// mentions.js, playlist-add.js) — none of them poll; this is the single
+	// poller. `records` is null for an empty broadcast (no code, or locked out).
 	function broadcastRoomData(records, locked) {
 		const r = records || {};
 		document.dispatchEvent(
@@ -183,30 +150,28 @@
 					roomCode: activeRoomCode,
 					myClientId,
 					locked: Boolean(locked),
-					// Whether this broadcast carries a SUCCESSFUL Room read. A failed GET
-					// still broadcasts (with empty arrays) so consumers reconcile, but
-					// they must not treat the emptiness as truth — notes.js only prunes
-					// the Unseen seen-set (ADR-0010) against an ok read.
+					// False on a failed GET (empty arrays still broadcast) — consumers
+					// must not treat that as truth; notes.js only prunes Unseen state
+					// (ADR-0010) when ok.
 					ok: Boolean(r.ok),
-					// Connection Lost (>= 2 consecutive failed reads, YTB.connectionState):
-					// carried on EVERY broadcast so consumers track both onset and
-					// recovery without owning a failure counter of their own.
+					// >= 2 consecutive failed reads (YTB.connectionState); carried on
+					// every broadcast so consumers track onset/recovery without their
+					// own failure counter.
 					connectionLost,
 				},
 			}),
 		);
 	}
 
-	// Reset the toast baseline when there is no code (so re-joining later doesn't
-	// replay every existing member as a fresh "joined").
+	// Reset the toast baseline when Unpaired, so rejoining later doesn't replay
+	// every existing member as a fresh "joined".
 	function resetPresenceBaseline() {
 		knownBuddyIds = new Set();
 		baselineReady = false;
 	}
 
-	// Diff the current foreign Buddies against the last seen set; toast any new
-	// clientId once the baseline has been established. `buddies` already excludes
-	// me and dedups by clientId (presence-only Buddies included).
+	// Diff against the last-seen set and toast any new clientId once the
+	// baseline is established; `buddies` already excludes me and dedups by clientId.
 	function notePresence(buddies) {
 		const current = new Set();
 		for (const b of buddies) {
@@ -224,20 +189,18 @@
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * Draw (or refresh) a marker per Buddy on `.ytp-progress-bar` for `videoId`,
-	 * each at the Buddy's position in that Buddy's color, with a hover tooltip.
-	 * No-op when the bar isn't built yet (the player initializes async —
-	 * ytb:mutation re-invokes us until it is). Keyed by clientId so markers
-	 * survive re-renders (no flicker mid-hover); Buddies that left are removed.
-	 * Overlapping positions are allowed to overlap.
+	 * Draw/refresh one marker per Buddy on `.ytp-progress-bar` for `videoId`, in
+	 * that Buddy's color, with a hover tooltip. No-op until the bar exists
+	 * (ytb:mutation retries). Keyed by clientId so markers survive re-renders
+	 * without flicker; left Buddies are removed. Overlaps are allowed.
 	 * @param {string|null} videoId
 	 */
 	function renderWatchMarker(videoId) {
 		const bar = document.querySelector('.ytp-progress-bar');
 		if (!bar) return; // player not ready yet — a later ytb:mutation retries
 
-		// Hidden Buddy Progress leaves `desired` empty, so the reconciliation
-		// below strips existing markers (and re-grows them all when re-shown).
+		// Hidden Buddy Progress leaves `desired` empty, so reconciliation below
+		// strips markers (and regrows them when re-shown).
 		const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
 		const desired = new Map(); // clientId -> record
 		if (records) {
@@ -246,9 +209,8 @@
 			}
 		}
 
-		// Reconcile existing markers by clientId: keep the ones still wanted, drop
-		// the rest. Index them rather than querying per id, so an unusual clientId
-		// can never form a bad attribute selector.
+		// Reconcile by clientId (keep wanted, drop the rest); indexed rather than
+		// queried per id so no clientId can form a bad attribute selector.
 		const existing = new Map();
 		for (const marker of bar.querySelectorAll(':scope > .' + MARKER_CLASS)) {
 			const cid = marker.dataset.ytbCid;
@@ -262,9 +224,8 @@
 			bar.style.position = 'relative';
 		}
 
-		// Place through YouTube's own chapter geometry (#159), re-measured here so
-		// a resize, theater/fullscreen, or late-arriving chapter DOM re-aligns every
-		// marker on the next render.
+		// Placed via YouTube's chapter geometry (#159), re-measured here so a
+		// resize, theater/fullscreen, or late chapter DOM re-aligns markers next render.
 		const segments = YTB.barSegments(bar);
 
 		for (const [cid, record] of desired) {
@@ -286,33 +247,24 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Thumbnails: Watched-By Dots — a top-left cluster of flat dots inside each
-	// tile's thumbnail box, one dot per Buddy who has a Progress Record for that
-	// video, ordered most-recent-first. A dot means only "this Buddy has a
-	// record" — no fraction, no timestamp — and the viewer is never included
-	// (YouTube's own red Watched Bar already tells the viewer's state). Hovering
-	// or keyboard-focusing the cluster shows one dark "Watched by <names>"
-	// tooltip (the Buddies-only watchedByLabel).
-	//
-	// YouTube-thumbnail-DOM fragility is deliberately contained in this section
-	// (as playlist-add.js and home-toggle.js do for the menu and guide DOM).
+	// Thumbnails: Watched-By Dots — a top-left cluster of flat dots, one per
+	// Buddy with a Progress Record for that video, newest first, viewer excluded
+	// (YouTube's own Watched Bar covers that). Hover/focus shows a "Watched by
+	// <names>" tooltip. YouTube-thumbnail-DOM fragility is deliberately
+	// contained here (as playlist-add.js/home-toggle.js do for the menu/guide).
 	// ---------------------------------------------------------------------------
 
-	// YouTube's hover-autoplay inline preview host: a document-level SINGLETON,
-	// never reparented into a tile, sized over the hovered tile and larger than
-	// its thumbnail box. While it visibly covers a decorated tile the cluster
-	// is mirrored INTO the host — and ownership is explicit (#174): the mirror
-	// owns that video's cluster and the covered tile's own is swept, never left
-	// to stacking-order luck.
+	// YouTube's hover-autoplay preview host: a document-level singleton, larger
+	// than the tile it covers. While it covers a decorated tile, the cluster is
+	// mirrored into the host, which owns it (#174) — the tile's own is swept,
+	// never left to stacking-order luck.
 	const PREVIEW_HOST_SELECTOR = 'ytd-video-preview';
 
 	/**
-	 * The tile's real thumbnail box — the element the Watched-By Dots must never
-	 * escape. On lockup tiles (`yt-lockup-view-model`) the `/watch` anchor is
-	 * WIDER AND TALLER than the image, so the cluster anchors to the nested
-	 * `yt-thumbnail-view-model` (already `position: relative; overflow: hidden`
-	 * and exactly the image box). Classic `a#thumbnail` tiles ARE their image
-	 * box, so the anchor stands.
+	 * The tile's real thumbnail box the dots must never escape. Lockup tiles'
+	 * (`yt-lockup-view-model`) anchor is wider/taller than the image, so this
+	 * anchors to the nested `yt-thumbnail-view-model` instead; classic
+	 * `a#thumbnail` tiles ARE their image box, so the anchor itself stands.
 	 * @param {Element} anchor
 	 * @returns {Element}
 	 */
@@ -321,98 +273,81 @@
 	}
 
 	/**
-	 * Overlay the Watched-By Dots on every thumbnail tile whose video has at
-	 * least one Buddy Progress Record. Idempotent + recycle-safe: YouTube reuses
-	 * tile DOM nodes for different videos as you scroll, so each pass re-keys
-	 * the cluster to the tile's CURRENT videoId and only rebuilds its dots when
-	 * the video or the watcher set changes (a signature guard) — frequent
-	 * ytb:mutation passes never tear down a tooltip mid-hover. Dot COLORS are
-	 * repainted every pass: a Buddy Color re-assignment changes no ids, so it
-	 * must never be short-circuited by the signature.
-	 *
-	 * Exactly one surface owns a video's cluster at any moment (#174): while a
-	 * visible preview host covers a tile, the preview MIRROR owns it and the
-	 * tile's own cluster goes; otherwise the tile owns it. Every cluster the
-	 * pass keeps is claimed, and the closing sweep removes every unclaimed
-	 * `.ytb-thumb-dots` left anywhere in the document — a recycled tile, a
-	 * hidden preview's stale mirror, a reparented box — so doubling is
-	 * impossible by construction rather than by z-index luck.
+	 * Overlay Watched-By Dots on every tile whose video has a Buddy record.
+	 * Idempotent + recycle-safe: re-keys each cluster to the tile's current
+	 * videoId and only rebuilds dots when the video/watcher set changes (a
+	 * signature guard), so frequent ytb:mutation passes never tear down a
+	 * tooltip mid-hover; colors repaint every pass regardless. Exactly one
+	 * surface owns a video's cluster (#174): a preview mirror wins over its
+	 * covered tile; the closing sweep removes every unclaimed cluster, so
+	 * doubling is impossible by construction.
 	 */
 	function renderThumbnails() {
 		const claimed = new Set(); // every cluster this pass kept
-		// The preview pass runs FIRST: it decides which tile boxes a visible
-		// preview covers, so the tile pass below can cede those clusters.
+		// Preview pass runs first, deciding which tile boxes a visible preview
+		// covers so the tile pass below can cede those clusters.
 		const coveredBoxes = renderPreviewDots(claimed);
 
 		const anchors = document.querySelectorAll('a[href*="/watch?v="]');
 		for (const anchor of anchors) {
-			// Decorate only thumbnail anchors — the ones wrapping the tile image — so
-			// we never draw dots on a video-title link. The image check is
-			// surface-agnostic: it matches both the classic `a#thumbnail` tiles and
-			// the newer `yt-lockup-view-model` tiles, whose anchors differ.
+			// Only thumbnail-image anchors (never a title link); the img check
+			// matches both classic and lockup tile anchors.
 			if (!anchor.querySelector('img')) continue;
 
-			// Our own Recommended-for-you cards keep their below-card text label
-			// ("Watched by ..."); dots there would double-label the same info.
+			// Our Recommended-for-you cards keep their own text label; dots there
+			// would double it.
 			if (anchor.closest('#ytb-home-section')) continue;
 
-			// Anchors inside a hover-autoplay preview host belong to
-			// renderPreviewDots — decorating both would double the dots.
+			// Preview-host anchors belong to renderPreviewDots — decorating both
+			// would double the dots.
 			if (anchor.closest(PREVIEW_HOST_SELECTOR)) continue;
 
 			const videoId = videoIdFromHref(anchor.getAttribute('href'));
-			// Hidden Buddy Progress removes every tile's dots via the null branch
-			// (unclaimed, so the sweep strips them).
+			// Hidden Buddy Progress nulls records here, so unclaimed dots are swept.
 			const records = videoId && !buddyProgressHidden ? buddyByVideoId.get(videoId) : null;
 			if (!records || records.length === 0) continue;
 
 			const box = thumbBoxFor(anchor);
-			// A visible preview covers this tile: the mirror owns its cluster, and
-			// the tile's own (unclaimed) one is swept.
+			// A visible preview covers this tile — the mirror owns the cluster;
+			// ours goes unclaimed and is swept.
 			if (coveredBoxes.has(box)) continue;
 
-			// The cluster lives inside the thumbnail box, itself inside the anchor —
-			// one anchor-scoped lookup finds it wherever the box resolved to. One
-			// that attached before the tile hydrated its real thumbnail box is
-			// rebuilt inside the right parent (the stray gets swept).
+			// Anchor-scoped lookup finds the cluster wherever the box resolved to;
+			// one attached before hydration is rebuilt in the right parent (the
+			// stray is swept).
 			let cluster = anchor.querySelector('.' + THUMB_DOTS_CLASS);
 			if (cluster && !box.contains(cluster)) cluster = null;
 
 			claimed.add(renderDotsCluster(box, cluster, videoId, records));
 		}
 
-		// The sweep: any cluster this pass did not claim is an orphan — a
-		// recycled tile's, a hidden preview's stale mirror, a preview-covered
-		// tile's own — and goes. At most one cluster per video survives, by
-		// construction.
+		// Sweep: any unclaimed cluster (recycled tile, stale mirror, ceded tile)
+		// is an orphan and goes — at most one per video survives.
 		for (const cluster of document.querySelectorAll('.' + THUMB_DOTS_CLASS)) {
 			if (!claimed.has(cluster)) cluster.remove();
 		}
 	}
 
 	/**
-	 * Build (or reconcile) one Watched-By Dots cluster inside `box`: one flat
-	 * dot per Buddy record, newest first, plus the dark tooltip carrying one row
-	 * per dot (swatch + Display Name + Watch Status, #176). Shared by the
-	 * per-tile pass and the preview mirror. Reconciles IN PLACE: a pass that
-	 * changes nothing writes nothing beyond the color/text repaint, so a stable
-	 * cluster and its tooltip are never removed-and-re-added mid-hover (#174).
-	 * @param {Element} box the positioning parent the cluster must stay inside
-	 * @param {?Element} cluster the existing cluster in `box`, if any
+	 * Build/reconcile one Watched-By Dots cluster inside `box`: one dot per
+	 * Buddy record (newest first) plus a tooltip row each (swatch + name +
+	 * status, #176). Shared by the per-tile pass and the preview mirror;
+	 * reconciles in place so an unchanged pass never tears down a tooltip
+	 * mid-hover (#174).
+	 * @param {Element} box positioning parent the cluster must stay inside
+	 * @param {?Element} cluster existing cluster in `box`, if any
 	 * @param {string} videoId
 	 * @param {Array<object>} records this video's Buddy records (latest per Buddy)
-	 * @returns {Element} the cluster kept by this pass (for the caller's claim)
+	 * @returns {Element} the cluster kept by this pass
 	 */
 	function renderDotsCluster(box, cluster, videoId, records) {
-		// One row per Buddy with a record — the viewer excluded, newest first —
-		// the SAME order the dots render in (the pure derivation owns the sort,
-		// so dots and rows never drift). Row i pairs dot i.
+		// One row per Buddy (viewer excluded, newest first) in the same order the
+		// dots render, so dots and rows never drift; row i pairs dot i.
 		const rows = YTB.watchedByRows(records, videoId, myClientId, roster);
 
 		if (!cluster) {
-			// The thumbnail box must establish a positioning context; only mutate
-			// YouTube's layout when it doesn't already (`yt-thumbnail-view-model`
-			// ships `position: relative`, classic `a#thumbnail` does not).
+			// Only set position:relative when YouTube's own layout doesn't already
+			// (yt-thumbnail-view-model does, classic a#thumbnail doesn't).
 			if (getComputedStyle(box).position === 'static') {
 				box.style.position = 'relative';
 			}
@@ -426,19 +361,15 @@
 			box.appendChild(cluster);
 		}
 
-		// The accessible name mirrors the visual rows (names + statuses), so a
-		// screen reader and a keyboard-focus user get what the pointer shows.
-		// Guarded so an unchanged pass performs no write (a text-node replace is
-		// childList churn for nothing).
+		// aria-label mirrors the visual rows so screen readers get what the
+		// pointer shows; guarded so an unchanged pass writes nothing.
 		const label = YTB.watchedByAriaLabel(rows);
 		if (cluster.getAttribute('aria-label') !== label) cluster.setAttribute('aria-label', label);
 		const tooltip = cluster.querySelector(':scope > .' + TOOLTIP_CLASS);
 
-		// Rebuild the dots AND the tooltip rows only when the video or its
-		// (ordered) watcher set changed — the signature carries order, so a
-		// recency flip rebuilds both together and they stay aligned. Status text
-		// and colors, which can change with the set unchanged, are reconciled
-		// every pass below, so a no-op poll tears nothing down mid-hover.
+		// Rebuild dots + tooltip rows only when the video/ordered watcher set
+		// changes (signature guard, keeps them aligned); colors/status reconcile
+		// every pass below regardless.
 		const sig = videoId + '|' + rows.map((r) => r.clientId).join(',');
 		if (cluster.dataset.ytbSig !== sig) {
 			for (const dot of cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS)) dot.remove();
@@ -463,10 +394,9 @@
 			cluster.dataset.ytbSig = sig;
 		}
 
-		// Reconcile color + text every pass — a Buddy Color pick, a renamed
-		// Buddy, or a Buddy advancing all change these without changing the set.
-		// Colors are set unconditionally (a style write is no childList churn);
-		// text is guarded (a text-node replace would be). Dot i pairs row i.
+		// Reconcile color/text every pass (a color pick, rename, or advance can
+		// change these without changing the set); colors set unconditionally,
+		// text guarded. Dot i pairs row i.
 		const dotEls = cluster.querySelectorAll(':scope > .' + THUMB_DOT_CLASS);
 		const rowEls = tooltip.querySelectorAll(':scope > .' + TOOLTIP_ROW_CLASS);
 		rows.forEach((row, i) => {
@@ -485,20 +415,15 @@
 	}
 
 	/**
-	 * Mirror the Watched-By Dots into YouTube's hover-autoplay inline preview
-	 * while it covers a decorated tile, so the dots stay visible AND hoverable
-	 * during the preview — the mirror stays a DESCENDANT of the preview host,
-	 * keeping the pointer inside the host's subtree (a document-level float of
-	 * ours would fire a synthetic mouseleave and cancel the autoplay). Runs
-	 * first on every render pass; a preview that is hidden, previewing an
-	 * un-watched video, or gone again leaves its mirror unclaimed for the
-	 * sweep.
+	 * Mirror the Watched-By Dots into YouTube's hover-autoplay preview while it
+	 * covers a decorated tile, so they stay visible and hoverable — the mirror
+	 * stays a descendant of the host, since a document-level float would fire a
+	 * synthetic mouseleave and cancel the autoplay. A hidden/un-watched/gone
+	 * preview leaves its mirror unclaimed for the sweep.
 	 *
-	 * While a mirror renders, the ONE tile the preview covers cedes its own
-	 * cluster (#174): the covered tile is the one showing the SAME videoId
-	 * whose thumbnail box the host geometrically overlaps
-	 * (YTB.previewOwnsTile) — a duplicate of the videoId elsewhere in the feed
-	 * keeps its own dots.
+	 * The one covered tile (same videoId, geometrically overlapping via
+	 * YTB.previewOwnsTile) cedes its own cluster (#174); a duplicate videoId
+	 * elsewhere keeps its own dots.
 	 * @param {Set<Element>} claimed this pass's claim set (mirrors added here)
 	 * @returns {Set<Element>} the tile thumbnail boxes covered by a preview
 	 */
@@ -530,8 +455,8 @@
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * Whether a record can be placed on the bar at all (finite timestamp, positive
-	 * finite duration). Where it lands is YTB.timeToX's business (#159).
+	 * Whether a record has a placeable position (finite timestamp, positive
+	 * finite duration); where it lands is YTB.timeToX's business (#159).
 	 * @param {{timestamp: number, duration: number}} record
 	 * @returns {boolean}
 	 */
@@ -564,8 +489,7 @@
         top: 0;
         bottom: 0;
         width: 3px;
-        /* Half the marker's width, so the 3px bar straddles its timestamp's x
-           instead of sitting half a pixel right of it (#159). */
+        /* Half the marker's width, so the 3px bar straddles its timestamp x (#159). */
         margin-left: -1.5px;
         background: ${fallback};
         z-index: 40;
@@ -591,11 +515,9 @@
       .${MARKER_CLASS}:hover .${TOOLTIP_CLASS} {
         opacity: 1;
       }
-      /* Watched-By Dots: a top-left cluster of flat Buddy-colored dots inside
-         the thumbnail box. The negative margin keeps the dots' visual inset at
-         ${DOTS_INSET}px while the padding grows the hover/focus target beyond
-         the tiny dots. High z-index so the cluster rides above tile overlays
-         and an in-box inline preview player. */
+      /* Watched-By Dots cluster: negative margin keeps the ${DOTS_INSET}px
+         visual inset while padding grows the hit target; high z-index rides
+         above tile overlays and the inline preview. */
       .${THUMB_DOTS_CLASS} {
         position: absolute;
         top: ${DOTS_INSET}px;
@@ -603,9 +525,8 @@
         display: flex;
         align-items: center;
         gap: ${DOT_GAP}px;
-        /* 8px padding (cancelled by the margin, so the dots keep their
-           ${DOTS_INSET}px visual inset) grows the focus/hover target to the
-           24px minimum even for a single dot (UA-012). */
+        /* 8px padding (cancelled by the margin) grows the hit target to the
+           24px minimum even for one dot (UA-012). */
         padding: 8px;
         margin: -8px;
         border-radius: 999px;
@@ -613,9 +534,8 @@
         pointer-events: auto;
         cursor: default;
       }
-      /* Two-tone focus ring (UA-013): the dark inner layer keeps the
-         indicator visible over bright thumbnails, the white outline over
-         dark ones. */
+      /* Two-tone focus ring (UA-013): dark inner layer visible on bright
+         thumbnails, white outline on dark ones. */
       .${THUMB_DOTS_CLASS}:focus-visible {
         outline: 2px solid rgba(255, 255, 255, 0.9);
         outline-offset: 1px;
@@ -626,10 +546,8 @@
         height: ${DOT_SIZE}px;
         border-radius: 50%;
         background: ${fallback};
-        /* Hover/focus settles the dots up ~1.25x (DESIGN.md section 2:
-           transform + opacity only, never layout). The cluster's own padded
-           box — the 24px hit target — is untouched, since a transform never
-           reflows, and a 1px growth per side keeps the dots inside the box. */
+        /* Hover/focus scales dots ~1.25x (DESIGN.md 2: transform/opacity
+           only); the 24px hit target is untouched since transform never reflows. */
         transform-origin: center;
         transition:
           transform var(--ytb-dur-quick, 140ms) var(--ytb-ease-spring, cubic-bezier(0.34, 1.3, 0.64, 1)),
@@ -639,8 +557,7 @@
       .${THUMB_DOTS_CLASS}:focus-visible > .${THUMB_DOT_CLASS} {
         transform: scale(1.25);
       }
-      /* Reduced motion: no scale. The dots rest slightly dimmed so hover/focus
-         has somewhere to go — a brightness lift via opacity instead. */
+      /* Reduced motion: no scale; dots rest dimmed so hover/focus can lift via opacity. */
       @media (prefers-reduced-motion: reduce) {
         .${THUMB_DOT_CLASS} {
           opacity: 0.82;
@@ -652,10 +569,9 @@
           opacity: 1;
         }
       }
-      /* The cluster's dark tooltip opens below the dots, left-aligned (the box
-         clips at overflow: hidden, so it must open inward), one row per dot in
-         the same order: a Buddy Color swatch, the Display Name (wraps, never
-         clips), and the Watch Status pinned to the right edge. */
+      /* Tooltip opens below the dots, left-aligned (box clips overflow:
+         hidden, so it opens inward); one row per dot: swatch, wrapping name,
+         status pinned right. */
       .${THUMB_DOTS_CLASS} > .${TOOLTIP_CLASS} {
         top: 100%;
         bottom: auto;
@@ -707,9 +623,8 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Wiring: pure consumer of content.js's ytb:* events. Registered
-	// synchronously so the initial ytb:navigate (fired by content.js, loaded
-	// last) is received.
+	// Wiring: pure consumer of content.js's ytb:* events, registered
+	// synchronously so the first ytb:navigate (fired last) is received.
 	// ---------------------------------------------------------------------------
 
 	document.addEventListener('ytb:navigate', async (e) => {
@@ -724,15 +639,14 @@
 
 	document.addEventListener('ytb:mutation', () => {
 		if (!YTB.isContextActive()) return;
-		// The feed lazy-loaded more tiles (and/or the player finished building).
-		// Use the cached records — no re-GET. Re-apply the markers too, since the
-		// progress bar may have only just appeared after the last navigate.
+		// Feed lazy-loaded more tiles or the player finished building; use cached
+		// records (no re-GET), but re-apply markers in case the bar just appeared.
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	});
 
-	// The markers sit at bar px (#159), so a bar that changes width must re-place
-	// them. The thumbnail dots carry no bar geometry and are left alone.
+	// Markers sit at bar px (#159), so a width change must re-place them;
+	// thumbnail dots carry no bar geometry and are left alone.
 	for (const type of ['resize', 'fullscreenchange']) {
 		window.addEventListener(type, () => {
 			if (!YTB.isContextActive()) return;
@@ -748,18 +662,17 @@
 		renderThumbnails();
 	});
 
-	// A Buddy Color re-assignment. shared.js owns the one buddyColors storage
-	// listener and has already refreshed the cache when this rebroadcast fires
-	// (issue #115); repaint the markers and thumbnail bars from cached records.
+	// Buddy Color re-assignment; shared.js's listener already refreshed the
+	// cache by the time this fires (#115) — just repaint from cached records.
 	document.addEventListener('ytb:buddy-colors', () => {
 		if (!YTB.isContextActive()) return;
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();
 	});
 
-	// Live updates: re-GET every ~60s so a Buddy who joins or moves shows up (and
-	// arrival toasts fire) without a navigation. ~1 GET/min per open tab. Uses the
-	// same refreshToken guard so a poll can't clobber a fresher navigate render.
+	// Poll every ~60s so a Buddy joining/moving shows up without a navigation
+	// (~1 GET/min/tab); refreshToken guard stops a poll from clobbering a fresher
+	// navigate render.
 	pollTimer = setInterval(async () => {
 		if (!YTB.isContextActive()) return;
 		const token = ++refreshToken;

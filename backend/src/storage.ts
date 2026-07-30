@@ -1,23 +1,14 @@
 import { MAX_EVENTS, MAX_MEMBERS, TTL_SECONDS } from './constants';
 import type { Env } from './types';
 
-// Reports whether a Client ID may write into the Room. Returning members keep
-// their slot; a brand-new member needs the current distinct count to be below
-// MAX_MEMBERS. Membership is derived under the Code's prefix.
-// Every key kind reserves a slot: progress keys are
-// `${code}:${clientId}:${videoId}` (member id is the first segment), presence
-// keys are `${code}:presence:${clientId}`, note keys are
-// `${code}:note:${clientId}:${videoId}:${id}`, and reply keys are
-// `${code}:reply:${noteId}:${clientId}:${id}` (member id is the third segment)
-// — all readable from the key name alone. Caller input validation guarantees
-// these segments contain no delimiter and Client IDs cannot equal an infix.
-// Playlist keys
-// (`${code}:playlist:${videoId}`) and event keys (`${code}:event:${ts}:${id}`)
-// carry no member id, so those few values (<= 30 + ~50, both capped) are read
-// for their `addedBy` / `actorClientId` — keeping a locked-out 6th person from
-// curating the list. KV is eventually consistent with no transactions, so a
-// simultaneous-join race (or a >1000-key code whose listing truncates) can
-// momentarily admit a 6th member; acceptable for a friends-only weak-secret app.
+// Whether a Client ID may write into the Room: returning members keep their slot, a brand-new one needs the
+// distinct count below MAX_MEMBERS. Member id is readable from the key name alone (validation guarantees
+// segments never contain ':' and Client IDs never equal a reserved infix): first segment for progress
+// (`${code}:${clientId}:${videoId}`), second for presence/note (`${code}:presence|note:${clientId}:...`), third
+// for reply (`${code}:reply:${noteId}:${clientId}:${id}`). Playlist (`${code}:playlist:${videoId}`) and event
+// (`${code}:event:${ts}:${id}`) keys carry no member id, so those few (capped) values are read for
+// addedBy/actorClientId. KV's eventual consistency (no transactions) can momentarily admit a 6th member on a
+// race or truncated listing - acceptable for a friends-only weak-secret app.
 export async function roomHasCapacityFor(env: Env, prefix: string, clientId: string): Promise<boolean> {
 	const existing = await env.PROGRESS.list({ prefix });
 	const members = new Set<string>();
@@ -42,16 +33,10 @@ export async function roomHasCapacityFor(env: Env, prefix: string, clientId: str
 	return members.has(clientId) || members.size < MAX_MEMBERS;
 }
 
-// One Playlist Event backs one System Message in the Room Feed. Only
-// recommends are recorded — un-recommending emits nothing (ADR-0007) — and the
-// event captures the video's `title` at recommend time so the Feed line
-// survives the Playlist Item's later removal. The key embeds a zero-padded
-// millisecond timestamp so KV's lexicographic listing order is chronological;
-// the log keeps only the newest MAX_EVENTS, pruned best-effort from the front
-// on each write, and ages out on the shared TTL. The timestamp is bumped past
-// the newest existing event when two writes land in the same millisecond, so
-// sequential recommends always order correctly (best-effort under concurrency,
-// like every cap here).
+// One Playlist Event backs one Feed System Message; only recommends are recorded (un-recommending emits
+// nothing, ADR-0007), with title captured at recommend time so the Feed line survives later removal. The key's
+// zero-padded millisecond timestamp keeps KV's listing chronological (bumped past the last event to break
+// same-millisecond ties); the log keeps only the newest MAX_EVENTS, pruned best-effort on each write, sharing the TTL.
 export async function recordPlaylistEvent(env: Env, prefix: string, videoId: string, title: string, actorClientId: string): Promise<void> {
 	const eventPrefix = `${prefix}event:`;
 	const listing = await env.PROGRESS.list({ prefix: eventPrefix });
@@ -67,10 +52,8 @@ export async function recordPlaylistEvent(env: Env, prefix: string, videoId: str
 	}
 }
 
-// Walk a KV prefix listing to completion and collect every key name. Use this
-// when the names must all be in hand before acting on them — when the action
-// only streams (delete every match) prefer deleteKeysWithPrefix, which keeps a
-// single page in memory.
+// Walk a KV prefix listing to completion; use when every name must be in hand before acting (else prefer
+// deleteKeysWithPrefix, which streams one page at a time).
 export async function listAllKeyNames(env: Env, prefix: string): Promise<string[]> {
 	const names: string[] = [];
 	let cursor: string | undefined;
@@ -94,10 +77,8 @@ export async function deleteMember(env: Env, prefix: string, clientId: string): 
 	});
 	await Promise.all(ownNoteIds.map((noteId) => deleteKeysWithPrefix(env, `${prefix}reply:${noteId}:`)));
 
-	// Replies the member left under OTHER authors' Notes: the author sits in the
-	// third key segment (`reply:${noteId}:${clientId}:${id}`), so no value reads.
-	// The listing completes before any delete, so the scan never races its own
-	// mutations.
+	// Replies left under OTHER authors' Notes: author is the third key segment (`reply:${noteId}:${clientId}:${id}`),
+	// so no value reads; the listing completes before any delete, so the scan never races its own mutations.
 	const replyKeys = await listAllKeyNames(env, `${prefix}reply:`);
 	await Promise.all(
 		replyKeys.filter((name) => name.slice(prefix.length).split(':')[2] === clientId).map((name) => env.PROGRESS.delete(name)),

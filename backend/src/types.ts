@@ -42,8 +42,7 @@ export interface PlaylistBody {
 	title: string;
 }
 
-// Stable machine-readable error categories. The extension branches on these —
-// never on the prose in `error`.
+// Stable machine-readable error categories; the extension branches on these, never on error's prose.
 export type ErrorCategory =
 	'validation' | 'room_full' | 'reply_cap' | 'missing_parent' | 'forbidden' | 'not_allowed' | 'unexpected' | 'playlist_full';
 

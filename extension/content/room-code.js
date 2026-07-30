@@ -155,14 +155,7 @@ window.YTBRoomCode = (function () {
 
 	const feedbackTimers = new WeakMap();
 
-	/**
-	 * Copy `text` to the clipboard, flashing the feedback line and — when a copy
-	 * button is supplied — a checkmark on it. `button` is optional (the popup has
-	 * one; the plain feedback flow does not); `writeText` overrides the Clipboard
-	 * API in tests.
-	 * @param {{ text: string, feedback: { textContent: string, classList: { toggle(name: string, force: boolean): void, remove(name: string): void } }, button?: { classList: { toggle(name: string, force: boolean): void, remove(name: string): void } }, writeText?: (text: string) => Promise<void>, durationMs?: number }} options
-	 * @returns {Promise<boolean>}
-	 */
+	// Copies text to the clipboard, flashing feedback (and a checkmark on button, if given); writeText overrides the Clipboard API in tests.
 	async function copy({ text, feedback, button, writeText, durationMs = 1500 }) {
 		const previousTimer = feedbackTimers.get(feedback);
 		if (previousTimer) clearTimeout(previousTimer);

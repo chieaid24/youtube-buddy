@@ -1,30 +1,6 @@
-// extension/playlist-add.js
-//
-// The two Recommend Controls (the Recommended-for-you grid itself renders in
-// home-section.js; ADR-0007), sharing one vocabulary (see CONTEXT.md
-// "Recommend Control"):
-//   1. Watch page: a "Recommend to Buddies" pill appended to the actions row
-//      that holds Like/Share/Save — a self-owned sibling, apricot and visually
-//      distinct from YouTube's Save. On a video the viewer recommended it
-//      shows an "Unrecommend" toggle state — the action it offers, not the
-//      state it reports; clicking it un-recommends (the author-only point
-//      delete that removes the Recommendation for everyone). The pill is
-//      OPTIMISTIC (CONTEXT.md "Recommend Intent"): a click flips it at once —
-//      no "Recommending..." label, no disabled state — and only a failure
-//      moves it again, reverting to the true state with the reason in the
-//      transient feedback popover. The label is a state, never a message.
-//   2. Any thumbnail: a "Recommend to Buddies" row appended to the tile's
-//      three-dots menu, next to YouTube's own Save-to-playlist items.
-//
-// The kebab injection DELIBERATELY accepts YouTube-menu DOM fragility (an
-// explicit product decision — see issue #56 / ADR-0005 notes): the risk is
-// contained to this one module, hooked only through content.js's throttled
-// ytb:mutation events, and the watch-page pill stays a self-owned fallback.
-//
-// Pure consumer per ADR-0001. Only rendered/enabled while a Room Code is set
-// (an Unpaired install pairs via the popup or the Room Home Section first).
-// Adding is NOT gated by Sharing — curating the Room's list is an explicit
-// act, not position reporting.
+// The two Recommend Controls (grid renders in home-section.js; ADR-0007, CONTEXT.md "Recommend Control"): the watch-page pill
+// (optimistic Recommend Intent; toggles idle/"Unrecommend") and the thumbnail kebab-menu row (DOM fragility deliberately accepted, issue #56/ADR-0005).
+// Pure consumer per ADR-0001; enabled only with a Room Code set, and adding is NOT gated by Sharing.
 
 (function () {
 	'use strict';
@@ -34,48 +10,29 @@
 	const STYLE_ID = 'ytb-playlist-add-style';
 	const FEEDBACK_ID = 'ytb-playlist-feedback';
 	const FEEDBACK_MS = 2000;
-	// The invisible per-video click cooldown (CONTEXT.md "Recommend Intent"):
-	// clicks within this window of the last accepted one are silently ignored,
-	// with no dimming, no disabled attribute, no cursor change.
+	// Invisible per-video click cooldown (CONTEXT.md "Recommend Intent"): clicks within this window are silently ignored, no visual lockout.
 	const CLICK_COOLDOWN_MS = 1000;
-	// The Recommend Celebration (CONTEXT.md): on a member's own idle -> recommend
-	// click the pill shows "Recommended!" with a one-shot apricot confetti burst,
-	// then crossfades to the resting "Unrecommend" after this beat. Purely
-	// cosmetic — the optimistic flip underneath is unchanged.
+	// Recommend Celebration (CONTEXT.md): purely cosmetic "Recommended!" + confetti beat on idle -> recommend, then crossfades to "Unrecommend".
 	const CELEBRATION_MS = 1200;
 	const CELEBRATION_LABEL = 'Recommended!';
 	const CONFETTI_COUNT = 14;
 	const CONFETTI_COLORS = ['--ytb-accent-500', '--ytb-accent-600', '--ytb-accent-800'];
 
 	let currentVideoId = null;
-	// From ok ytb:room-data reads: videoId -> the recommending member's clientId
-	// (addedBy). Powers the pill's three states: absent = idle ("Recommend to
-	// Buddies"), mine = "Unrecommend" (click to un-recommend), a Buddy's =
-	// "Recommended to you". A failed read never rewrites it — emptiness is not
-	// truth (the renderer retains its caches the same way).
+	// videoId -> recommending member's clientId (addedBy), from ok ytb:room-data reads. A failed read never rewrites it — emptiness is not truth.
 	let recommenderByVideoId = new Map();
-	// The member's just-clicked, not-yet-confirmed Recommend Intents:
-	// videoId -> { intent: 'mine'|'absent', title }. Overlaid on every Room
-	// read by YTB.recommendPillState so a read that raced the write cannot flip
-	// the pill back; dropped when an ok read agrees (YTB.recommendIntentSettled)
-	// or when the write fails (the pill reverts).
+	// videoId -> { intent: 'mine'|'absent', title }: not-yet-confirmed Recommend Intents, overlaid on every Room read so a racing read can't flip the pill back.
 	const recommendIntents = new Map();
 	// videoId -> epoch ms of the last accepted pill click (the cooldown gate).
 	let lastPillClickAt = new Map();
-	// videoIds with a playlist write in flight — at most one per video; a
-	// toggle made mid-flight goes out as a single delta once the write settles.
+	// videoIds with a playlist write in flight — at most one per video; a mid-flight toggle goes out as a single delta once the write settles.
 	const writesInFlight = new Set();
 	let activeRoomCode = null; // a Room change orphans the old Room's intents
 	let myClientId = null;
 	let hasRoomCode = false;
 	let feedbackTimer = null;
-	// The tile whose kebab was last clicked; consumed when its menu popup opens.
-	let pendingKebab = null; // { videoId, title, at }
-	// The live Recommend Celebration on the watch pill, or null: fired ONLY from
-	// the local idle -> recommend click. Holds the settle timer and its confetti
-	// node so any exit (settle, failure revert, navigation, context loss) cuts it
-	// cleanly — no lingering "Recommended!" label or particles.
-	let celebration = null; // { videoId, timer, confetti }
+	let pendingKebab = null; // { videoId, title, at } of the last-clicked kebab, consumed when its menu popup opens
+	let celebration = null; // { videoId, timer, confetti } of the live Recommend Celebration, or null
 
 	injectStyle();
 
@@ -92,9 +49,7 @@
 		if (!YTB.isContextActive()) return { ok: false, category: 'unexpected' };
 		myClientId = myClientId || clientId;
 		const result = await YTB.postPlaylistAdd({ clientId, name, videoId, title });
-		// The server record is authoritative: re-recommending a video a Buddy
-		// already recommended is a no-op that returns THEIR item (addedBy stays
-		// theirs), so the pill must not claim it as ours.
+		// Server record is authoritative: re-recommending a Buddy's item is a no-op that returns THEIR item, so the pill must not claim it as ours.
 		if (result.ok) recommenderByVideoId.set(videoId, (result.item && result.item.addedBy) || clientId);
 		return result;
 	}
@@ -109,9 +64,7 @@
 			document.getElementById(BUTTON_ID)?.remove();
 			return;
 		}
-		// The row holding Like/Share/Save on the watch page. When Save hides
-		// under the "..." overflow, the pill still sits in the same row — an
-		// accepted open tuning point (see the issue's Further Notes).
+		// Row holding Like/Share/Save; pill stays here even when Save hides under "..." overflow (accepted open tuning point).
 		const actions = document.querySelector('ytd-watch-metadata #actions #top-level-buttons-computed');
 		if (!actions) return; // metadata not built yet — a later ytb:mutation retries
 
@@ -128,13 +81,9 @@
 				const now = Date.now();
 				if (now - (lastPillClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent — no visual lockout
 				lastPillClickAt.set(videoId, now);
-				// Optimistic: record the Recommend Intent and flip the pill NOW; the
-				// write goes out underneath (ADR-0007 un-recommend is the author-only
-				// point delete that removes the Recommendation for everyone).
+				// Optimistic: flip the pill NOW, write goes out underneath (ADR-0007 un-recommend is the author-only point delete).
 				recommendIntents.set(videoId, { intent: state === 'idle' ? 'mine' : 'absent', title: YTB.watchTitle(document) });
-				// Only the local idle -> recommend gesture celebrates (CONTEXT.md
-				// "Recommend Celebration"); un-recommend stays plain.
-				if (state === 'idle') startCelebration(button, videoId);
+				if (state === 'idle') startCelebration(button, videoId); // only idle -> recommend celebrates (CONTEXT.md "Recommend Celebration")
 				syncWatchButton(button);
 				pumpWrites(videoId);
 			});
@@ -149,8 +98,7 @@
 		recommended: 'Unrecommend', // mine — the action offered, click to un-recommend
 	};
 
-	/** The pill's text lives in its own span so the Recommend Celebration can
-	 * crossfade the label without touching the button's own opacity. */
+	// Pill text lives in its own span so the Recommend Celebration can crossfade the label without touching the button's own opacity.
 	function pillLabel(button) {
 		let label = button.querySelector('.ytb-pill-label');
 		if (!label) {
@@ -181,18 +129,13 @@
 
 	function syncWatchButton(button) {
 		const state = pillState();
-		// The celebration is a cosmetic overlay on the mine-state ONLY: any exit
-		// from 'recommended' — a failed write reverting to idle, or a Room read
-		// correcting to a Buddy's item — cuts it cleanly here.
+		// Celebration overlays the mine-state ONLY; any exit from 'recommended' cuts it cleanly here.
 		const celebrating = Boolean(celebration) && celebration.videoId === currentVideoId && state === 'recommended';
 		if (celebration && !celebrating) endCelebration();
 		setButtonState(button, state, celebrating);
 	}
 
-	// --- Recommend Celebration (CONTEXT.md): a purely cosmetic beat on the local
-	// idle -> recommend click. The optimistic flip happens regardless; this only
-	// overlays "Recommended!" + an apricot confetti burst, then crossfades to the
-	// resting "Unrecommend". ---
+	// --- Recommend Celebration (CONTEXT.md): purely cosmetic overlay on the local idle -> recommend click; the optimistic flip happens regardless. ---
 
 	function prefersReducedMotion() {
 		return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -213,8 +156,7 @@
 		celebration = null;
 	}
 
-	/** End of the beat: fade the "Recommended!" label out, swap to the resting
-	 * "Unrecommend", fade back in. Reduced motion (or no WAAPI) swaps instantly. */
+	// End of the beat: fade "Recommended!" out, swap to resting "Unrecommend", fade back in. Reduced motion (or no WAAPI) swaps instantly.
 	function crossfadeToResting(button, c) {
 		if (celebration !== c) return; // superseded or already cut
 		removeConfetti(c);
@@ -237,8 +179,7 @@
 			.catch(() => finish()); // a cancelled fade still lands on the resting label
 	}
 
-	/** One-shot apricot burst from the pill: fixed-positioned at its centre,
-	 * pointer-events none, transform/opacity only, self-removing. */
+	// One-shot apricot burst from the pill: fixed-positioned at its centre, pointer-events none, transform/opacity only, self-removing.
 	function spawnConfetti(button) {
 		const rect = button.getBoundingClientRect();
 		const box = document.createElement('div');
@@ -267,20 +208,14 @@
 		c.confetti = null;
 	}
 
-	/**
-	 * Drive one video's pending Recommend Intent to the backend: at most one
-	 * write in flight per videoId, re-examined when it settles, so a toggle
-	 * made mid-flight goes out as a single delta and a late response can never
-	 * overwrite a newer intent. A failed write drops the intent (the pill
-	 * reverts to the true state) and puts the reason in the feedback popover.
-	 */
+	// Drive one video's pending Recommend Intent to the backend: at most one write in flight per videoId, re-examined when it settles so a
+	// mid-flight toggle goes out as a single delta. A failed write drops the intent (pill reverts) and puts the reason in the feedback popover.
 	async function pumpWrites(videoId) {
 		if (writesInFlight.has(videoId)) return;
 		const held = recommendIntents.get(videoId);
 		if (!held) return;
 		const addedBy = recommenderByVideoId.get(videoId);
-		// The confirmed state already matches (a prior write landed): nothing to
-		// send. The intent stays held until an ok Room read agrees (ytb:room-data).
+		// Confirmed state already matches (a prior write landed): nothing to send; the intent stays held until an ok Room read agrees.
 		if (held.intent === 'mine' ? addedBy !== undefined : addedBy === undefined) return;
 		writesInFlight.add(videoId);
 		let result;
@@ -297,9 +232,7 @@
 			// The intent may have moved while this write flew; send the delta.
 			pumpWrites(videoId);
 		} else {
-			// Revert: a failed write leaves the true state exactly where it was —
-			// and if the member toggled mid-flight, that toggle asked for the
-			// pre-write state, so dropping the whole intent honors it too.
+			// Revert: dropping the intent leaves the true state as-is, which also honors a mid-flight toggle back to the pre-write state.
 			recommendIntents.delete(videoId);
 			showWriteFailure(videoId, held.intent, result.category);
 		}
@@ -315,8 +248,7 @@
 		showFeedback(button, message);
 	}
 
-	/** The transient feedback popover — the ONLY failure surface the pill owns.
-	 * The label itself is a state, never a message, so it is left alone here. */
+	// Transient feedback popover — the ONLY failure surface the pill owns; the label itself is a state, never a message.
 	function showFeedback(button, message) {
 		document.getElementById(FEEDBACK_ID)?.remove();
 		const feedback = document.createElement('span');
@@ -343,21 +275,16 @@
 	// ---------------------------------------------------------------------------
 	// Thumbnails: the "Recommend to Buddies" row in a tile's three-dots menu.
 	//
-	// Flow: a capture-phase click listener notices a click inside a tile's
-	// ytd-menu-renderer (the kebab) and remembers that tile's videoId + title;
-	// the menu popup itself is rendered later into a top-level
-	// tp-yt-iron-dropdown, so the next ytb:mutation injects our row into the
-	// open menu list and consumes the pending capture.
+	// Flow: a capture-phase click on a tile's kebab records its videoId + title;
+	// the menu popup renders later into a top-level tp-yt-iron-dropdown, so the
+	// next ytb:mutation injects our row into the open menu and consumes the capture.
 	//
 	// Two live menu generations (verified against real YouTube markup):
-	//   - classic tiles (ytd-video-renderer & co):
-	//       tp-yt-iron-dropdown > ytd-menu-popup-renderer > tp-yt-paper-listbox
-	//   - lockup tiles (yt-lockup-view-model — today's home grid + watch-related):
-	//       tp-yt-iron-dropdown > yt-sheet-view-model > yt-contextual-sheet-layout
-	//         > yt-list-view-model[role="menu"]
-	// YouTube reuses ONE dropdown node for successive popups, so an injected row
-	// must never outlive its menu: rows in a closed dropdown are removed, and a
-	// fresh capture replaces any row left from a previous tile.
+	//   - classic tiles: tp-yt-iron-dropdown > ytd-menu-popup-renderer > tp-yt-paper-listbox
+	//   - lockup tiles (yt-lockup-view-model): tp-yt-iron-dropdown > yt-sheet-view-model
+	//       > yt-contextual-sheet-layout > yt-list-view-model[role="menu"]
+	// YouTube reuses ONE dropdown node for successive popups, so an injected row must
+	// never outlive its menu (removed when closed; a fresh capture replaces stale rows).
 	// ---------------------------------------------------------------------------
 
 	const TILE_SELECTOR =
@@ -378,8 +305,7 @@
 		(event) => {
 			if (!YTB.isContextActive() || !hasRoomCode) return;
 			const target = event.target instanceof Element ? event.target : null;
-			// The kebab lives in a ytd-menu-renderer (classic tiles) or a
-			// button-shape with an "options/more" aria label (lockup tiles).
+			// The kebab: a ytd-menu-renderer (classic tiles) or an options/more button (lockup tiles).
 			const trigger = target && (target.closest('ytd-menu-renderer') || target.closest('yt-icon-button, button'));
 			if (!trigger) return;
 			const tile = trigger.closest(TILE_SELECTOR);
@@ -387,9 +313,7 @@
 			const anchor = tile.querySelector('a[href*="/watch?v="]');
 			const videoId = anchor && videoIdFromHref(anchor.getAttribute('href'));
 			if (!videoId) return;
-			// Lockup tiles carry the clean title on .ytLockupMetadataViewModelTitle
-			// (the older -wiz__ spelling is kept for stragglers); classic tiles on
-			// #video-title. Any other a[title] is a last-resort fallback only.
+			// Lockup tiles: .ytLockupMetadataViewModelTitle (-wiz__ kept for stragglers); classic tiles: #video-title; else a[title] fallback.
 			const titleEl =
 				tile.querySelector('#video-title, .ytLockupMetadataViewModelTitle, .yt-lockup-metadata-view-model-wiz__title') ||
 				tile.querySelector('a[title]');
@@ -399,25 +323,20 @@
 		true,
 	);
 
-	/** The list element of the currently open tile menu, across both menu
-	 * generations, or null while no menu is open. */
+	// The list element of the currently open tile menu, across both menu generations, or null while no menu is open.
 	function openMenuList() {
 		for (const dropdown of document.querySelectorAll('tp-yt-iron-dropdown:not([aria-hidden="true"])')) {
 			if (dropdown.style.display === 'none') continue; // closed but not yet re-hidden
-			// Classic tiles: the paper listbox inside the menu popup renderer.
-			const popup = dropdown.querySelector('ytd-menu-popup-renderer');
+			const popup = dropdown.querySelector('ytd-menu-popup-renderer'); // classic tiles
 			if (popup) return popup.querySelector('tp-yt-paper-listbox') || popup;
-			// Lockup tiles: the sheet's list view model.
-			const sheet = dropdown.querySelector('yt-sheet-view-model');
+			const sheet = dropdown.querySelector('yt-sheet-view-model'); // lockup tiles
 			if (sheet) return sheet.querySelector('yt-list-view-model') || sheet;
 		}
 		return null;
 	}
 
 	function syncKebabMenu() {
-		// A row must never outlive its menu: YouTube reuses one dropdown node for
-		// every popup, so a survivor would resurface under the wrong menu (another
-		// tile's, or an unrelated popup's) and recommend the wrong video.
+		// A row must never outlive its menu: YouTube reuses one dropdown node per popup, so a survivor could resurface under the wrong menu.
 		for (const row of document.querySelectorAll('.' + KEBAB_ITEM_CLASS)) {
 			const host = row.closest('tp-yt-iron-dropdown');
 			if (!host || host.getAttribute('aria-hidden') === 'true' || host.style.display === 'none') row.remove();
@@ -477,12 +396,8 @@
 		fitOpenMenu(item);
 	}
 
-	/** After the row lands in an open menu, the popup must show it WITHOUT the
-	 * user scrolling — in both menu generations. YouTube sizes the popup before
-	 * the row exists, so any inline pixel max-height between the row and its
-	 * dropdown is now one row short: grow each by the row's height, then let
-	 * the dropdown re-measure and re-position itself (iron-dropdown's refit)
-	 * in case the taller menu would overflow the viewport. */
+	// The popup must show the new row without scrolling: YouTube sized it before the row existed, so grow any inline max-height by the
+	// row's height and let the dropdown refit itself in case the taller menu would overflow the viewport.
 	function fitOpenMenu(item) {
 		const dropdown = item.closest('tp-yt-iron-dropdown');
 		if (!dropdown) return;
@@ -544,8 +459,7 @@
 		}
 		if (detail.ok) {
 			recommenderByVideoId = new Map((detail.playlist || []).map((item) => [item.videoId, item.addedBy]));
-			// Drop each Recommend Intent this read agrees with; the rest keep
-			// overlaying (a read that raced the write is not the truth yet).
+			// Drop each Recommend Intent this read agrees with; the rest keep overlaying.
 			for (const [videoId, held] of recommendIntents) {
 				if (YTB.recommendIntentSettled({ addedBy: recommenderByVideoId.get(videoId), myClientId, pending: held.intent })) {
 					recommendIntents.delete(videoId);
@@ -571,17 +485,13 @@
 		for (const item of document.querySelectorAll('.' + KEBAB_ITEM_CLASS)) item.remove();
 	});
 
-	/** Inject the styles once: apricot pill + menu row, quirky on purpose. */
+	// Inject the styles once: apricot pill + menu row, quirky on purpose.
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
-      /* The pill consumes the shared --ytb-* tokens like every sibling YTB
-       * surface (UA-010): the design face, theme-aware accent roles, and the
-       * r-pill radius. A transparent border keeps the label inset identical
-       * across the filled and outline states. 14px matches YouTube's actions
-       * row on purpose. */
+      /* Shared --ytb-* tokens like every sibling YTB surface (UA-010); transparent border keeps the label inset identical across states. */
       #${BUTTON_ID} {
         margin-left: 8px;
         padding: 0 16px;
@@ -598,25 +508,15 @@
       #${BUTTON_ID}:hover { background: var(--ytb-accent-600, #e88b45); }
       #${BUTTON_ID}:active { transform: scale(0.97); }
       #${BUTTON_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring, rgba(246, 169, 107, 0.55)); }
-      /* Outline states read as text on the page itself: the raw apricot fill
-       * misses AA there (1.94:1 on a light page), so they use the deep
-       * accent-800 text role, which flips bright on the dark theme (UA-002). */
+      /* Outline states use accent-800 text: raw apricot fill misses AA on the page (1.94:1), and accent-800 flips bright on dark theme (UA-002). */
       #${BUTTON_ID}.is-added { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); cursor: default; line-height: 34px; }
       #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); line-height: 34px; }
       #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
-      /* Recommend Celebration (CONTEXT.md): during the beat the pill fills apricot
-       * again for a celebratory pop, then transitions back to the outline resting
-       * state via the button's own background transition. */
       #${BUTTON_ID} .ytb-pill-label { display: inline-block; }
-      /* The :hover variant is load-bearing: the resting mine-state's
-       * .is-recommended:hover outranks a single-class .is-celebrating, so without
-       * it a hovered pill (every mouse click leaves the pointer here) would keep
-       * the outline look and hide the dark celebration label. */
+      /* :hover variant is load-bearing: .is-recommended:hover otherwise outranks single-class .is-celebrating and hides the celebration label. */
       #${BUTTON_ID}.is-celebrating,
       #${BUTTON_ID}.is-celebrating:hover { background: var(--ytb-accent-500, #f6a96b); border-color: transparent; color: var(--ytb-on-accent, #3a2e28); }
-      /* The apricot burst: a fixed, non-interactive layer at the pill's centre,
-       * animating transform/opacity only, particles tinted from the --ytb-* tokens
-       * (theme.js) and fully removed when the beat ends. */
+      /* Apricot burst: fixed, non-interactive, transform/opacity only, tinted from --ytb-* tokens, removed when the beat ends. */
       .ytb-recommend-confetti { position: fixed; z-index: 2147483646; width: 0; height: 0; pointer-events: none; }
       .ytb-recommend-confetti > span {
         position: absolute;

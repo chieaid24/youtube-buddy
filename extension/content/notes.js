@@ -1,53 +1,19 @@
 // extension/notes.js
 //
-// ALL Note & Reaction presentation on the watch page:
-//   - Video Timeline dots (text Notes, Reactions, locked Spoilers) floating
-//     just above the progress bar, each at the exact x YouTube would draw its
-//     own playhead at for that timestamp (chapter-aware, #159) —
-//     co-timed dots simply overlap, and every dot swallows the pointer events
-//     it receives so YouTube never pops its storyboard thumbnail or time pill
-//     behind a Note Preview;
-//   - hover/focus Note Previews (two-line body, author beneath, Reply count,
-//     corner timestamp) reachable across a transparent hover bridge;
-//   - the Expanded Note: a pinned panel opened by clicking ANY Note Dot or Note
-//     Preview (text, Reaction, or locked Spoiler) — activation never seeks. It
-//     has three variants: a text Note's full conversation (Replies, a Reply
-//     composer with paper-plane send, the author-only delete), a Reaction's
-//     read-only emoji + author, and a locked Spoiler's masked "Spoiler" body
-//     (no conversation, composer, or delete until it unlocks). Every variant
-//     pins the Note's video timestamp in its top-right corner and offers the
-//     one "Go here" seek-and-play control — omitted when the paused playhead is
-//     already within ~2s of the moment;
-//   - Playback Notifications: note cards (~4s, clickable) and animated
-//     Reaction bursts (~2s, non-interactive), fired by TWO triggers — a NATURAL
-//     forward crossing (rewind-and-replay triggers again, direct seeks stay
-//     silent) and a Post Echo (the author's own record, the instant they post
-//     it, with no playback required). They render at the viewer's Notification
-//     Position (one of four player edges, default bottom; live via
-//     chrome.storage.onChanged).
-//   - Unseen pulses (ADR-0010): a Note Dot carrying an Unseen Mention or
-//     Reply pulses an apricot halo until Acknowledged — by hovering the dot,
-//     opening its Expanded Note, or a natural forward crossing. The derivation
-//     is pure (YTB.unseenNoteIds / YTB.acknowledgeTargets); the seen set is
-//     private, per install, Room-scoped chrome.storage.local (YTB.markSeen /
-//     YTB.pruneSeen) and never reaches the backend.
-//   - Notes Visibility ("Notes off"): while the notesHidden setting is on,
-//     this file renders NOTHING — no dots, previews, panels, or Playback
-//     Notifications (composer.js removes the + button) — and Acknowledges
-//     nothing — updating live.
+// ALL Note/Reaction presentation on the watch page: Video Timeline dots,
+// hover Note Previews, the Expanded Note panel (text/Reaction/locked-Spoiler
+// variants), Playback Notifications (natural crossing + Post Echo triggers),
+// and Unseen pulses (ADR-0010) - see CONTEXT.md for the full behavior spec.
+// Renders and Acknowledges nothing while Notes Visibility is off.
 //
-// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
-// by theme.js (the shared on-video apricot foundation); theme.js also isolates
-// keystrokes in the Reply textarea from YouTube's player hotkeys by swallowing
-// real key events and re-dispatching `ytb:keydown` (detail.original carries
-// the key state), which the Reply composer listens for below.
+// Styling consumes the --ytb-* tokens theme.js injects; theme.js also
+// isolates Reply-textarea keystrokes from YouTube's hotkeys, re-dispatched
+// as `ytb:keydown` (listened for below).
 //
-// Pure consumer per ADR-0001: content.js owns navigation/mutation events and
-// renderer.js owns Room polling (rebroadcast here as `ytb:room-data`). The only
-// network traffic originating here is the focused conversation poll (every 5s
-// WHILE an Expanded Note is open) and Reply/delete writes. composer.js hands
-// freshly posted records over via `ytb:note-posted` so the current Video
-// Timeline reconciles immediately, without waiting for any poll.
+// Pure consumer per ADR-0001: content.js owns navigation/mutation events,
+// renderer.js owns Room polling (rebroadcast here as `ytb:room-data`);
+// composer.js hands freshly posted records via `ytb:note-posted` so the
+// Video Timeline reconciles immediately without waiting for a poll.
 
 (function () {
 	'use strict';
@@ -62,14 +28,12 @@
 	const CLUSTER_CLASS = 'ytb-dot-cluster'; // wrapper owning a Cluster's hover/fan (#123)
 	const CLUSTER_PINNED_CLASS = 'ytb-dot-cluster-pinned'; // stays fanned while its Note's panel is open
 	const TOOLTIP_SUPPRESSED_CLASS = 'ytb-note-tooltip-suppressed'; // hides YouTube's stale storyboard while a Cluster is hovered
-	// The Note Band's geometry (#173) — dot lift, glyph, hit extender, and
-	// the Expanded Note's clearance all live in shared.js so the pure helpers
-	// (dotHitReaches, panelBarClearance) derive from the same numbers this
-	// file styles with.
+	// Note Band geometry (#173) lives in shared.js so dotHitReaches/panelBarClearance
+	// derive from the same numbers this file styles with.
 	const BAND = YTB.NOTE_BAND;
-	const DOT_DIAMETER = BAND.dotDiameter; // px — matches the .ytb-note-dot circle; drives clustering + clamp
+	const DOT_DIAMETER = BAND.dotDiameter; // px - matches the .ytb-note-dot circle; drives clustering + clamp
 	const LAYOUT_UNITS_PER_PX = 64; // Chromium's subpixel layout grid
-	const CLUSTER_FAN_GAP = 14; // px — the Fan Gap's IDEAL; it shrinks toward DOT_DIAMETER on a crowded bar
+	const CLUSTER_FAN_GAP = 14; // px - the Fan Gap's IDEAL; it shrinks toward DOT_DIAMETER on a crowded bar
 	const UNSEEN_RING_GAP = '#0f0f0f'; // separates the reduced-motion Unseen ring from the Buddy-colored fill (UA-026)
 	const PREVIEW_CLASS = 'ytb-note-preview';
 	const PANEL_ID = 'ytb-note-panel';
@@ -78,12 +42,9 @@
 
 	const CONVERSATION_POLL_MS = 5000; // focused Expanded Note freshness
 	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
-	// Playback Notification lifetimes are the shared client seam's rule, keyed on
-	// kind AND trigger (YTB.notificationLifetime): a Post Echo lives half a
-	// crossing's. This file is the executor — it applies the number, never picks it.
 	// Concurrent crossings enter one-per-beat on this stagger, in timestamp order,
-	// instead of all at once — a staggered entrance, not serialization (each
-	// notification's own lifetime still starts at its own entrance).
+	// instead of all at once (each notification's own lifetime still starts at
+	// its own entrance); lifetimes themselves come from YTB.notificationLifetime.
 	const ENTRANCE_STAGGER_MS = 100;
 	// Steps larger than this between timeupdates are seeks, not playback.
 	const NATURAL_DELTA_SECONDS = 2;
@@ -96,20 +57,18 @@
 	let roster = []; // full Room roster (incl. me), for Room-unique Buddy labels
 	let currentVideoId = null;
 	let lastPlaybackTime = null; // previous timeupdate, for natural crossings
-	// Crossed Notes wait here and drain one-per-beat (ENTRANCE_STAGGER_MS); the
-	// timer is non-null exactly while a drain is in flight.
+	// Crossed Notes drain one-per-beat (ENTRANCE_STAGGER_MS); timer is non-null
+	// exactly while a drain is in flight.
 	let alertQueue = [];
 	let alertDrainTimer = null;
-	// Unseen state (ADR-0010). `seenSet` mirrors the Room's persisted seen list
-	// (loaded + pruned on each Room read); `unseenDotIds` is the derived set of
-	// Note ids whose dots pulse, kept synchronous so renderDots (which runs on
-	// every timeupdate) never awaits storage.
+	// Unseen state (ADR-0010): seenSet mirrors the Room's persisted seen list
+	// (loaded/pruned each Room read); unseenDotIds is the derived pulse set, kept
+	// synchronous so renderDots (runs every timeupdate) never awaits storage.
 	let seenSet = new Set();
 	let unseenDotIds = new Set();
 
-	// Expanded Note state. `pauseLease` records whether OPENING (the first panel
-	// in a chain of replacements) paused a playing video: an outside dismissal
-	// then resumes; a video that was already paused stays paused.
+	// Expanded Note state. pauseLease: true iff OPENING (the first panel in a
+	// chain of replacements) paused a playing video, so dismissal knows to resume.
 	let openNote = null;
 	let pauseLease = false;
 	let panelPressOrigin = 'elsewhere'; // capture-time origin for the next click (ADR-0011)
@@ -117,23 +76,19 @@
 	let labelTimer = null;
 	let pendingReply = false;
 	let pendingDelete = false;
-	// A Room Feed reply/mention row (home-section.js) recorded the video to pause
-	// on arrival (ADR-0010); consumed on the first Room read for that video, which
-	// pauses the player only if an Unseen dot is on it. Loaded once (covers a full
-	// reload) and mirrored live from storage (covers SPA nav, where this script
-	// stays alive) — see below.
+	// A Room Feed row (home-section.js) may record a video to pause on arrival
+	// (ADR-0010), consumed on that video's first Room read iff an Unseen dot is
+	// on it. Loaded once (full reload) and mirrored live from storage (SPA nav).
 	let pendingArrival = null;
 	// Settings (live via chrome.storage.onChanged below).
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
 	let notificationPosition = 'bottom'; // Playback Notification edge
 
-	// Controls Hold state (CONTEXT.md): while a Note surface is engaged,
-	// YouTube's chrome must not autohide — the dots swallow the pointer events
-	// that would keep it awake, so YTB.controlsHold (the shared refcount)
-	// re-feeds YouTube's timer instead. Hover/focus holds are keyed by the
-	// Cluster wrapper that took them, so a wrapper that leaves the DOM without
-	// its mouseleave/focusout (a re-render, or YouTube rebuilding the bar) can
-	// never leak one: sweepControlsHolds releases any disconnected key.
+	// Controls Hold state (CONTEXT.md): dots swallow the pointer events that would
+	// keep YouTube's chrome awake, so YTB.controlsHold re-feeds its timer instead
+	// while a Note surface is engaged. Holds are keyed by Cluster wrapper;
+	// sweepControlsHolds releases any wrapper that left the DOM without firing
+	// mouseleave/focusout, so a hold can never leak.
 	const holdBySurface = new Map(); // wrapper Element -> { hover: release|null, focus: release|null }
 	let panelHoldRelease = null; // teardown for the Expanded Note's hover-scoped hold
 
@@ -146,9 +101,8 @@
 	});
 
 	// Read any arrival a Room Feed row left before this script (re)loaded; the
-	// decision (pause iff an Unseen dot is on this video) runs once its Room read
-	// lands. On SPA nav this script never reloads, so the onChanged mirror below
-	// picks up the write instead.
+	// decision runs once that video's Room read lands. SPA nav never reloads
+	// this script, so the onChanged mirror below picks up the write instead.
 	YTB.getPendingArrival().then((arrival) => {
 		pendingArrival = arrival;
 	});
@@ -172,9 +126,8 @@
 		}
 		if ('pendingArrival' in changes) {
 			const next = changes.pendingArrival.newValue;
+			// Mirror only; the decision waits for this video's Room read (below).
 			pendingArrival = next && next.videoId ? next : null;
-			// The decision waits for this video's Room read (below); here we only
-			// mirror the write so it survives the SPA navigation about to happen.
 		}
 	});
 
@@ -217,8 +170,7 @@
 	// ---------------------------------------------------------------------------
 
 	/** The Room read shape the pure Unseen helpers take, rebuilt from the maps so
-	 * local appends (ytb:note-posted, appendLocalReply, conversation polls) are
-	 * reflected without waiting for the next Room poll. */
+	 * local appends reflect immediately without waiting for the next Room poll. */
 	function currentRecords() {
 		return {
 			notes: [...notesByVideoId.values()].flat(),
@@ -231,13 +183,9 @@
 		unseenDotIds = myClientId ? new Set(YTB.unseenNoteIds(currentRecords(), myClientId, seenSet)) : new Set();
 	}
 
-	/**
-	 * Reload (and prune) the Room's persisted seen set after a Room read, then
-	 * derive the pulse set. Pruning only follows a SUCCESSFUL read — a failed
-	 * GET broadcasts empty arrays, and pruning against those would wipe the set
-	 * and resurrect every Acknowledged pulse. An open Expanded Note Acknowledges
-	 * anything the read just added beneath it: its conversation is on screen.
-	 */
+	// Reload (and prune) the seen set after a Room read, then derive the pulse
+	// set. Pruning only follows a SUCCESSFUL read, since a failed GET's empty
+	// arrays would otherwise resurrect every Acknowledged pulse.
 	async function syncSeenState(detail) {
 		const code = activeRoomCode;
 		if (!code || !myClientId) {
@@ -263,13 +211,8 @@
 		tryPendingArrival(); // arrival pause depends on the Unseen set just computed
 	}
 
-	/**
-	 * Acknowledge one Note Dot: clear EVERY Unseen item anchored to it at once —
-	 * the Mention and all Unseen Replies beneath it — and stop its pulse for
-	 * good. Idempotent and cheap on a dot with nothing Unseen (the common case:
-	 * every hover and crossing routes through here). While Notes Visibility is
-	 * off nothing renders and nothing is Acknowledged.
-	 */
+	// Acknowledge one Note Dot: clears every Unseen item anchored to it (the
+	// Mention and all Unseen Replies) at once and stops its pulse for good.
 	function acknowledgeDot(noteId) {
 		if (notesHidden || !noteId || !unseenDotIds.has(noteId)) return;
 		const ids = YTB.acknowledgeTargets(currentRecords(), myClientId, noteId);
@@ -280,9 +223,8 @@
 		renderDots();
 	}
 
-	/** Does the current video carry at least one Unseen (pulsing) Note Dot? The
-	 * arrival pause is conditional on exactly this (ADR-0010): unseenDotIds is
-	 * Room-wide, so scope it to the notes on this video before deciding. */
+	/** Does the current video carry an Unseen dot? unseenDotIds is Room-wide, so
+	 * this scopes it to the current video's notes before the arrival-pause decision. */
 	function hasUnseenDotOnCurrentVideo() {
 		for (const note of notesForCurrentVideo()) {
 			if (unseenDotIds.has(note.id)) return true;
@@ -290,16 +232,11 @@
 		return false;
 	}
 
-	/**
-	 * A Room Feed row navigated us here asking to pause on arrival IF there is
-	 * something Unseen to look at (ADR-0010). Runs after each Room read's Unseen
-	 * recompute. On the target video this is our arrival: consume the one-shot
-	 * handshake now (whether or not we pause, so it never fires on a later visit),
-	 * then pause — holding through autoplay's settling `play` — only when Notes are
-	 * visible AND a dot on this video is Unseen. Otherwise nothing happens: never
-	 * seize the player with nothing pulsing, never override Notes Visibility. A
-	 * stale (expired) or other-video handshake is left/dropped until it expires.
-	 */
+	// A Room Feed row asked to pause on arrival IF something is Unseen (ADR-0010).
+	// On the target video, consume the one-shot handshake now regardless of the
+	// outcome (so it never refires on a later visit), then pause only when Notes
+	// are visible AND a dot on this video is Unseen. A stale or other-video
+	// handshake is left/dropped until it expires.
 	function tryPendingArrival() {
 		const arrival = pendingArrival;
 		if (!arrival) return;
@@ -324,13 +261,9 @@
 		YTB.clearPendingArrival();
 	}
 
-	// A Buddy Color re-assignment (issue #115): shared.js owns the one
-	// buddyColors storage listener and has already refreshed the cache when its
-	// ytb:buddy-colors rebroadcast fires. renderDots repaints every dot and —
-	// through the color-aware signature — rebuilds their Note Previews. The open
-	// Expanded Note is separate DOM renderDots never touches: restyle its
-	// stamped author spans in place, so the panel stays open with its scroll
-	// position and pause lease intact and no conversation read is issued.
+	// Buddy Color re-assignment (issue #115): renderDots repaints dots + Previews;
+	// the open Expanded Note is separate DOM renderDots never touches, so restyle
+	// its stamped author spans in place (keeps scroll position and pause lease).
 	document.addEventListener('ytb:buddy-colors', () => {
 		renderDots();
 		const panel = document.getElementById(PANEL_ID);
@@ -340,9 +273,8 @@
 		}
 	});
 
-	// composer.js posted a Note/Reaction: insert the complete server record into
-	// the active Video Timeline immediately — no waiting for the 60s Room poll —
-	// then fire its Post Echo.
+	// composer.js posted a Note/Reaction: insert the record into the Video
+	// Timeline immediately (no waiting for the 60s Room poll), then fire its Post Echo.
 	document.addEventListener('ytb:note-posted', (event) => {
 		const note = event.detail && event.detail.note;
 		if (!note || !note.id || !note.videoId) return;
@@ -354,23 +286,13 @@
 		postEcho(note);
 	});
 
-	/**
-	 * Post Echo: the author fires their own record's Playback Notification the
-	 * instant it is posted — the same card or burst a Buddy gets, in the same
-	 * container and stagger. A write receipt, and a preview of what the Room will
-	 * see. It is the SECOND Playback Notification trigger (the first is a natural
-	 * forward crossing) and it does NOT depend on playback: the composer pauses on
-	 * open, so posting from a paused player is the common case.
-	 *
-	 * Firing rebases the crossing window past the Note's own timestamp, so the
-	 * composer's lease-aware resume cannot replay the same notification a beat
-	 * later — the echo fires exactly once. Ordinary crossing behavior is otherwise
-	 * untouched: rewinding and replaying across the moment fires it again, like
-	 * any other Note.
-	 */
+	// Post Echo: the author's own Playback Notification, fired the instant they
+	// post - the second trigger alongside a natural forward crossing, and
+	// independent of playback. Rebases the crossing window past the Note's own
+	// timestamp so the composer's lease-aware resume can't replay it.
 	function postEcho(note) {
-		// Notes off renders nothing, the echo included (composer.js removes the +
-		// button then, so this is a guard, not a path).
+		// Notes off renders nothing, the echo included (composer.js already
+		// removed the + button, so this is a guard, not a live path).
 		if (notesHidden || note.videoId !== currentVideoId) return;
 		const timestamp = Number(note.timestamp);
 		if (Number.isFinite(timestamp)) {
@@ -401,7 +323,7 @@
 		sweepControlsHolds(); // a wrapper YouTube detached must not hold the chrome awake
 		const bar = document.querySelector('.ytp-progress-bar');
 		const video = document.querySelector('video');
-		if (!bar) return; // player not built yet — a later ytb:mutation retries
+		if (!bar) return; // player not built yet - a later ytb:mutation retries
 
 		const duration = video ? Number(video.duration) : NaN;
 		const playhead = video ? Number(video.currentTime) : 0;
@@ -423,7 +345,7 @@
 			}
 		}
 
-		// Index every existing dot by id — a dot lives under a Cluster wrapper now,
+		// Index every existing dot by id - a dot lives under a Cluster wrapper now,
 		// so search the whole bar, not just its direct children.
 		const existing = new Map();
 		for (const dot of bar.querySelectorAll('.' + DOT_CLASS)) {
@@ -440,11 +362,9 @@
 		}
 		if (getComputedStyle(bar).position === 'static') bar.style.position = 'relative';
 
-		// Each dot's exact moment on the bar, through YouTube's own chapter geometry
-		// (#159) — re-measured every render, so chapters that arrive late, a resize,
-		// and theater/fullscreen all re-align the dots. Never displaced at rest:
-		// co-timed dots overlap and fan apart only on hover (truth of position beats
-		// legibility).
+		// Each dot's exact moment through YouTube's own chapter geometry (#159),
+		// re-measured every render so late chapters/resize/fullscreen re-align them.
+		// Never displaced at rest: co-timed dots overlap, fanning apart only on hover.
 		const ids = [...desired.keys()];
 		const barWidth = bar.getBoundingClientRect().width || 0;
 		const segments = YTB.barSegments(bar);
@@ -452,11 +372,9 @@
 			(id) => Math.round(YTB.timeToX(segments, desired.get(id).timestamp, duration) * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX,
 		);
 
-		// Solve the fan for the WHOLE bar in one go (#162): every dot lands as close
-		// to its true moment as the Fan Gap allows, so a dot with room does not move
-		// and no fanned dot can reach a dot at rest elsewhere. A Cluster is what that
-		// constraint chains together. Recomputed every render, so the fan re-solves
-		// as the bar resizes (timeupdate/mutation/resize all re-enter here).
+		// Solve the fan for the WHOLE bar in one go (#162): every dot stays as close
+		// to its true moment as the Fan Gap allows, so a fanned dot can never reach
+		// one at rest elsewhere. Recomputed every render as the bar resizes.
 		const { clusters, offsets } = YTB.solveDotFan(px, {
 			idealGap: CLUSTER_FAN_GAP,
 			barWidth,
@@ -465,10 +383,9 @@
 
 		const hitReaches = YTB.dotHitReaches(px, BAND.dotDiameter, BAND.hitMaxSideReach);
 
-		// Reconcile Cluster wrappers keyed by their exact membership. A steady poll
-		// (unchanged membership) reuses each wrapper and never re-parents a dot,
-		// which would restart its Unseen pulse; a Note added or removed rebuilds
-		// only the affected wrapper and moves surviving dots into it.
+		// Reconcile Cluster wrappers keyed by exact membership: a steady poll reuses
+		// each wrapper (re-parenting a dot would restart its Unseen pulse), and only
+		// a Note added/removed rebuilds the affected wrapper.
 		const byKey = new Map();
 		for (const wrapper of bar.querySelectorAll('.' + CLUSTER_CLASS)) byKey.set(wrapper.dataset.ytbClusterKey, wrapper);
 		const wanted = new Set();
@@ -484,30 +401,24 @@
 				wrapper = document.createElement('div');
 				wrapper.className = CLUSTER_CLASS;
 				wrapper.dataset.ytbClusterKey = key;
-				// Swallow the press/hover family over the keeper (the gaps the fan
-				// opens) exactly as the dots do, so YouTube pops no storyboard or
-				// time pill behind the fan. Harmless at rest: the wrapper is
-				// pointer-events:none there and receives none of these.
+				// Swallow press/hover over the keeper (the fan's gaps) like the dots do,
+				// so YouTube pops no storyboard/time pill behind the fan; harmless at
+				// rest since the wrapper is pointer-events:none there.
 				for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
 					wrapper.addEventListener(type, (e) => e.stopPropagation());
 				}
-				// YouTube may already have shown its storyboard while the pointer
-				// crossed the scrubber on the way to this wrapper. Hide that stale
-				// tooltip for the entire fanned hover band, then restore normal
-				// scrubbing the instant the pointer leaves it.
+				// Hide any storyboard tooltip YouTube already showed crossing the
+				// scrubber en route, for the whole fanned hover band; restore on leave.
 				wrapper.addEventListener('mouseenter', () => setStoryboardSuppressed(wrapper, true));
 				wrapper.addEventListener('mouseleave', () => setStoryboardSuppressed(wrapper, false));
-				// Hover or keyboard focus anywhere in this wrapper (its dots and
-				// their Note Previews included) takes a Controls Hold: the swallowed
-				// pointer activity is fed back to the player, so the timeline never
-				// fades out from under a hovering hand.
+				// Hover/keyboard focus anywhere in the wrapper (dots + Previews) takes a
+				// Controls Hold, feeding the swallowed pointer activity back to the player.
 				bindControlsHold(wrapper);
 				bar.appendChild(wrapper);
 			}
-			// The wrapper anchors at the Cluster centre in bar px (chapter geometry
-			// has no fixed percentage to lean on); each member sits at its true px
-			// offset from that centre, and the fan is a hover-only transform layered
-			// on top. Every render re-measures, so a resize re-anchors it.
+			// Anchors at the Cluster centre in bar px (chapter geometry has no fixed
+			// percentage to lean on); members sit at their true px offset from that
+			// centre, with the fan as a hover-only transform on top.
 			const center = Math.round(((memberPx[0] + memberPx[memberPx.length - 1]) / 2) * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX;
 			wrapper.style.left = center + 'px';
 
@@ -552,15 +463,9 @@
 		if (player) player.classList.toggle(TOOLTIP_SUPPRESSED_CLASS, suppressed);
 	}
 
-	/**
-	 * Controls Hold wiring for one Cluster wrapper. The wrapper subtree contains
-	 * its Note Dots and their Note Previews (a preview is a dot's child), and
-	 * mouseenter/mouseleave + focusin/focusout are delivered for the whole
-	 * subtree, so this ONE binding covers every hover/keyboard-focus engagement
-	 * the issue names — dot, Cluster, and preview alike. Pointer and keyboard
-	 * contribute independently (a dot can be hovered AND focused); each side
-	 * holds at most one acquire at a time.
-	 */
+	// Controls Hold wiring for one Cluster wrapper: mouseenter/leave and
+	// focusin/out bubble from the whole subtree (dots + Previews), so this one
+	// binding covers every engagement; pointer and keyboard hold independently.
 	function bindControlsHold(wrapper) {
 		const holds = { hover: null, focus: null };
 		holdBySurface.set(wrapper, holds);
@@ -589,13 +494,9 @@
 		holdBySurface.delete(wrapper);
 	}
 
-	/**
-	 * Release the holds of wrappers that left the DOM without their
-	 * mouseleave/focusout ever firing (YouTube rebuilt the bar, or navigation
-	 * dropped it wholesale). Runs on every renderDots pass — timeupdate,
-	 * mutation, resize — so a leaked hold lives one render at most and the
-	 * chrome can never stay pinned awake.
-	 */
+	// Release holds of wrappers that left the DOM without firing mouseleave/
+	// focusout (YouTube rebuilt the bar, or navigation dropped it). Runs every
+	// renderDots pass, so a leaked hold lives one render at most.
 	function sweepControlsHolds() {
 		for (const wrapper of [...holdBySurface.keys()]) {
 			if (!wrapper.isConnected) releaseControlsHolds(wrapper);
@@ -610,12 +511,9 @@
 		dot.dataset.ytbNoteId = id;
 		const preview = dot.appendChild(document.createElement('div'));
 		preview.className = PREVIEW_CLASS;
-		// Never let the player interpret a dot press as a seek. Clicking the dot OR
-		// its Note Preview opens that Note's Expanded Note (the click itself never
-		// seeks — Go here inside the panel is the only seek). The hover family is
-		// swallowed too, so a hovered dot never leaks into the bar beneath it:
-		// YouTube pops no storyboard thumbnail and no time pill behind a Note
-		// Preview.
+		// Never let the player interpret a dot press as a seek; clicking the dot or
+		// its Preview opens the Expanded Note (Go here is the only seek). The hover
+		// family is swallowed too, so YouTube pops no storyboard/time pill behind it.
 		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
 			dot.addEventListener(type, (e) => e.stopPropagation());
 		}
@@ -624,12 +522,8 @@
 			e.preventDefault();
 			onDotActivate(dot);
 		});
-		// Hovering an Unseen dot Acknowledges it (ADR-0010) — the Note Preview that
-		// hover opens is the eye-catch the pulse asked for; keyboard focus, which
-		// opens the same preview, Acknowledges identically. (mouseenter never
-		// bubbles, so it needs no swallowing above.) The same two triggers are what
-		// unfold the Preview, so each also clamps it inside the player (#181) first,
-		// measuring the card against the player's live rect before it paints.
+		// Hover and keyboard focus both Acknowledge the dot (ADR-0010) and unfold
+		// its Preview, so each also clamps it inside the player first (#181).
 		dot.addEventListener('mouseenter', () => {
 			clampPreview(dot);
 			acknowledgeDot(dot.dataset.ytbNoteId);
@@ -642,16 +536,12 @@
 	}
 
 	/**
-	 * Slide a Note Preview back inside the player's edges before it unfolds (#181).
-	 * A Preview is centred on its dot; near the bar's ends the card (up to 240px)
-	 * would overflow the player and be clipped by the viewport — hovering a Note at
-	 * 0:25 on a long video rendered the body's first characters cut off. We measure
-	 * the card's own layout width against the player's box and, only when it would
-	 * spill past a small inset (the 8px positionPanel uses for the Expanded Note),
-	 * set --ytb-preview-shift so the CSS translates the card inside. The paired
-	 * transform-origin and ::before bridge read the same variable, so a shifted card
-	 * still grows out of its dot and keeps its hover bridge over the dot. The shift
-	 * is 0 whenever the card already fits, leaving mid-bar Previews pixel-identical.
+	 * Slide a Note Preview back inside the player's edges before it unfolds (#181):
+	 * a Preview centred near the bar's ends would overflow and clip. Measures the
+	 * card's layout width against the player box and sets --ytb-preview-shift only
+	 * when it would spill past positionPanel's 8px inset; the paired transform-origin
+	 * and ::before bridge read the same variable so a shifted card still grows out
+	 * of its dot. Shift is 0 whenever the card already fits.
 	 */
 	function clampPreview(dot) {
 		const preview = dot.querySelector('.' + PREVIEW_CLASS);
@@ -677,13 +567,11 @@
 		dot.style.background = color;
 		// The open Note's own hover preview is redundant next to its panel.
 		dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
-		// Unseen dots pulse until Acknowledged (ADR-0010). Layout-free by
-		// construction: the halo is box-shadow only, so neighbouring dots — which
-		// sit at their true, possibly overlapping moments — are never displaced.
+		// Unseen dots pulse until Acknowledged (ADR-0010); box-shadow only, so
+		// neighbouring (possibly overlapping) dots are never displaced.
 		const unseen = unseenDotIds.has(id);
 		dot.classList.toggle(DOT_UNSEEN_CLASS, unseen);
-		// An Unseen pulse keeps its full-color eye-catch until Acknowledged. On
-		// that render, an already-crossed dot immediately adopts the passed paint.
+		// The Unseen eye-catch outranks the passed paint until Acknowledged.
 		dot.classList.toggle(DOT_PASSED_CLASS, passed && !unseen);
 
 		const count = replyCount(id);
@@ -711,23 +599,17 @@
 		buildPreview(dot.querySelector('.' + PREVIEW_CLASS), note, who, locked, count);
 	}
 
-	// Activating ANY Note Dot or Note Preview — text, Reaction, or locked
-	// Spoiler — opens that Note's Expanded Note; the click itself never seeks or
-	// changes playback (Go here inside the panel is the only seek). The routing
-	// is the pure YTB.dotActivation ("always open"); this stays the thin executor.
+	// Activating any Note Dot/Preview opens its Expanded Note without seeking
+	// (Go here is the only seek); YTB.dotActivation owns the routing.
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
 		if (!note) return;
 		if (YTB.dotActivation(note).action === 'open') openPanel(note);
 	}
 
-	/**
-	 * Go here: seek to roughly one second before the Note and resume playback,
-	 * so the Note reveals through its own Playback Notification on the natural
-	 * forward crossing. Local playback control only (no write), so it works
-	 * regardless of Sharing. If an Expanded Note is open, the resulting 'play'
-	 * event closes it via the existing manual-resume path.
-	 */
+	// Go here: seek just before the Note and resume, so it reveals via its own
+	// Playback Notification on the natural crossing. Local-only; works regardless
+	// of Sharing.
 	function goHere(note) {
 		const video = document.querySelector('video');
 		if (!video) return;
@@ -764,11 +646,8 @@
 			preview.append(emoji, author);
 			return;
 		}
-		// Text Note: the body is the hero, author small beneath it (own
-		// authorship stays a neutral "You" — the stylesheet's muted default),
-		// Reply count last. A locked Spoiler keeps this exact layout with the
-		// body masked by a muted placeholder and the Reply count withheld until
-		// the playhead crosses (only text Notes can be Spoilers).
+		// Text Note: body is the hero, author beneath, Reply count last. A locked
+		// Spoiler keeps this layout with the body masked and count withheld.
 		const body = document.createElement('div');
 		body.className = locked ? 'ytb-preview-spoiler' : 'ytb-preview-body';
 		body.textContent = locked ? 'Spoiler' : note.body;
@@ -803,13 +682,8 @@
 		return null;
 	}
 
-	/**
-	 * The rectangle the Expanded Note should grow out of. A Note Preview is only on
-	 * screen while its dot is hovered, so a hovered dot grows the panel from the
-	 * preview card; keyboard activation (:focus-visible, no hover) — and any dot
-	 * whose preview is already suppressed, or a programmatic open with no dot yet —
-	 * grows it from the dot itself. Returns null when there is no dot to grow from.
-	 */
+	// The rectangle the Expanded Note grows out of: the hovered Preview card if
+	// one is on screen, else the dot itself. Null when there is no dot to grow from.
 	function panelGrowthSource(note) {
 		const dot = dotFor(note.id);
 		if (!dot) return null;
@@ -825,15 +699,11 @@
 		return fallback;
 	}
 
-	/**
-	 * Grow the freshly positioned Expanded Note out of `sourceRect` with a FLIP:
-	 * the panel already sits at its final rect, so invert it onto the source rect
-	 * (the Note Preview it replaced, or the dot) and play back to identity. The Web
-	 * Animations API auto-clears the transform when it finishes, leaving no inline
-	 * residue for a later positionPanel re-clamp. Durations and easings come from
-	 * the --ytb-* motion tokens; prefers-reduced-motion collapses to an opacity-only
-	 * fade (no transform), and a missing source falls back to a small scale-up.
-	 */
+	// Grow the already-positioned panel out of `sourceRect` with a FLIP: invert
+	// onto the source rect and play back to identity (the Web Animations API
+	// auto-clears the transform, leaving nothing for positionPanel to re-clamp).
+	// prefers-reduced-motion collapses to an opacity fade; no source falls back
+	// to a small scale-up.
 	function flipPanelOpen(panel, sourceRect) {
 		if (!panel.isConnected || typeof panel.animate !== 'function') return;
 		const tokens = getComputedStyle(document.documentElement);
@@ -885,7 +755,7 @@
 	async function openPanel(note) {
 		const host = player();
 		if (!host || !note) return;
-		// Where the Expanded Note grows FROM — captured before anything hides it:
+		// Where the Expanded Note grows FROM - captured before anything hides it:
 		// the hovered Note Preview if one is on screen, else the bare dot.
 		const sourceRect = panelGrowthSource(note);
 		acknowledgeDot(note.id); // opening the Expanded Note Acknowledges its dot (ADR-0010)
@@ -906,17 +776,12 @@
 		const variant = YTB.notePanelVariant(note, playhead);
 		const panel = buildPanel(note, playhead, variant);
 		host.appendChild(panel);
-		// Hover-scope the panel's Controls Hold: it keeps YouTube's chrome (and the
-		// panel's own anchor dot) awake ONLY while the pointer hovers the Expanded
-		// Note — not for its whole open lifetime, and not on keyboard focus (the
-		// panel auto-focuses on open, which would pin the chrome). removePanel
-		// releases any hold still live on close or replacement.
+		// Hover-scope the Controls Hold: keeps the chrome awake only while the
+		// pointer hovers the panel, not for its whole lifetime or on auto-focus.
 		panelHoldRelease = YTB.bindHoverHold(panel);
 		positionPanel(panel);
-		// The reply list seeded while the panel was detached (zero heights), so
-		// renderReplies' bottom-pin could not engage. Pin once now that the panel
-		// is laid out: the panel opens showing the newest reply, matching the
-		// post-reply behavior (UA-008).
+		// The reply list seeded while detached (zero heights), so renderReplies'
+		// bottom-pin couldn't engage; pin now to open on the newest reply (UA-008).
 		const seededReplies = panel.querySelector('.ytb-panel-replies');
 		if (seededReplies) seededReplies.scrollTop = seededReplies.scrollHeight;
 		panel.focus();
@@ -934,11 +799,9 @@
 	}
 
 	/**
-	 * Build the Expanded Note for `note` in the shape `variant` demands (chosen by
-	 * YTB.notePanelVariant from the panel-open `playhead`):
-	 * - 'text': the full conversation (Replies, composer, author-only delete);
-	 * - 'reaction': read-only — the large emoji with its author beneath;
-	 * - 'spoiler': read-only — a masked "Spoiler" body, conversation withheld.
+	 * Build the Expanded Note in the shape `variant` demands (from
+	 * YTB.notePanelVariant): 'text' gets the full conversation (Replies,
+	 * composer, author-only delete); 'reaction' and 'spoiler' are read-only.
 	 * Every variant pins the corner timestamp and offers Go here unless the
 	 * paused playhead already sits near the moment.
 	 */
@@ -960,10 +823,9 @@
 		time.textContent = '@' + YTB.formatTime(note.timestamp);
 		panel.append(time);
 
-		// Body area: the emoji + author for a Reaction, the masked placeholder for
-		// a locked Spoiler, otherwise the text Note itself. The author renders in
-		// the byline for text/Spoiler (beneath the emoji for a Reaction), staying a
-		// neutral "You" for own authorship via the stylesheet's muted default.
+		// Body area: emoji + author for a Reaction, masked placeholder for a locked
+		// Spoiler, otherwise the text Note itself; author sits in the byline except
+		// for a Reaction, where it's beneath the emoji.
 		if (variant === 'reaction') {
 			const emoji = document.createElement('div');
 			emoji.className = 'ytb-panel-emoji';
@@ -988,9 +850,8 @@
 			panel.append(body, buildByline(note, who, true));
 		}
 
-		// Note actions: Go here (omitted when already near the moment — nowhere to
-		// go), plus the author-only deemphasized delete on a text Note only. The
-		// row is appended only when it holds a control.
+		// Note actions: Go here (omitted when already near the moment) plus the
+		// author-only delete on a text Note; the row is appended only if non-empty.
 		const actions = document.createElement('div');
 		actions.className = 'ytb-panel-actions';
 		if (!YTB.nearNoteMoment(note.timestamp, playhead)) actions.append(buildGoHere(note));
@@ -1029,11 +890,8 @@
 		return panel;
 	}
 
-	/**
-	 * The Note's byline: the posted-time (always), with the author before it
-	 * unless `showAuthor` is false — a Reaction already names its author beneath
-	 * the emoji, so its byline carries the posted time alone.
-	 */
+	// The Note's byline: posted-time always, author before it unless showAuthor
+	// is false (a Reaction already names its author beneath the emoji).
 	function buildByline(note, who, showAuthor) {
 		const byline = document.createElement('div');
 		byline.className = 'ytb-panel-byline';
@@ -1056,11 +914,8 @@
 		return byline;
 	}
 
-	/**
-	 * Go here: the panel's one seek control. Labelled just "Go here" (no visible
-	 * "@time" suffix — the aria-label still speaks the moment); clicking seeks to
-	 * ~1s before the Note and resumes playback.
-	 */
+	// Go here: the panel's one seek control (labelled plainly; the aria-label
+	// speaks the moment).
 	function buildGoHere(note) {
 		const atLabel = YTB.formatTime(note.timestamp);
 		const goHereButton = document.createElement('button');
@@ -1088,12 +943,8 @@
 		});
 	}
 
-	/**
-	 * The author-only delete flow: a deemphasized "Delete" in the Note actions
-	 * row that swaps to an in-panel confirmation ("Really delete it?", naming
-	 * how many Replies cascade with it). Returns the confirm block; the trigger
-	 * is appended to `actions` directly.
-	 */
+	// The author-only delete flow: a deemphasized "Delete" that swaps to an
+	// in-panel confirmation naming the Replies that cascade with it.
 	function buildDeleteConfirm(panel, note, actions) {
 		const remove = document.createElement('button');
 		remove.type = 'button';
@@ -1164,12 +1015,8 @@
 		renderDots();
 	}
 
-	/**
-	 * Rebuild the Reply list (oldest → newest), keeping a bottom-pinned scroll.
-	 * Reply text is the hero with the author small beneath it (matching the
-	 * Note itself); rows that were not in the previous render settle in with a
-	 * mild spring — except on the very first render, which seeds silently.
-	 */
+	// Rebuild the Reply list (oldest to newest), keeping a bottom-pinned scroll.
+	// New rows (not the initial render) settle in with a mild spring.
 	function renderReplies(panel, replies) {
 		const wrap = panel.querySelector('.ytb-panel-replies');
 		if (!wrap) return;
@@ -1235,10 +1082,8 @@
 		textarea.rows = 1;
 		textarea.placeholder = 'Reply...';
 		textarea.setAttribute('aria-label', 'Write a reply');
-		// The @-mention popover must attach BEFORE our own ytb:keydown listener
-		// so an open popover consumes Enter/Escape instead of posting/dismissing.
-		// (theme.js's capture guard swallows real keydowns on this textarea and
-		// re-dispatches them as ytb:keydown, so YouTube's hotkeys see nothing.)
+		// Attach the @-mention popover BEFORE our own ytb:keydown listener so an
+		// open popover consumes Enter/Escape instead of posting/dismissing.
 		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
 
 		// Paper-plane send: springs in once the field is non-empty. Enter still
@@ -1299,7 +1144,7 @@
 		textarea.disabled = false;
 
 		if (result.ok) {
-			// Success appends immediately, oldest → newest, without closing. The
+			// Success appends immediately, oldest to newest, without closing. The
 			// synthetic input resizes the field and retracts the send button.
 			textarea.value = '';
 			mentionCtl?.reset();
@@ -1315,7 +1160,7 @@
 		} else if (result.category === 'missing_parent') {
 			removeNoteEverywhere(note);
 		} else {
-			textarea.focus(); // draft intact — retry is one keypress away
+			textarea.focus(); // draft intact - retry is one keypress away
 		}
 	}
 
@@ -1358,9 +1203,8 @@
 
 		if (result.ok) {
 			repliesByNoteId.set(note.id, result.replies);
-			// Replies surfacing while their conversation is OPEN are on screen —
-			// Acknowledge them now so closing the panel never starts a pulse for
-			// something the viewer just read.
+			// Replies surfacing while the conversation is open are on screen already:
+			// Acknowledge now so closing the panel never starts a pulse for it.
 			recomputeUnseen();
 			acknowledgeDot(note.id);
 			renderReplies(panel, result.replies);
@@ -1394,10 +1238,8 @@
 		const width = Math.min(300, Math.max(220, hostRect.width - 24));
 		panel.style.width = width + 'px';
 
-		// The resting anchor clears the lifted dot glyphs: the bottom edge sits
-		// panelBarClearance (lift + glyph + breathing room) above the bar's top
-		// edge, derived from the Note Band geometry itself so a future change to
-		// the dots' lift carries the panel with it instead of re-colliding (#173).
+		// The resting anchor clears the lifted dot glyphs via panelBarClearance
+		// (#173), derived from Note Band geometry so a lift change carries the panel with it.
 		const bar = document.querySelector('.ytp-progress-bar');
 		const barRect = bar ? bar.getBoundingClientRect() : null;
 		const bottom = barRect ? Math.max(12, hostRect.bottom - barRect.top + YTB.panelBarClearance(BAND)) : 72;
@@ -1409,24 +1251,19 @@
 		const left = Math.max(8, Math.min(center - width / 2, hostRect.width - width - 8));
 		panel.style.left = left + 'px';
 
-		// Never taller than the player: the Reply list absorbs the squeeze. The
-		// fixed chrome around it (body, byline, actions, composer, error, and a
-		// visible delete confirmation) is measured live, so content changes that
-		// grow the panel re-clamp instead of pushing it past the player's top.
-		// If even the minimum list cannot fit above the bar, the panel slides
+		// Never taller than the player: the Reply list absorbs the squeeze, its
+		// fixed chrome measured live so growth re-clamps instead of pushing past
+		// the player's top. If even the minimum list can't fit, the panel slides
 		// down over the control bar rather than out of the player.
 		const replies = panel.querySelector('.ytb-panel-replies');
 		if (replies) {
 			const chrome = panel.offsetHeight - replies.offsetHeight;
 			let anchor = parseFloat(panel.style.bottom);
 
-			// Margin the panel keeps from its own ceiling. Normally 16px below the
-			// player's top; but while YouTube's storyboard thumbnail floats above
-			// the scrubber, cap the panel just below it instead so it sits below
-			// the thumbnail, the Reply list absorbing the squeeze exactly as it
-			// does against the player top. Skipped when the thumbnail hugs the
-			// scrubber and would leave no usable panel — the panel's own high
-			// z-index keeps it above the thumbnail there, so nothing is clipped.
+			// Margin from the panel's own ceiling: normally 16px below the player
+			// top, but capped just below YouTube's storyboard thumbnail when it
+			// floats above the scrubber (skipped if that would leave no usable
+			// panel; the panel's own z-index keeps it above the thumbnail there).
 			let topMargin = 16;
 			const tip = document.querySelector('.ytp-tooltip');
 			if (tip && tip.offsetParent !== null) {
@@ -1460,11 +1297,8 @@
 		pendingDelete = false;
 	}
 
-	/**
-	 * Dismiss the Expanded Note (outside click, Escape, delete, navigation). If
-	 * opening it paused a playing video, dismissal resumes; a video that was
-	 * already paused stays paused. Keyboard dismissal refocuses the origin dot.
-	 */
+	// Dismiss the Expanded Note. If opening it paused a playing video, dismissal
+	// resumes it; keyboard dismissal refocuses the origin dot.
 	function dismissPanel({ refocusDot = false, resume = true } = {}) {
 		const noteId = openNote && openNote.id;
 		const wasOpen = Boolean(document.getElementById(PANEL_ID));
@@ -1479,9 +1313,8 @@
 		}
 	}
 
-	// Capture where the gesture began before the panel's containment handler can
-	// stop the pointerdown. A selection dragged past the panel edge reports its
-	// later click on a common ancestor in the player, but remains panel-owned.
+	// Capture where the gesture began, before containment stops the pointerdown:
+	// a selection dragged past the panel edge still reports as panel-owned.
 	document.addEventListener(
 		'pointerdown',
 		(event) => {
@@ -1496,11 +1329,9 @@
 		true,
 	);
 
-	// Route every click while the Expanded Note is open in capture phase. Its own
-	// controls remain inside the panel. Press Origin protects a selection dragged
-	// out of the panel; a genuine Picture Click is consumed before YouTube can arm
-	// its deferred play/pause toggle. YTB.pictureClickAction owns the shared
-	// decision with composer.js.
+	// Route every click while the Expanded Note is open (capture phase). Press
+	// Origin protects a dragged-out selection; YTB.pictureClickAction owns the
+	// shared decision with composer.js.
 	document.addEventListener(
 		'click',
 		(event) => {
@@ -1547,10 +1378,9 @@
 		}
 	});
 
-	// A play during the arrival grace is autoplay settling in as the watch page
-	// loads (a Room Feed row paused us here) — re-assert the pause so the Unseen
-	// dot(s) stay in view. Otherwise a play is the viewer's deliberate resume:
-	// with an Expanded Note open it dismisses the panel (without re-pausing).
+	// A play during the arrival grace is autoplay settling in; re-assert the
+	// pause so the Unseen dot stays in view. Otherwise it's a deliberate resume,
+	// which dismisses an open Expanded Note (without re-pausing).
 	document.addEventListener(
 		'play',
 		(event) => {
@@ -1596,13 +1426,10 @@
 	}
 
 	/**
-	 * Anchor the alerts stack at the viewer's Notification Position AND lay its
-	 * children ALONG that edge: one of the four player edges (default bottom).
-	 * Top/bottom become a centered horizontal row that wraps to another line
-	 * (away from the edge) when it outgrows the player; left/right stay a vertical
-	 * column. Inline styles own placement and axis so a Settings change re-anchors
-	 * and re-flows an existing stack live; the stylesheet carries only the static
-	 * look (gap, z-index).
+	 * Anchor the alerts stack at the viewer's Notification Position and lay its
+	 * children along that edge: top/bottom is a centered row that wraps away
+	 * from the edge, left/right a column. Inline styles own placement/axis so a
+	 * Settings change re-anchors live; the stylesheet carries only the static look.
 	 */
 	function applyAlertsPosition(wrap, host) {
 		const edge = YTB.NOTIFICATION_EDGES.includes(notificationPosition) ? notificationPosition : 'bottom';
@@ -1679,7 +1506,7 @@
 		author.className = 'ytb-alert-author';
 		author.textContent = who;
 		if (note.clientId !== myClientId) author.style.color = YTB.buddyTextColor(note.clientId);
-		// Author beneath the content, matching the Note Preview (no timestamp here —
+		// Author beneath the content, matching the Note Preview (no timestamp here -
 		// a Playback Notification fires exactly as playback crosses the moment).
 		card.append(body, author);
 		card.addEventListener('click', (event) => {
@@ -1713,10 +1540,8 @@
 		// legible; own bursts stay the default white "You".
 		if (note.clientId !== myClientId) author.style.color = YTB.buddyColor(note.clientId);
 		burst.append(emoji, author);
-		// The keyframes are percentage-based, so a per-element animation-duration
-		// scales the WHOLE float-and-fade — a short echo compresses, never truncates
-		// mid-flight. The reduced-motion variant swaps only the animation NAME, so it
-		// inherits this same duration.
+		// Keyframes are percentage-based, so a per-element duration scales the whole
+		// float-and-fade (a short echo compresses, never truncates mid-flight).
 		burst.style.animationDuration = `${lifetime}ms`;
 		wrap.append(burst);
 		setTimeout(() => burst.remove(), lifetime);
@@ -1747,7 +1572,7 @@
 		for (const note of YTB.crossedNotes(notesForCurrentVideo(), previousTime, currentTime)) {
 			// Queue the entrance (drained one-per-beat, in timestamp order) but
 			// Acknowledge NOW: the crossing itself is the ADR-0010 trigger, not the
-			// staggered reveal — a no-op unless the dot was Unseen.
+			// staggered reveal - a no-op unless the dot was Unseen.
 			alertQueue.push({ note, trigger: 'crossing' });
 			acknowledgeDot(note.id);
 		}
@@ -1756,7 +1581,7 @@
 
 	// Reveal one queued Note per ENTRANCE_STAGGER_MS beat, in the order queued
 	// (crossedNotes is timestamp-sorted). Earlier notifications stay on screen as
-	// later ones arrive — each lives its own lifetime from its own entrance.
+	// later ones arrive - each lives its own lifetime from its own entrance.
 	function scheduleAlertDrain() {
 		if (alertDrainTimer !== null || alertQueue.length === 0) return;
 		drainNextAlert();
@@ -1774,7 +1599,7 @@
 		alertDrainTimer = setTimeout(drainNextAlert, ENTRANCE_STAGGER_MS);
 	}
 
-	// Drop every on-screen and queued notification and cancel the drain — for a
+	// Drop every on-screen and queued notification and cancel the drain - for a
 	// Notes-off toggle and a real video change (a duplicate navigate keeps them).
 	function resetAlerts() {
 		alertQueue = [];
@@ -1791,12 +1616,9 @@
 
 	document.addEventListener('ytb:navigate', (event) => {
 		const nextVideoId = (event.detail && event.detail.videoId) || null;
-		// A duplicate navigation-finish for the SAME video — YouTube re-emits these
-		// as the watch page loads (content.js forwards every yt-navigate-finish).
-		// Treat it as a no-op: tearing the panel down here is what dismissed an
-		// Expanded Note, and clearing the arrival grace here would let autoplay
-		// escape the arrival pause. Keep the panel, lease, grace, and alerts; only
-		// reconcile dots.
+		// YouTube re-emits a navigation-finish for the SAME video while the watch
+		// page loads; treat as a no-op (tearing down here would dismiss the panel
+		// and clearing the arrival grace would let autoplay escape it) - only reconcile dots.
 		if (nextVideoId === currentVideoId) {
 			renderDots();
 			return;
@@ -1858,35 +1680,22 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
-      /* --- Dot Cluster (#123): the wrapper owning the hover/focus state for the
-         dots that overlap at rest. It carries the vertical lift (its members sit
-         at its bottom edge, just clear of the bar) and anchors at the Cluster
-         centre in bar px, re-measured on every render (#159). It is
-         pointer-events:none at rest — only the member dots catch the pointer, so
-         it never blocks the scrubber — but while hovered a ::before keeper spans
-         the fanned band so the pointer can cross the gaps the fan opens (and
-         travel between members) without the fan collapsing.
+      /* Dot Cluster (#123): wrapper owning hover/focus for dots that overlap at
+         rest. Carries the vertical lift and anchors at the Cluster centre in bar
+         px, re-measured every render (#159); pointer-events:none at rest (only
+         member dots catch the pointer), but a hovered ::before keeper spans the
+         fanned band so travel between members doesn't collapse it.
 
-         EVERY interactive surface we own on the player lives STRICTLY ABOVE the
-         progress bar's top edge (#158), so the bar stays seekable under a Note —
-         at a Note's exact timestamp included. The wrapper's bottom edge is that
-         boundary (the Note Band's dot lift above the bar since #162 lifted the
-         dots), and the keeper below, the dots' hit extender, and the preview's
-         hover bridge all stop at or before it.
+         Every interactive surface we own lives STRICTLY ABOVE the progress bar's
+         top edge (#158), so the bar stays seekable under a Note, timestamp
+         included - the wrapper's bottom edge is that boundary.
 
-         Inside the Note Band our surfaces outrank YouTube's own affordances
-         that reach up into it (#173): the scrubber knob's upper arc is far
-         larger than a Note Dot and, stacked above us, swallowed every click on
-         a dot near the playhead. Measured live against YouTube's player CSS,
-         the bar's children stack at .ytp-progress-bar-padding 28 (the grab
-         pad), .ytp-chapters-container 32, .ytp-timed-markers-container 40, and
-         .ytp-scrubber-container 43 — so 44 wins the band honestly, by stacking
-         order, with the knob's pointer events untouched (disabling them would
-         break drag-scrub). The knob stays fully grabbable on the bar itself,
-         where nothing of ours exists (#158); only its overlap INTO the band is
-         conceded, so with a Note within a hit box of the playhead a drag cannot
-         start from the top of the knob — its body, and the whole bar, still
-         start one. */
+         Inside the Note Band we outrank YouTube's own affordances (#173): measured
+         stacking puts .ytp-progress-bar-padding at 28, .ytp-chapters-container at
+         32, .ytp-timed-markers-container at 40, .ytp-scrubber-container at 43 - so
+         our 44 wins honestly, by stacking order. The knob's pointer events stay
+         untouched (needed for drag-scrub) and it remains fully grabbable on the
+         bar itself; only its overlap INTO the band is conceded. */
       .${CLUSTER_CLASS} {
         position: absolute;
         bottom: calc(100% + ${BAND.dotLift}px);
@@ -1895,12 +1704,10 @@
         z-index: 44;
         pointer-events: none;
       }
-      /* Hover keeper: it reaches from above the dots down across the whole dot
-         lift and stops FLUSH with the bar's top edge — the furthest it can go
-         while still claiming none of the bar (#158). That leaves no dead strip
-         between bar and dots, so travelling up off the scrubber into a fan never
-         crosses a gap that would collapse it (#162), and a press on the bar under
-         a Note still reaches YouTube's own seek. */
+      /* Hover keeper: reaches from above the dots down to FLUSH with the bar's top
+         edge - the furthest it can go while claiming none of the bar (#158). No
+         dead strip between bar and dots means travelling into a fan never crosses
+         a gap that would collapse it (#162), and a press on the bar still seeks. */
       .${CLUSTER_CLASS}::before {
         content: '';
         position: absolute;
@@ -1912,20 +1719,18 @@
         pointer-events: none;
       }
       .${CLUSTER_CLASS}:hover::before { pointer-events: auto; }
-      /* Fan the members apart on hover, keyboard focus, or while a member's panel
-         is open (pinned). Display offset only (a transform) — the dots' base left
-         offset never changes, and the fan reverses the instant the state clears. */
+      /* Fan members apart on hover, focus, or a pinned member's open panel. A
+         transform only - base left offset never changes, and reverses instantly. */
       .${CLUSTER_CLASS}:hover > .${DOT_CLASS},
       .${CLUSTER_CLASS}:focus-within > .${DOT_CLASS},
       .${CLUSTER_CLASS}.${CLUSTER_PINNED_CLASS} > .${DOT_CLASS} {
         transform: translateX(var(--ytb-fan, 0px));
       }
 
-      /* A flat, single-color circle floating just clear of the bar's top edge
-         (nested in its Cluster wrapper, so it inherits the control chrome's
-         autohide fade and stays bar-aligned through resizes and fullscreen for
-         free). No border, outline, ring, or shadow — a pale dot over a bright
-         frame is the accepted trade. */
+      /* A flat, single-color circle just clear of the bar's top edge (nested in
+         its Cluster wrapper, so it inherits autohide fade and stays bar-aligned
+         through resizes/fullscreen for free). No border/outline/ring/shadow - a
+         pale dot over a bright frame is the accepted trade. */
       .${DOT_CLASS} {
         position: absolute;
         bottom: 0;
@@ -1943,16 +1748,12 @@
         transform: translateX(0);
         transition: transform var(--ytb-dur-base) var(--ytb-ease-spring);
       }
-      /* Invisible hit extender (UA-004, resized by #202): each horizontal side
-         stops at its nearest-neighbour midpoint and caps at the Note Band's
-         maximum side reach. A dot with no reach keeps only its glyph.
-
-         It grows UPWARD off the dot's bottom edge (#158) rather than centring
-         on the glyph: a centred box hung below the dot, INTO the bar — it
-         covered the whole bar and stole every press near a Note's timestamp.
-         Bottom-anchored, the target keeps its full size while ending exactly
-         where the dot does, the dot lift clear of the bar. What it claims
-         instead is the band above the bar (YouTube's grab pad included). */
+      /* Invisible hit extender (UA-004, resized by #202): each side stops at its
+         nearest-neighbour midpoint, capped at the Note Band's max side reach.
+         Grows UPWARD off the dot's bottom edge (#158) rather than centring on
+         the glyph - a centred box hung into the bar stole every press near a
+         Note's timestamp; bottom-anchored, it claims only the band above the
+         bar (YouTube's grab pad included), never the bar itself. */
       .${DOT_CLASS}::after {
         content: '';
         position: absolute;
@@ -1969,14 +1770,11 @@
       .${DOT_PASSED_CLASS} { filter: saturate(.4) opacity(.55); }
 
       /* Crossing the scrubber to reach a Note can leave YouTube's storyboard
-         frozen over the Note Preview. The Cluster wrapper toggles this class on
-         the player root for precisely the duration of its hover band. */
+         frozen over the Preview; toggled on the player root for the hover band. */
       .${TOOLTIP_SUPPRESSED_CLASS} .ytp-tooltip { display: none !important; }
-      /* Locked Spoilers stay visually obscured. The obscuring is a veil overlay
-         rather than filter/opacity on the dot itself: a filter would gray out —
-         and element opacity would fade — the apricot Unseen halo and the hover
-         preview, both rendered on/inside this same element. (The preview child
-         carries its own z-index, so it paints above the veil.) */
+      /* Locked Spoilers use a veil overlay, not filter/opacity on the dot itself,
+         since that would also gray out or fade the Unseen halo and hover preview
+         rendered on this same element (the preview paints above via its own z-index). */
       .${DOT_LOCKED_CLASS} { cursor: pointer; }
       .${DOT_REACTION_CLASS} { cursor: pointer; }   /* opens its panel like every dot (UA-025) */
       .${DOT_LOCKED_CLASS}::before {
@@ -1991,11 +1789,9 @@
         background: rgba(58, 58, 58, 0.45);
       }
 
-      /* --- Unseen pulse (ADR-0010): an expanding apricot halo, box-shadow
-         only — the dot never moves, resizes, or recolors, and neighbouring
-         dots (at their true, possibly overlapping moments) are never
-         displaced. Shares the popup Waiting dot's ~1.6s breathing rhythm
-         (DESIGN.md section 2). */
+      /* Unseen pulse (ADR-0010): expanding apricot halo, box-shadow only, so
+         neighbouring dots are never displaced. Shares the popup Waiting dot's
+         ~1.6s breathing rhythm (DESIGN.md section 2). */
       .${DOT_UNSEEN_CLASS} {
         animation: ytb-unseen-pulse 1.6s var(--ytb-ease-out) infinite;
       }
@@ -2003,9 +1799,8 @@
         from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ytb-accent-500) 75%, transparent); }
         to   { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ytb-accent-500) 0%, transparent); }
       }
-      /* While a Note's panel is open, its own hover preview stays hidden — and
-         hidden INSTANTLY (no fade), so it vanishes on the first frame of the
-         Expanded Note that grows out of it rather than lingering beside it. */
+      /* An open panel's own hover preview hides INSTANTLY (no fade), vanishing on
+         the first frame of the Expanded Note that grows out of it. */
       .${DOT_OPEN_CLASS} .${PREVIEW_CLASS} {
         opacity: 0 !important;
         transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px))) scale(0.6) !important;
@@ -2013,30 +1808,26 @@
         pointer-events: none !important;
       }
 
-      /* --- Note Preview: opaque warm card (apricot system) ---
-         The preview unfolds OUT OF the dot on hover: it scales up from the dot's
-         own point (transform-origin sits 15px below the card's bottom edge — the
-         18px bottom gap less the 3px dot half-height), so it grows from the dot
-         rather than fading in from its own centre. Pure CSS off the hover state;
-         reduced-motion collapses it to an opacity-only fade below. */
+      /* Note Preview: opaque warm card. Unfolds OUT OF the dot on hover -
+         transform-origin sits 15px below the card's bottom edge (the 18px bottom
+         gap less the dot's 3px half-height) so it grows from the dot rather than
+         fading in from its own centre. Pure CSS; reduced-motion below collapses
+         it to an opacity-only fade. */
       .${PREVIEW_CLASS} {
         position: absolute;
         bottom: 18px;
         left: 50%;
         /* --ytb-preview-shift (JS, clampPreview) slides a card back inside the
-           player's edges near the bar's ends (#181); 0 mid-bar, so most cards
-           are untouched. The origin subtracts the same shift so the unfold still
-           grows out of the dot — which sits a shift to the LEFT of a card pushed
-           right — not out of the card's own displaced centre. */
+           player's edges near the bar's ends (#181); 0 mid-bar. The origin
+           subtracts the same shift so the unfold still grows out of the dot,
+           not the card's own displaced centre. */
         transform-origin: calc(50% - var(--ytb-preview-shift, 0px)) calc(100% + 15px);
         transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px))) scale(0.6);
-        /* Two auto columns — content, then the corner timestamp (#158). The
-           timestamp is a real grid item, not an absolute overlay, so it CONTRIBUTES
-           intrinsic width: a max-content card always widens to fit body + time, at
-           any timestamp length and any body length, and nothing reserves room by a
-           hardcoded gutter. Past the 240px cap the auto tracks shrink — the time
-           column is nowrap, so the body is what wraps (and line-clamps), never the
-           timestamp. */
+        /* Two auto columns - content, then the corner timestamp (#158). The
+           timestamp is a real grid item (not an absolute overlay), so it
+           contributes intrinsic width: a max-content card always widens to fit
+           body + time, with no hardcoded gutter. Past the 240px cap, the nowrap
+           time column stays fixed and the body wraps/line-clamps instead. */
         display: grid;
         grid-template-columns: auto auto;
         column-gap: 10px;
@@ -2055,16 +1846,13 @@
         transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out), transform var(--ytb-dur-quick) var(--ytb-ease-spring);
         z-index: 60;
       }
-      /* Transparent hover bridge: a dot-width column spanning the gap between the
-         preview and the dot so the pointer can travel straight up onto the card
-         without dropping :hover. Kept narrow (not full preview width) so sliding
-         horizontally along the progress bar off the dot drops the preview. It is
-         interactive only while the dot is hovered, so it never blocks the
-         scrubber; hovering it (a dot descendant) keeps .${DOT_CLASS}:hover alive.
-         Its height is exactly the preview's 18px bottom offset less the dot's 6px
-         glyph, so it lands ON the dot's top edge and stops (#158): at 22px it ran
-         past the dot and 1px into the bar, and — being a live hover target once
-         the dot is hovered — swallowed presses meant for the bar beneath it. */
+      /* Transparent hover bridge: a dot-width column bridging the gap so the
+         pointer can travel straight up onto the card without dropping :hover.
+         Narrow (not full preview width) so sliding off the dot drops the
+         preview; interactive only while the dot is hovered, so it never blocks
+         the scrubber. Height is exactly the preview's 18px offset less the dot's
+         6px glyph, landing ON the dot's top edge (#158) - at 22px it ran 1px
+         into the bar and stole presses meant for it. */
       .${PREVIEW_CLASS}::before {
         content: '';
         position: absolute;
@@ -2085,10 +1873,8 @@
       .${DOT_CLASS}:hover .${PREVIEW_CLASS}::before {
         pointer-events: auto;
       }
-      /* Every preview kind accepts a click anywhere on it (it bubbles to the
-         dot's handler, which opens the Expanded Note). The Reaction preview
-         stays transparent but is clickable too, so clicking the card opens its
-         read-only panel exactly like clicking the tiny dot. */
+      /* Every preview kind accepts a click anywhere on it, bubbling to the dot's
+         handler; the Reaction preview stays transparent but is clickable too. */
       .${DOT_TEXT_CLASS}:hover .${PREVIEW_CLASS},
       .${DOT_TEXT_CLASS}:focus-visible .${PREVIEW_CLASS},
       .${DOT_LOCKED_CLASS}:hover .${PREVIEW_CLASS},
@@ -2098,13 +1884,10 @@
         pointer-events: auto;
         cursor: pointer;
       }
-      /* Reactions keep the transparent over-video treatment (not a card),
-         always at natural height. They share the grid above; the emoji simply
-         takes a full-width row of its own BENEATH the timestamp's row, which is
-         what keeps it centred over the dot while the corner timestamp stays
-         clear of it (#158) — the old flex column had to hold the emoji off an
-         absolute timestamp with an 18px top pad, and a short emoji still
-         collided with a long time. */
+      /* Reactions keep the transparent over-video treatment (not a card). They
+         share the grid above; the emoji takes a full-width row beneath the
+         timestamp's, keeping it centred over the dot while the corner timestamp
+         stays clear (#158). */
       .${PREVIEW_CLASS}.ytb-preview-reaction {
         border: 0;
         background: transparent;
@@ -2115,10 +1898,8 @@
         text-align: center;
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
       }
-      /* The Note's video timestamp, pinned in the top-right corner of both the
-         text card and the transparent Reaction preview — now by grid placement
-         (row 1, right-hand column) rather than by absolute positioning, so it
-         reserves its own width. */
+      /* Pinned top-right on both card kinds via grid placement (row 1, right
+         column) rather than absolute positioning, so it reserves its own width. */
       .ytb-preview-time {
         grid-column: 2;
         grid-row: 1;
@@ -2131,9 +1912,8 @@
         font-variant-numeric: tabular-nums;
       }
       .ytb-preview-reaction .ytb-preview-time { color: #eee; }
-      /* Content is the hero; the author sits small beneath it (own authorship
-         stays the muted neutral "You"; Buddies get their Buddy Color inline).
-         The body shares row 1 with the timestamp and owns the left column. */
+      /* Content is the hero, author small beneath. Body shares row 1 with the
+         timestamp and owns the left column. */
       .ytb-preview-body,
       .ytb-preview-spoiler {
         grid-column: 1;
@@ -2149,7 +1929,7 @@
         overflow-wrap: anywhere;
       }
       /* Everything under row 1 spans the full card, so the timestamp column
-         constrains the body only — never the author or the Reply count. */
+         constrains the body only - never the author or the Reply count. */
       .ytb-preview-author,
       .ytb-preview-replies,
       .ytb-preview-emoji,
@@ -2162,10 +1942,9 @@
       .ytb-preview-emoji { grid-row: 2; font-size: 26px; line-height: 1.1; }
       .ytb-preview-emoji-author { margin-top: 2px; color: #eee; font-size: 11px; font-weight: 700; }
 
-      /* --- the Expanded Note: opaque warm surface (cream / espresso) ---
-         Its entrance is a JS FLIP (flipPanelOpen) that grows the panel out of the
-         Note Preview — or the dot — it replaced, so there is no standalone pop-in
-         keyframe here. (ytb-pop-in still animates Replies and the delete confirm.) */
+      /* Expanded Note: opaque warm surface. Entrance is a JS FLIP (flipPanelOpen)
+         growing the panel out of what it replaced, so no pop-in keyframe here
+         (ytb-pop-in still animates Replies and the delete confirm). */
       #${PANEL_ID} {
         position: absolute;
         z-index: 2100;
@@ -2352,10 +2131,8 @@
       .ytb-panel-confirm-delete:disabled, .ytb-panel-confirm-cancel:disabled { opacity: 0.5; cursor: default; }
       .ytb-panel-confirm-delete:focus-visible, .ytb-panel-confirm-cancel:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
 
-      /* --- Playback Notifications ---
-         Placement AND main axis (row for top/bottom, column for left/right, plus
-         wrap and centering) are inline via applyAlertsPosition; only the static
-         look lives here. */
+      /* Playback Notifications: placement and main axis are inline via
+         applyAlertsPosition; only the static look lives here. */
       #${ALERTS_ID} {
         position: absolute;
         z-index: 2050;
@@ -2397,9 +2174,8 @@
       .ytb-alert-burst {
         pointer-events: none;
         text-align: center;
-        /* Duration is set per element (showReactionBurst) so a Post Echo's short
-           lifetime compresses the whole float-and-fade; longhands here leave that
-           duration untouched and let the reduced-motion rule swap only the name. */
+        /* Duration set per element (showReactionBurst); longhands here leave it
+           untouched so reduced-motion below can swap only the animation name. */
         animation-name: ytb-burst;
         animation-timing-function: ease-out;
         animation-fill-mode: forwards;
@@ -2422,28 +2198,23 @@
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
         .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
-        /* The Cluster fan is a reachability affordance, not decoration, so it
-           still applies — it just snaps instead of animating. */
+        /* The Cluster fan is a reachability affordance, not decoration - it still
+           applies, just snapping instead of animating. */
         .${DOT_CLASS} { transition: none; }
-        /* The Note Preview's unfold-from-the-dot collapses to a plain opacity
-           fade: the centring translate stays constant (so nothing animates), but
-           the scale and its transition are dropped. The clamp shift (#181) is
-           kept so an edge card is still inside the player. The Expanded Note's
-           FLIP is skipped in JS on this same query, fading opacity only. */
+        /* Note Preview's unfold collapses to a plain opacity fade: the centring
+           translate (plus clamp shift, #181) stays constant, scale is dropped.
+           The Expanded Note's FLIP is skipped in JS on this same query. */
         .${PREVIEW_CLASS},
         .${DOT_CLASS}:hover .${PREVIEW_CLASS},
         .${DOT_CLASS}:focus-visible .${PREVIEW_CLASS} {
           transform: translateX(calc(-50% + var(--ytb-preview-shift, 0px)));
           transition: opacity var(--ytb-dur-quick) linear;
         }
-        /* Unseen: a static ring replaces the looping halo — and it is held off
-           the dot by a 1px near-black gap (UA-026). Flush against the fill, an
-           apricot ring scores 1.01-2.51:1 on EVERY Buddy Color (1.06:1 on
-           #f0a500) and the two read as one fatter dot; the gap carries the
-           separation instead, at >= 3.69:1 against every palette color and
-           8.7:1 against the ring. Reduced-motion viewers have no pulse to fall
-           back on, so this ring is their only Unseen cue. Still box-shadow
-           only: nothing moves, resizes, or recolors. */
+        /* Unseen: a static ring replaces the looping halo, held off the dot by a
+           1px near-black gap (UA-026) - flush, an apricot ring scores as low as
+           1.06:1 against some Buddy Colors and reads as one fatter dot, but the
+           gap carries >= 3.69:1 separation instead. Reduced-motion viewers have
+           no pulse, so this ring is their only Unseen cue; still box-shadow only. */
         .${DOT_UNSEEN_CLASS} {
           animation: none;
           box-shadow:

@@ -1,8 +1,5 @@
-// extension/control-panel-relay.js
-//
-// A hidden extension-origin frame on YouTube Home. The content script cannot
-// reach chrome.action, so this minimal extension context relays one request to
-// Chrome's real action popup (ADR-0012). It renders and stores nothing.
+// Hidden extension-origin frame on YouTube Home: relays a request to open the real action popup,
+// since the content script cannot reach chrome.action (ADR-0012). Renders and stores nothing.
 
 (function () {
 	'use strict';

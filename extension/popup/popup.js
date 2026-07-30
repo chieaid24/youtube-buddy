@@ -1,8 +1,5 @@
-// popup.js -- identity, Room Code, and Sharing controls.
-// Consumes the frozen `window.YTB` contract from shared.js. The popup is the only
-// UI surface; all persisted state lives in chrome.storage.local (via YTB) so it
-// survives a browser restart. See CONTEXT.md for terminology and DESIGN.md for the
-// visual system this file drives.
+// popup.js -- identity, Room Code, and Sharing controls. Consumes shared.js's YTB
+// contract; state persists in chrome.storage.local. See CONTEXT.md / DESIGN.md.
 
 const ROSTER_POLL_MS = 5_000;
 
@@ -54,23 +51,21 @@ const el = {
 	confirmTitle: document.getElementById('confirm-title'),
 	confirmBody: document.getElementById('confirm-body'),
 	confirmCancel: document.getElementById('confirm-cancel'),
-	// The single confirm/OK button (id kept as confirm-disconnect); its label and
-	// variant are set per-open by openConfirm.
+	// Single confirm/OK button (id kept as confirm-disconnect); label/variant set per-open.
 	confirmOk: document.getElementById('confirm-disconnect'),
 };
 
 let myClientId = '';
 
-// The action to run if the open confirm dialog is confirmed (set per-open;
-// cleared on cancel/confirm). One dialog serves Leave room AND Stop sharing.
+// Action to run when the open confirm dialog is confirmed; one dialog serves
+// Leave room AND Stop sharing.
 let pendingConfirm = null;
 
 // Last-known Sharing state.
 let currentSharing = true;
 
-// The Settings snapshot driving the Settings controls: the five YTB.getSettings
-// keys plus homeSectionHidden (which keeps its own storage seam). null until
-// init has read storage.
+// Settings snapshot driving the Settings controls (5 YTB.getSettings keys plus
+// homeSectionHidden); null until init has read storage.
 let currentSettings = null;
 
 // The room view to land on when Settings closes (Back or the gear again).
@@ -83,13 +78,12 @@ let currentRoster = [];
 let selectedBuddyId = '';
 let activeRoomCode = '';
 
-// Consecutive Room-read failures belong to this popup poller. A successful
-// read resets the count immediately through the shared Connection Lost rule.
+// Consecutive Room-read failures for this popup's poller; resets via the shared
+// Connection Lost rule on a successful read.
 let connectionFailures = 0;
 
-// Roster ids from the previous render: lets a genuinely NEW Buddy row animate in
-// while the 5s poll re-render keeps existing rows perfectly still. null = no
-// render yet (the initial fill does not animate row-by-row).
+// Roster ids from the previous render, so a genuinely new Buddy row animates in
+// while unchanged rows stay still on the 5s poll. null = no render yet.
 let prevRosterIds = null;
 
 // Buddy whose swatch should do the one-shot pick wiggle on the next render.
@@ -108,12 +102,11 @@ async function init() {
 	el.nameValue.textContent = config.name || '';
 	currentSharing = config.sharing;
 
-	// The Display Name starts locked iff it already holds a non-empty committed
-	// value, so a fresh install (blank name) opens in edit mode (onboarding unchanged).
+	// Locked iff a name is already committed; a fresh install (blank name) opens in edit mode.
 	setFieldLocked(el.nameField, !!config.name);
 
-	// Settings: read the stored preferences once, build the zone picker, and
-	// reflect everything into the controls (theme.js already stamped data-theme).
+	// Read stored preferences once and reflect them into the controls (theme.js
+	// already stamped data-theme).
 	currentSettings = {
 		...(await YTB.getSettings()),
 		homeSectionHidden: await YTB.getHomeSectionHidden(),
@@ -124,15 +117,11 @@ async function init() {
 	wireHandlers();
 	setInterval(refreshConnectedRoom, ROSTER_POLL_MS);
 
-	// Route to the right view: an active code -> Connected (refresh status with a
-	// real GET); otherwise the chooser (true first run, nothing to Cancel back to).
+	// An active code -> Connected (refresh via a real GET); otherwise the chooser.
 	if (config.code) {
 		showConnected(config.code);
-		// Re-assert presence on open: refreshes my TTL and backfills installs that
-		// predate the presence feature. Deliberately NOT awaited — it is a
-		// best-effort write (it resolves false rather than throwing), and holding
-		// the boot on it holds every room-derived control, Leave room included,
-		// behind a backend that may be slow or gone.
+		// Re-assert presence to refresh TTL; not awaited so a slow/dead backend
+		// can't block Leave room and the rest of the room-derived controls.
 		YTB.assertPresence(config.code);
 		await refreshStatus(config.code);
 	} else {
@@ -141,14 +130,13 @@ async function init() {
 }
 
 function wireHandlers() {
-	// Display Name is cosmetic; persist every keystroke so closing the popup never
-	// loses input. Name collisions are harmless -- identity is the Client ID.
+	// Persist every keystroke so closing the popup never loses input; name
+	// collisions are harmless since identity is the Client ID.
 	el.name.addEventListener('input', () => {
 		YTB.setConfig({ name: el.name.value });
 	});
 
-	// Name commit: Enter or blur turns the editable name into a locked chip. There
-	// is no Save button -- unfocusing the field (or pressing Enter) just saves.
+	// Enter or blur commits the name into a locked chip; there is no Save button.
 	el.name.addEventListener('keydown', (e) => {
 		if (e.key === 'Enter') commitName();
 	});
@@ -160,10 +148,8 @@ function wireHandlers() {
 		el.name.focus();
 	});
 
-	// Chooser -> Create: mint + commit a fresh code immediately (no confirm step).
 	el.chooseCreate.addEventListener('click', () => createAndCommit());
 
-	// Chooser -> Join: switch to the free-text entry view.
 	el.chooseJoin.addEventListener('click', () => {
 		el.joinInput.value = '';
 		updateJoinSubmit();
@@ -171,8 +157,7 @@ function wireHandlers() {
 		el.joinInput.focus();
 	});
 
-	// Chooser -> Cancel: only reachable when a code already exists; return to
-	// Connected without touching the active code.
+	// Only reachable when a code already exists; returns to Connected untouched.
 	el.chooserCancel.addEventListener('click', async () => {
 		const { code } = await YTB.getConfig();
 		if (!code) return; // No active code -- nothing to cancel back to.
@@ -180,8 +165,7 @@ function wireHandlers() {
 		await refreshStatus(code);
 	});
 
-	// Join -> submit: normalize (trim + lowercase) and commit verbatim. Pure match --
-	// no word-list validation; pairing succeeds only if it matches a real code.
+	// Pure match, no word-list validation; pairing succeeds only against a real code.
 	el.joinSubmit.addEventListener('click', () => joinAndCommit());
 	el.joinInput.addEventListener('input', () => {
 		clearJoinError();
@@ -194,9 +178,7 @@ function wireHandlers() {
 	// Join -> Back: abandon entry, return to the chooser (active code untouched).
 	el.joinBack.addEventListener('click', () => showView('chooser'));
 
-	// Connected -> Copy: use the exact rendered label as the clipboard source of
-	// truth and announce anchored success/failure feedback. The button is native
-	// keyboard-accessible.
+	// Use the exact rendered label as the clipboard source of truth.
 	el.copyCode.addEventListener('click', async () => {
 		const text = el.code.textContent;
 		if (!text) return;
@@ -207,15 +189,12 @@ function wireHandlers() {
 		});
 	});
 
-	// Connected -> Leave room: the explicit "leave this room" action. Always
-	// confirm (copy adapts to whether a buddy is connected); on confirm, drop the
-	// code and reopen the chooser.
+	// Always confirm (copy adapts to whether a buddy is connected).
 	el.leaveRoom.addEventListener('click', () => {
 		confirmDisconnectThen(clearCodeAndChoose);
 	});
 
-	// Confirm dialog: Cancel/backdrop/Escape dismiss; OK runs the pending action.
-	// The dialog is never a trap.
+	// Cancel/backdrop/Escape dismiss; OK runs the pending action.
 	el.confirmCancel.addEventListener('click', hideConfirm);
 	el.confirmOk.addEventListener('click', () => {
 		const proceed = pendingConfirm;
@@ -231,30 +210,26 @@ function wireHandlers() {
 		else if (!el.colorGrid.hidden) closeColorGrid();
 	});
 
-	// Color picker dismiss: same "click anywhere else" pattern as the confirm
-	// dialog. Swatch clicks stop propagation (see renderRoster) so they never
-	// reach here -- this only ever sees clicks that should close the picker.
+	// Same click-anywhere-else dismissal as the confirm dialog; swatch clicks stop
+	// propagation (see renderRoster) so only closing clicks reach here.
 	document.addEventListener('click', (e) => {
 		if (el.colorGrid.hidden || el.colorGrid.contains(e.target)) return;
 		closeColorGrid();
 	});
 
-	// Starting Sharing is instant and unguarded; the main view only ever offers
-	// the turn-ON (the guarded stop lives in Settings). The reporter reads
-	// `sharing` and stops/resumes its POSTs; the renderer keeps drawing the
-	// Buddy either way.
+	// Turn-ON is instant and unguarded (the guarded stop lives in Settings);
+	// reporter.js reads `sharing` to stop/resume POSTs, renderer.js draws regardless.
 	el.sharingTurnOn.addEventListener('click', () => setSharing(true));
 
-	// Settings: the gear toggles the view open/closed; Back returns to the
-	// room view that was showing when it opened.
+	// Gear toggles Settings open/closed; Back returns to the room view it opened from.
 	el.settingsOpen.addEventListener('click', () => {
 		if (el.viewSettings.hidden) openSettings();
 		else closeSettings();
 	});
 	el.settingsBack.addEventListener('click', () => closeSettings());
 
-	// Theme Preference: persist and stamp data-theme immediately (theme.js's
-	// storage.onChanged listener does the same in every open YouTube tab).
+	// Stamp data-theme immediately; theme.js's onChanged listener does the same
+	// in every open YouTube tab.
 	for (const button of el.themeSeg.querySelectorAll('[data-theme-choice]')) {
 		button.addEventListener('click', () => saveSettings({ theme: button.dataset.themeChoice }));
 	}
@@ -280,8 +255,8 @@ function wireHandlers() {
 		}
 	});
 
-	// Keep the Settings controls honest when a preference changes elsewhere
-	// while the popup is open (e.g. the Room Home Toggle in YouTube's guide).
+	// Keep Settings controls honest when a preference changes elsewhere while
+	// open (e.g. the Room Home Toggle in YouTube's guide).
 	chrome.storage.onChanged.addListener(async (changes, area) => {
 		if (area !== 'local' || !currentSettings) return;
 		const keys = ['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden', 'homeSectionHidden'];
@@ -294,8 +269,7 @@ function wireHandlers() {
 	});
 }
 
-// Keep the Join action unavailable and neutral until there is meaningful input;
-// with input it promotes to the apricot primary.
+// Join action stays disabled/neutral until there is input, then promotes to primary.
 function updateJoinSubmit() {
 	const enabled = el.joinInput.value.trim().length > 0;
 	el.joinSubmit.disabled = !enabled;
@@ -309,15 +283,13 @@ function setFieldLocked(field, locked) {
 	field.classList.toggle('is-locked', locked);
 }
 
-// Commit the Display Name: trim, persist, mirror into the locked view, and lock
-// only when non-empty (a blank name has nothing to lock, so it stays editable).
+// Trim, persist, mirror into the locked view; locks only when non-empty.
 function commitName() {
 	const name = el.name.value.trim();
 	el.name.value = name;
 	el.nameValue.textContent = name;
 	setFieldLocked(el.nameField, name.length > 0);
-	// Persist, then re-assert presence so the new name propagates to Buddies
-	// immediately (best-effort, fire-and-forget).
+	// Persist, then re-assert presence so the new name propagates to Buddies (best-effort).
 	YTB.setConfig({ name }).then(() =>
 		YTB.getConfig().then(({ code }) => {
 			if (code) YTB.assertPresence(code);
@@ -327,8 +299,8 @@ function commitName() {
 
 // --- Room Code flows (create / join) -----------------------------------------
 
-// Create flow: generate a code, commit it, assert presence (so I appear to a
-// Buddy who joins later even before I watch anything), then land on Connected.
+// Generate a code, commit it, assert presence (so I appear even before watching
+// anything), then land on Connected.
 async function createAndCommit() {
 	clearCreateError();
 	const { code: oldCode } = await YTB.getConfig();
@@ -369,9 +341,8 @@ function clearCreateError() {
 	el.createFeedback.classList.remove('is-error');
 }
 
-// Join flow: verify that the typed Room already has a member, then commit it,
-// assert my presence, and refresh status. The existence read must happen before
-// any local config or old-Room membership changes.
+// Verify the typed Room has a member before committing any local config or
+// old-Room membership changes; then assert presence and refresh status.
 async function joinAndCommit() {
 	const code = YTB.normalizeCode(el.joinInput.value);
 	if (!code) return; // Empty -- stay on the entry view.
@@ -403,9 +374,8 @@ function clearJoinError() {
 
 // --- confirmation dialog -----------------------------------------------------
 
-// One reusable confirm dialog. Callers set the copy, the confirm button's label
-// and variant ("danger" = red Leave; "neutral" = warm charcoal Stop sharing), and
-// the action to run on confirm.
+// One reusable confirm dialog; callers set copy, button label/variant ("danger" =
+// red Leave, "neutral" = warm charcoal Stop sharing), and the confirm action.
 function openConfirm({ title, body, confirmLabel, variant, onConfirm }) {
 	el.confirmTitle.textContent = title;
 	el.confirmBody.textContent = body;
@@ -415,12 +385,9 @@ function openConfirm({ title, body, confirmLabel, variant, onConfirm }) {
 	showConfirm();
 }
 
-// Confirm leaving the current room before `onProceed` (the red Leave variant).
-// The dialog opens on LOCAL state alone and never waits on a Room read: leaving
-// must work while the backend is unreachable (Connection Lost is a supported
-// state), and a gated dialog leaves the viewer stuck in a room they can't quit.
-// Who they are leaving behind is an enrichment — the copy adapts once the read
-// lands, and simply stays generic if it never does.
+// Opens on local state alone (never gated on a Room read, so leaving still works
+// while the backend is unreachable); the buddy-names copy is an enrichment that
+// fills in once the read lands, or stays generic if it never does.
 async function confirmDisconnectThen(onProceed) {
 	openConfirm({
 		title: 'Leave this room?',
@@ -431,8 +398,7 @@ async function confirmDisconnectThen(onProceed) {
 	});
 	const { code } = await YTB.getConfig();
 	const names = await buddyNames(code);
-	// A slow read must not overwrite a dialog the viewer already dismissed or
-	// re-opened for something else; `pendingConfirm` identifies the open one.
+	// A slow read must not overwrite a dialog already dismissed/reopened elsewhere.
 	if (pendingConfirm !== onProceed) return;
 	if (names.length > 0) {
 		el.confirmTitle.textContent = 'Are you sure you want to go?';
@@ -442,8 +408,7 @@ async function confirmDisconnectThen(onProceed) {
 	}
 }
 
-// Toggle Sharing and re-render the pill. Off stops our POSTs (reporter reads the
-// flag); the renderer keeps drawing the Buddy's markers either way.
+// Off stops our POSTs (reporter reads the flag); renderer keeps drawing regardless.
 async function setSharing(on) {
 	currentSharing = on;
 	await YTB.setConfig({ sharing: on });
@@ -451,12 +416,9 @@ async function setSharing(on) {
 	await refreshStatus(code);
 }
 
-// Confirmed disconnect via Leave room (now in Settings). Leaving is LOCAL state:
-// clear it and land on the chooser at once (which also closes Settings), then
-// release the membership server-side so the Room slot and the Buddy's markers go
-// with it. The release is deliberately NOT a gate — an unreachable backend must
-// not trap the viewer in a room they have already left, and the records carry a
-// TTL that collects them anyway if the DELETE never lands.
+// Leaving is local state: clear it and land on the chooser at once, then release
+// membership server-side (not a gate -- an unreachable backend must not trap the
+// viewer, and TTL cleans up the records anyway if the DELETE never lands).
 async function clearCodeAndChoose() {
 	const { code: oldCode } = await YTB.getConfig();
 	await YTB.setConfig({ code: '' });
@@ -470,10 +432,8 @@ async function clearCodeAndChoose() {
 	}
 }
 
-// Buddy Display Names under `code` for the confirmation, via the shared roomView
-// (same dedup-by-Client-ID the roster uses); an unnamed buddy falls back to a
-// stable "<Adjective> Buddy" (YTB.buddyName), matching the roster and on-page
-// tooltips. Room-full lockout is irrelevant here -- I am already a member.
+// Buddy Display Names for the confirmation, via the shared roomView (same
+// dedup-by-Client-ID the roster uses); unnamed buddies fall back to YTB.buddyName.
 async function buddyNames(code) {
 	if (!code) return [];
 	const records = await YTB.getRecords(code);
@@ -501,9 +461,8 @@ function openSettings() {
 	showView('settings');
 }
 
-// Back: return to the room view Settings was opened from. Connected re-routes
-// through a real GET (state may have changed while in Settings); a cleared
-// code (left the room from Settings) falls back to the chooser.
+// Return to the room view Settings opened from; Connected re-routes through a
+// real GET since state may have changed while in Settings.
 async function closeSettings() {
 	const { code } = await YTB.getConfig();
 	if (settingsReturn === 'connected' && code) {
@@ -516,12 +475,9 @@ async function closeSettings() {
 	}
 }
 
-// Merge-persist a Settings change and reflect it into the controls at once.
-// homeSectionHidden keeps its dedicated storage seam (shared with the guide
-// toggle); everything else goes through YTB.setSettings. A theme choice also
-// stamps data-theme on this document immediately — theme.js's onChanged
-// listener restyles every open YouTube tab (and would restyle us too, this is
-// just the zero-latency path).
+// Merge into currentSettings and re-render. homeSectionHidden has its own storage
+// seam; everything else goes through YTB.setSettings. A theme change also stamps
+// data-theme here immediately, mirroring theme.js's cross-tab onChanged listener.
 function saveSettings(partial) {
 	if (!currentSettings) return;
 	currentSettings = { ...currentSettings, ...partial };
@@ -535,8 +491,7 @@ function saveSettings(partial) {
 	if (Object.keys(rest).length > 0) YTB.setSettings(rest);
 }
 
-// The four Notification Position edges, in reading order so tab order matches
-// the plus layout the CSS paints on the monitor.
+// Reading order so tab order matches the plus layout the CSS paints.
 const EDGE_PICKER_ORDER = ['top', 'left', 'right', 'bottom'];
 
 function buildEdgePicker() {
@@ -560,9 +515,8 @@ function setSwitch(row, on) {
 	row.setAttribute('aria-checked', String(on));
 }
 
-// Reflect currentSettings into every Settings control. The visibility rows
-// read as "shown" switches, so their checked state is the INVERSE of the
-// stored *Hidden keys.
+// Reflect currentSettings into every control; visibility rows read as "shown"
+// switches, so their checked state is the inverse of the stored *Hidden keys.
 function renderSettingsControls() {
 	if (!currentSettings) return;
 	for (const button of el.themeSeg.querySelectorAll('[data-theme-choice]')) {
@@ -586,10 +540,8 @@ function updateSettingsRoomControls() {
 
 // --- view switching ----------------------------------------------------------
 
-// Show exactly one of the four views (chooser / join / connected / settings).
-// Re-unhiding a view restarts its CSS enter animation (fade + 6px rise). The
-// Cancel link in the chooser only makes sense when an active code exists
-// (reached via "Leave room").
+// Show exactly one of the four views; re-unhiding restarts its CSS enter animation.
+// The chooser's Cancel link only makes sense when an active code exists.
 function showView(name) {
 	if (name === 'join') clearJoinError();
 	if (name !== 'chooser') clearCreateError();
@@ -605,19 +557,15 @@ function showView(name) {
 	}
 }
 
-// Render the Connected view for an active code, showing its pretty label. The
-// copy button is always available (created or joined).
+// Render the Connected view for an active code, showing its pretty label.
 function showConnected(code) {
 	el.code.textContent = YTBRoomCode.pretty(code);
 	showView('connected');
 }
 
-// Room status, from my perspective (a Room Code is one Room of up to
-// YTB.MAX_MEMBERS people):
-//   Unpaired      -- no code.
-//   Waiting       -- code set, but no Buddy has a record yet.
-//   In room       -- 1+ Buddies; list each with their color swatch + last-seen.
-//   Room full     -- 5 others already, I'm not one of them (the locked-out 6th).
+// Room status from my perspective: Unpaired (no code), Waiting (code set, no
+// Buddy record yet), In room (1+ Buddies, listed with swatch + last-seen), or
+// Room full (5 others already, I'm the locked-out 6th).
 async function refreshStatus(code) {
 	if (!code) {
 		activeRoomCode = '';
@@ -677,10 +625,8 @@ async function refreshConnectedRoom() {
 	await refreshStatus(code);
 }
 
-// Render the status panel. Waiting and in-room states show the Sharing state:
-// a muted read-only "Sharing on" line while on (the guarded stop lives in
-// Settings), or a compact one-click "Turn on sharing" while off. Unpaired
-// and Room-full states show neither.
+// Waiting/in-room states show Sharing state (read-only "on" line, or a one-click
+// "Turn on sharing"); Unpaired and Room-full show neither.
 function setStatus(state, text, sub, memberStates = false) {
 	el.status.dataset.state = state;
 	el.statusText.textContent = text;
@@ -692,16 +638,13 @@ function setStatus(state, text, sub, memberStates = false) {
 	updateSettingsRoomControls();
 }
 
-// Render one row per Buddy: [color swatch] name ... last-seen. The swatch square
-// matches that Buddy's markers/segments (YTB.buddyColor), so the popup doubles
-// as the color legend. Newest-active Buddy first (roomView already sorts).
-// A row whose Client ID was not in the previous render springs in; rows that
-// were already there re-render in place with no motion (the 5s poll stays calm).
+// One row per Buddy: swatch (matches their markers, so the popup doubles as the
+// color legend), name, last-seen. A row new since the previous render springs in;
+// existing rows stay motionless so the 5s poll stays calm.
 function renderRoster(buddies, roster = buddies) {
 	const ids = buddies.map((b) => b.clientId);
 	const sameRoster = prevRosterIds !== null && ids.join('\n') === prevRosterIds.join('\n');
-	// Keep an open picker up across a no-change poll; anything else invalidates
-	// its anchor, so close it.
+	// Keep an open picker up across a no-change poll; anything else closes it.
 	if (!sameRoster) closeColorGrid();
 
 	currentRosterBuddies = buddies;
@@ -726,8 +669,7 @@ function renderRoster(buddies, roster = buddies) {
 			swatch.classList.add('is-picked');
 			lastPickedBuddyId = '';
 		}
-		// Stop this from also reaching the document-level outside-click dismissal
-		// -- toggle/re-anchor is handled explicitly here.
+		// Stop propagation; toggle/re-anchor is handled explicitly here, not by the outside-click dismissal.
 		swatch.addEventListener('click', (e) => {
 			e.stopPropagation();
 			toggleColorGrid(b.clientId, swatch, row);
@@ -747,8 +689,7 @@ function renderRoster(buddies, roster = buddies) {
 	prevRosterIds = ids;
 }
 
-// Toggle: re-clicking the Buddy the picker is already open for closes it;
-// clicking a different Buddy re-anchors and repopulates for them instead.
+// Re-clicking the Buddy the picker is already open for closes it; a different Buddy re-anchors it instead.
 function toggleColorGrid(clientId, anchorEl, rowEl) {
 	const alreadyOpenForThis = !el.colorGrid.hidden && selectedBuddyId === clientId;
 	if (alreadyOpenForThis) {
@@ -797,9 +738,8 @@ function closeColorGrid() {
 	selectedBuddyId = '';
 }
 
-// Left-align the popover to the clicked swatch and open it directly below
-// that row by default, flipping above when the popup doesn't have enough
-// remaining space below (e.g. the last roster row).
+// Left-align to the clicked swatch, open below by default, flip above when the
+// popup lacks room below (e.g. the last roster row).
 function positionColorGrid(anchorEl, rowEl) {
 	const anchorRect = anchorEl.getBoundingClientRect();
 	const rowRect = rowEl.getBoundingClientRect();
@@ -811,8 +751,8 @@ function positionColorGrid(anchorEl, rowEl) {
 	el.colorGrid.style.top = fitsBelow ? `${rowRect.bottom + gap}px` : `${rowRect.top - gap - gridHeight}px`;
 }
 
-// Wall-clock "last seen" for a record's updatedAt (ms epoch). YTB.formatTime is
-// for video positions, not timestamps, so format relative time here.
+// Wall-clock "last seen" for updatedAt (ms epoch); YTB.formatTime is for video
+// positions, not timestamps.
 function formatLastSeen(updatedAt) {
 	const diff = Date.now() - updatedAt;
 	const sec = Math.max(0, Math.round(diff / 1000));

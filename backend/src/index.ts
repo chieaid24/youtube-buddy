@@ -19,8 +19,7 @@ export default {
 		try {
 			return await route(req, env, url, log);
 		} catch (err) {
-			// Unexpected storage/parse/server failure: log loudly (no Room Codes,
-			// Client IDs, names, or note text — the message is exception prose only).
+			// Unexpected failure: log loudly, but no Room Codes/Client IDs/names/text - message is exception prose only.
 			console.error(
 				JSON.stringify({
 					op: log.op,
@@ -52,8 +51,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	const prefix = `${code}:`;
 	const path = url.pathname;
 
-	// Presence: a member appears the instant they join a Code, independent of
-	// whether they're watching anything. Stored under `${code}:presence:${id}`.
+	// Presence: a member appears the instant they join, independent of watching. Stored under `${code}:presence:${id}`.
 	if (req.method === 'POST' && path === '/presence') {
 		const body = (await req.json()) as Partial<PresenceBody>;
 		if (!isValidClientId(body.clientId)) {
@@ -75,10 +73,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true });
 	}
 
-	// Leaving a Room removes the member completely: their presence row, all
-	// Progress Records, their Notes (each with its whole conversation), and
-	// every Reply they left under other authors' Notes — across every page of
-	// the KV listing. Deleting absent keys is harmless, so it's idempotent.
+	// Leaving a Room removes the member completely: presence, Progress Records, Notes (with conversations), and
+	// Replies under others' Notes, across every listing page; deleting absent keys is idempotent.
 	if (req.method === 'DELETE' && path === '/member') {
 		const clientId = url.searchParams.get('clientId');
 		if (!clientId) {
@@ -91,9 +87,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true });
 	}
 
-	// The Shared Playlist: one Room-level list keyed by videoId
-	// (`${code}:playlist:${videoId}`), so re-adding dedups naturally and removal
-	// is a point delete. Items are Room-communal — no per-item ownership.
+	// Shared Playlist: one Room-level list keyed by videoId (`${code}:playlist:${videoId}`) - re-adding dedups
+	// naturally, removal is a point delete; items are Room-communal, no per-item ownership.
 	if (req.method === 'POST' && path === '/playlist') {
 		const body = (await req.json()) as Partial<PlaylistBody>;
 		const error = validatePlaylist(body);
@@ -117,11 +112,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 409, 'playlist_full', 'playlist full');
 		}
 
-		// A server-minted id names one recommendation INSTANCE (ADR-0007): stable
-		// while the item stays live (the no-op re-add above returns it unchanged),
-		// freshly minted when a video is recommended again after an un-recommend
-		// (delete then add), so a viewer's identity-keyed Dismiss resurfaces on a
-		// re-recommend. addedAt is server-authoritative; name optional (-> "").
+		// Server-minted id names one recommendation instance (ADR-0007): stable while live, freshly minted after
+		// an un-recommend + re-add, so a Dismiss resurfaces on re-recommend. addedAt is server-authoritative; name optional (-> "").
 		const item = {
 			id: crypto.randomUUID(),
 			videoId: body.videoId,
@@ -135,11 +127,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true, item });
 	}
 
-	// Any member may remove any Playlist Item (the list belongs to the Room).
-	// Idempotent: deleting an absent video is ok. Removals emit NO Playlist
-	// Event (ADR-0007: the recommend Feed line survives an un-recommend). The
-	// actor's clientId is still required because a brand-new clientId is
-	// cap-gated, so a locked-out 6th person cannot curate the list.
+	// Any member may remove any Playlist Item (Room-communal), idempotently; removals emit no Event (ADR-0007:
+	// the Feed line survives an un-recommend). clientId is still required so a locked-out 6th person cannot curate the list.
 	if (req.method === 'DELETE' && path === '/playlist') {
 		const clientId = url.searchParams.get('clientId');
 		const videoId = url.searchParams.get('videoId');
@@ -177,28 +166,24 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			clientId: body.clientId,
 			name: typeof body.name === 'string' ? body.name : '',
 			videoId: body.videoId,
-			// The video's title, frozen at post time (like a Playlist Event's, see
-			// recordPlaylistEvent). Absent means the poster had no title to give.
+			// Frozen at post time (like a Playlist Event's, see recordPlaylistEvent); absent means no title given.
 			...(videoTitle !== undefined ? { videoTitle } : {}),
 			timestamp: body.timestamp,
 			kind: body.kind,
 			body: body.body,
 			spoiler: body.spoiler ?? false,
-			// Mentions are stored Client IDs, never display-name text (ADR-0006).
-			// Absent means no mentions — older clients and records stay valid.
+			// Mentions are stored Client IDs, never display-name text (ADR-0006); absent means none.
 			...(body.mentions !== undefined ? { mentions: body.mentions } : {}),
 			createdAt: Date.now(),
 		};
 		await env.PROGRESS.put(`${prefix}note:${body.clientId}:${body.videoId}:${id}`, JSON.stringify(record), {
 			expirationTtl: TTL_SECONDS,
 		});
-		// The complete server-authoritative record: the extension inserts it into
-		// the active Video Timeline immediately, without inventing server fields.
+		// Complete server-authoritative record so the extension can insert it into the Video Timeline without inventing fields.
 		return json({ ok: true, id, note: record });
 	}
 
-	// Deleting a parent Note deletes its whole conversation: every Reply under
-	// it goes too, so no orphan Reply outlives its parent (ADR-0003 ownership).
+	// Deleting a parent Note cascades to every Reply under it, so none outlives its parent (ADR-0003).
 	if (req.method === 'DELETE' && path === '/notes') {
 		const clientId = url.searchParams.get('clientId');
 		const id = url.searchParams.get('id');
@@ -222,10 +207,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true });
 	}
 
-	// A Reply: a short text-only child of one existing text Note. Stored under
-	// `${code}:reply:${noteId}:${authorClientId}:${replyId}` so a conversation
-	// is one prefix scan and a member's Replies are removable without value
-	// reads. Posting one extends the whole conversation's lifetime.
+	// A Reply is a short text-only child of an existing text Note, stored under
+	// `${code}:reply:${noteId}:${authorClientId}:${replyId}` so a conversation is one prefix scan and a
+	// member's Replies are removable without value reads; posting one extends the whole conversation's lifetime.
 	if (req.method === 'POST' && path === '/replies') {
 		const body = (await req.json()) as Partial<ReplyBody>;
 		const error = validateReply(body);
@@ -265,9 +249,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		};
 		await env.PROGRESS.put(`${replyPrefix}${body.clientId}:${id}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
 
-		// Extend the conversation's lifetime to 14 days from this latest Reply:
-		// re-put the parent and every prior Reply (bounded by MAX_REPLIES) with a
-		// fresh TTL, together, so nothing in the conversation outlives its parent.
+		// Re-put the parent and every prior Reply (bounded by MAX_REPLIES) with a fresh TTL so the conversation ages as a unit.
 		await Promise.all([
 			env.PROGRESS.put(noteKey!, noteRaw, { expirationTtl: TTL_SECONDS }),
 			...existing.keys.map(async ({ name }) => {
@@ -278,8 +260,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true, reply: record });
 	}
 
-	// Focused conversation read: one Note plus its Replies (oldest first), so an
-	// open Expanded Note can poll every 5s without pulling the whole Room.
+	// Focused conversation read: one Note plus its Replies (oldest first), for the Expanded Note's 5s poll without pulling the whole Room.
 	if (req.method === 'GET' && path === '/conversation') {
 		const noteId = url.searchParams.get('noteId');
 		if (!noteId) {
@@ -303,15 +284,12 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', error);
 		}
 
-		// Best-effort Room cap: a Room Code holds at most MAX_MEMBERS distinct
-		// Client IDs, counting both progress and presence rows. A brand-new
-		// Client ID is rejected once the Room is full; returning members — and
-		// their new videos — always go through.
+		// Best-effort Room cap: a brand-new Client ID is rejected once MAX_MEMBERS is reached; returning members always go through.
 		if (!(await roomHasCapacityFor(env, prefix, body.clientId!))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
-		// updatedAt is server-authoritative — never trust the client's value.
+		// updatedAt is server-authoritative - never trust the client's value.
 		const key = `${prefix}${body.clientId}:${body.videoId}`;
 		const record = {
 			clientId: body.clientId,
@@ -328,12 +306,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	}
 
 	if (req.method === 'GET' && path === '/') {
-		// One prefix scan over every kind; partition by key shape. Presence keys
-		// carry the "presence" infix (`${code}:presence:${id}`), Notes the "note"
-		// infix, Replies the "reply" infix, Playlist Items the "playlist" infix,
-		// Playlist Events the "event" infix; everything else is a progress key
-		// (`${code}:${id}:${videoId}`). Replies ride along so the client can pair
-		// them with parent Notes and show Reply counts on Note Previews.
+		// One prefix scan over every kind, partitioned by key shape: presence/note/reply/playlist/event infixes
+		// route to their bucket, everything else is a progress key (`${code}:${id}:${videoId}`). Replies ride
+		// along so the client can pair them with parent Notes and show Reply counts on Note Previews.
 		const list = await env.PROGRESS.list({ prefix });
 		const progress: unknown[] = [];
 		const presence: unknown[] = [];
@@ -347,11 +322,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 				const value = await env.PROGRESS.get(k.name);
 				if (value === null) return;
 				const kind = k.name.slice(prefix.length).split(':')[0];
-				// Only the five reserved kinds have their own bucket; every other
-				// first segment is a Progress Record's clientId and belongs in
-				// progress. Match on OWN properties so a clientId that happens to
-				// equal an inherited Object property name (e.g. "toString") routes
-				// to progress instead of resolving a prototype member.
+				// Only the five reserved kinds have their own bucket; everything else is a progress clientId.
+				// hasOwn guards against a clientId matching an inherited Object property name (e.g. "toString").
 				const bucket = Object.hasOwn(buckets, kind) ? buckets[kind] : progress;
 				bucket.push(JSON.parse(value));
 			}),

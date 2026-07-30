@@ -1,34 +1,11 @@
 // extension/home-toggle.js
 //
-// The Room Home Toggle: an icon + "Buddy Room" row injected into YouTube's
-// own left guide (sidebar) on the home route, controlling whether the Room
-// Home Section (home-section.js) renders at all. There is no switch — the
-// row is styled to be pixel-indistinguishable from the native guide entries
-// (Home / Shorts / Subscriptions), and the buddies icon itself is the state
-// indicator: apricot while the section is shown, the native guide-icon color
-// while hidden. Off removes the section completely; the toggle row itself
-// stays in the guide so it can be turned back on. The state persists per
-// install in chrome.storage.local (shared.js getHomeSectionHidden/
-// setHomeSectionHidden) and only affects the home surface — on-video
-// markers, Notes, presence, and the watch-page control are untouched.
-//
-// Like the kebab injection in playlist-add.js, targeting YouTube's guide DOM
-// DELIBERATELY accepts markup fragility, contained to this one module: the
-// row is appended to the expanded guide's first section (below Home /
-// Subscriptions) and re-attempted on content.js's throttled ytb:mutation
-// until the guide is present. Pure consumer per ADR-0001.
-//
-// Contract with home-section.js: after each persisted flip this module
-// dispatches `ytb:home-section-visibility` with detail {hidden}; the section
-// module also reads the stored preference itself on load, so neither module
-// depends on the other having run.
-//
-// This module also hosts the Control Panel Launcher: a control-knobs (sliders)
-// icon pinned to the RIGHT end of the toggle row. It asks a hidden,
-// extension-origin Relay Frame to call chrome.action.openPopup(), so Chrome
-// opens the real action popup and this content script never needs chrome.action
-// or a background service worker (ADR-0012). The Launcher stops propagation so
-// it never flips the Room Home Toggle.
+// The Room Home Toggle: a "Buddy Room" row injected into YouTube's left
+// guide on the home route, pixel-matched to native entries, controlling
+// whether home-section.js renders. State lives in chrome.storage.local.
+// Guide-DOM targeting is deliberately fragile, contained to this module
+// (ADR-0001 pure consumer): retried on content.js's throttled ytb:mutation
+// until the guide exists. Also hosts the Control Panel Launcher (ADR-0012).
 
 (function () {
 	'use strict';
@@ -43,17 +20,14 @@
 	const EXT_ORIGIN = new URL(chrome.runtime.getURL('')).origin;
 	const STYLE_ID = 'ytb-home-toggle-style';
 	const SVG_NS = 'http://www.w3.org/2000/svg';
-	// A control-knobs "tune" glyph (Material "tune"): three sliders with knobs.
-	// Deliberately NOT a gear — the launcher opens the whole Control Panel hub,
-	// not just its Settings view.
+	// A control-knobs "tune" glyph (Material "tune"), deliberately not a gear -
+	// the launcher opens the whole Control Panel hub, not just Settings.
 	const TUNE_PATH =
 		'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z';
-	// A two-person "buddies" glyph (Material "people"). While the section is
-	// hidden it inherits the row text color — which is exactly what native
-	// guide icons render at in today's markup (rgb(15,15,15) light /
-	// rgb(241,241,241) dark, measured on production YouTube) — so it matches
-	// Home / Shorts / Subscriptions; while shown it flips to the apricot
-	// accent, the row's only ON/OFF signal.
+	// A two-person "buddies" glyph (Material "people"): hidden, it inherits the
+	// row text color (measured off native guide icons, rgb(15,15,15) light /
+	// rgb(241,241,241) dark) to match Home/Shorts/Subscriptions; shown, it
+	// flips to the apricot accent - the row's only ON/OFF signal.
 	const PEOPLE_PATH =
 		'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z';
 
@@ -69,8 +43,8 @@
 		ensureRow();
 	});
 
-	// A popup-Settings flip of the same homeSectionHidden key must reflect in
-	// this guide row live (our own click also lands here — idempotent).
+	// A popup-Settings flip of homeSectionHidden reflects here live (our own
+	// click also lands here - idempotent).
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
 		hidden = changes.homeSectionHidden.newValue === true;
@@ -83,9 +57,8 @@
 		return location.pathname === '/';
 	}
 
-	/** The guide slot the row lives in: the expanded guide's first section's
-	 * item list, falling back to the section container when YouTube's inner
-	 * markup shifts. Null while the guide isn't built yet (retry on mutation). */
+	/** The guide slot the row lives in, with fallbacks for shifted markup; null
+	 * while the guide isn't built yet (retried on mutation). */
 	function guideSlot() {
 		const guide = document.querySelector('ytd-guide-renderer');
 		if (!guide) return null;
@@ -94,8 +67,8 @@
 
 	function ensureRow() {
 		if (!YTB.isContextActive()) return;
-		// Off the home route (or before the stored state is known) the row has
-		// no business in the page; the section module gates itself the same way.
+		// Off the home route (or before state is known) the row has no business
+		// here; the section module gates itself the same way.
 		if (!onHome || hidden === null) {
 			removeHomeControls();
 			return;
@@ -107,7 +80,7 @@
 		}
 
 		const slot = guideSlot();
-		if (!slot) return; // guide not built yet — a later ytb:mutation retries
+		if (!slot) return; // guide not built yet - a later ytb:mutation retries
 
 		row = document.createElement('button');
 		row.id = ROW_ID;
@@ -122,9 +95,8 @@
 		label.className = 'ytb-ht-label';
 		label.textContent = 'Buddy Room';
 
-		// The Control Panel Launcher, pinned to the row's right end. A role=button
-		// span (not a nested <button>, which is invalid inside the row button); it
-		// swallows its own activation so opening the panel never flips the toggle.
+		// Control Panel Launcher: a role=button span (a nested <button> is
+		// invalid here) that swallows its own activation so it never flips the toggle.
 		const launcher = document.createElement('span');
 		launcher.className = LAUNCHER_CLASS;
 		launcher.setAttribute('role', 'button');
@@ -152,6 +124,8 @@
 			syncRow(row);
 			await YTB.setHomeSectionHidden(hidden);
 			flipping = false;
+			// home-section.js also reads the stored preference on load, so neither
+			// module depends on the other having run first.
 			document.dispatchEvent(new CustomEvent('ytb:home-section-visibility', { detail: { hidden } }));
 		});
 
@@ -159,16 +133,17 @@
 		slot.append(row, ensureRelayFrame(slot));
 	}
 
-	/** Reflect the current state: checked means the section is shown, and the
-	 * is-on class tints the buddies icon apricot — the row's only signal. */
+	/** aria-checked mirrors "section shown"; the is-on class tints the buddies
+	 * icon apricot - the row's only signal. */
 	function syncRow(row) {
 		const shown = hidden === false;
 		row.setAttribute('aria-checked', String(shown));
 		row.classList.toggle('is-on', shown);
 	}
 
-	/** Create the hidden extension-origin frame that can reach chrome.action.
-	 * It is a sibling of the row, so YouTube tearing down the guide removes both. */
+	/** Hidden extension-origin frame that can call chrome.action.openPopup, so
+	 * this content script needs no background service worker (ADR-0012). A
+	 * sibling of the row, so YouTube tearing down the guide removes both. */
 	function ensureRelayFrame(slot) {
 		let frame = document.getElementById(RELAY_ID);
 		if (frame && frame.isConnected) return frame;
@@ -216,10 +191,7 @@
 		document.getElementById(ROW_ID)?.remove();
 	}
 
-	// ---------------------------------------------------------------------------
-	// Wiring: pure consumer, registered synchronously (before content.js fires
-	// the initial ytb:navigate).
-	// ---------------------------------------------------------------------------
+	// --- wiring: pure consumer, registered before content.js's first ytb:navigate ---
 
 	document.addEventListener('ytb:navigate', () => {
 		if (!YTB.isContextActive()) return;
@@ -256,11 +228,9 @@
 		return svg;
 	}
 
-	/** Inject the row stylesheet once (light + html[dark] themes). Every
-	 * metric below was measured off a production YouTube guide entry
-	 * (Home / Shorts / Subscriptions) so the row is pixel-indistinguishable
-	 * from its native siblings; the --yt-spec-* custom properties are gone
-	 * from today's markup, so the measured values are written out directly. */
+	/** Inject the row stylesheet once (light + html[dark]). Every metric below
+	 * was measured off a production guide entry, and written out directly
+	 * since today's markup no longer exposes --yt-spec-* custom properties. */
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');

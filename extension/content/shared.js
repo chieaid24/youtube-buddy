@@ -1,25 +1,12 @@
 // extension/shared.js
-//
-// The `window.YTB` global: backend URL, config storage helpers, the API client,
-// and formatting utils. Loaded by BOTH the popup (<script src="shared.js"> before
-// popup.js) and as the FIRST content-script file, so every helper must work in
-// both contexts (popups and content scripts both have chrome.storage + fetch).
-//
-// Content scripts are NOT ES modules — this file communicates only via the
-// `window.YTB` global, no import/export. See ADR-0001.
-//
-// `code` ownership (decided once, depended on by tasks 04 and 05):
-//   - getRecords(code)  — code is PASSED IN (the popup already holds the code).
-//   - postProgress(...) — code is READ FROM CONFIG (the reporter just wants to
-//                         "send my current position"; it never carries the code).
-// Room Codes are stored already-normalized (popup calls normalizeCode before
-// setConfig), so the API client passes the code through verbatim.
+// The window.YTB global: backend URL, config storage, API client, formatting utils.
+// Loaded by both the popup and as the first content script; no ES modules (ADR-0001),
+// communicates only via window.YTB.
+// code ownership: getRecords(code) takes code as an arg; postProgress reads it from
+// config (already-normalized, so the API client passes it through verbatim).
 
-// Private Room-scoped local-list persistence. Dismissals and seen ids have the
-// same chrome.storage.local shape: { [storageKey]: { [roomCode]: string[] } }.
-// Keep that representation, context lifecycle, Room isolation, and no-op write
-// behavior in one Module; the public YTB functions below remain the domain
-// Interfaces and own their input filtering.
+// Shared Room-scoped local-list persistence for Dismissals and seen ids:
+// { [storageKey]: { [roomCode]: string[] } }. Public YTB functions own input filtering.
 const roomScopedLocalLists = {
 	async read(storageKey, code) {
 		if (!code) return [];
@@ -46,10 +33,9 @@ const roomScopedLocalLists = {
 };
 
 const YTB = {
-	// A Chrome extension reload/update leaves already-injected content scripts in
-	// the page, but revokes their access to extension APIs. Treat that one error
-	// as a terminal lifecycle event for the stale script. Popup documents are
-	// destroyed by Chrome, so the same helpers are harmless there.
+	// A Chrome extension reload/update revokes an already-injected content script's
+	// API access; treat that one error as terminal for the stale script (harmless
+	// in the popup, which Chrome just destroys).
 	_contextActive: true,
 	_contextInvalidationCallbacks: new Set(),
 
@@ -109,13 +95,11 @@ const YTB = {
 	},
 
 	// --- config ---
-	// PLACEHOLDER backend URL — replace with the deployed …workers.dev URL from
-	// task 02 (also update the matching entry in manifest.json host_permissions).
+	// Local dev backend; update alongside manifest.json host_permissions before deploying.
 	BACKEND_URL: 'http://localhost:8787',
 
-	// A Room Code is one Room of at most this many distinct Client IDs (you +
-	// up to 4 Buddies). Mirrors MAX_MEMBERS in the backend Worker; the server
-	// enforces it, the client uses it to detect a full Room (see roomView).
+	// One Room of at most this many distinct Client IDs. Mirrors backend MAX_MEMBERS;
+	// the server enforces it, the client uses it to detect a full Room (see roomView).
 	MAX_MEMBERS: 5,
 
 	// Keep this literal in lockstep with backend NOTE_EMOJIS. The backend rejects
@@ -131,10 +115,8 @@ const YTB = {
 	// this many distinct videos (API/KV names keep the playlist term, ADR-0007).
 	MAX_PLAYLIST_ITEMS: 30,
 
-	// The Expanded Note omits "Go here" when the paused playhead already sits
-	// within this many seconds of the Note's moment (nearNoteMoment) — there is
-	// nowhere meaningful to go. Independent of the Playback Notification
-	// "natural crossing" delta in notes.js.
+	// The Expanded Note omits "Go here" within this many seconds of the Note's moment
+	// (nearNoteMoment); independent of the "natural crossing" delta in notes.js.
 	GO_HERE_NEAR_SECONDS: 2,
 
 	// --- storage (chrome.storage.local) ---
@@ -144,9 +126,8 @@ const YTB = {
 	// seenItems maps.
 
 	/**
-	 * Read the full config, applying defaults for unset keys.
-	 * `clientId` is "" until ensureClientId() has minted one — call that when you
-	 * need a guaranteed id.
+	 * Read the full config, applying defaults for unset keys; clientId is "" until
+	 * ensureClientId() mints one.
 	 * @returns {Promise<{name: string, code: string, clientId: string, sharing: boolean}>}
 	 */
 	async getConfig() {
@@ -160,9 +141,8 @@ const YTB = {
 	},
 
 	/**
-	 * Merge-write a subset of { name, code, sharing } into
-	 * chrome.storage.local. `clientId` is intentionally NOT writable here — it is
-	 * owned by ensureClientId.
+	 * Merge-write a subset of { name, code, sharing }; clientId is owned by
+	 * ensureClientId, not writable here.
 	 * @param {{name?: string, code?: string, sharing?: boolean}} partial
 	 */
 	async setConfig(partial) {
@@ -174,8 +154,8 @@ const YTB = {
 	},
 
 	/**
-	 * Whether the viewer turned the Room Home Section off with the Room Home
-	 * Toggle. Per install (NOT Room-scoped), absent means visible.
+	 * Whether the Room Home Toggle turned the Room Home Section off. Per install
+	 * (not Room-scoped); absent means visible.
 	 * @returns {Promise<boolean>}
 	 */
 	async getHomeSectionHidden() {
@@ -184,8 +164,8 @@ const YTB = {
 	},
 
 	/**
-	 * Persist the Room Home Toggle state. Coerced to a strict boolean so the
-	 * stored value round-trips getHomeSectionHidden exactly.
+	 * Persist the Room Home Toggle state, coerced to a strict boolean so it
+	 * round-trips getHomeSectionHidden exactly.
 	 * @param {boolean} hidden
 	 * @returns {Promise<boolean>} false when the extension context is gone.
 	 */
@@ -193,28 +173,20 @@ const YTB = {
 		return await YTB._storageSet({ homeSectionHidden: hidden === true });
 	},
 
-	// A clicked Room Feed reply/mention row lives on the home route; the video it
-	// points at is rendered by notes.js on the watch route. The two surfaces hand
-	// off through this single storage slot: the row records the videoId, and
-	// notes.js consumes it on the first Room read after arrival — pausing the
-	// player only when an Unseen dot is on that video (ADR-0010). Storage (not just
-	// an in-memory event) so the handshake survives BOTH an SPA navigation — where
-	// the content scripts stay alive per ADR-0001 — and a full page reload. The TTL
-	// keeps a stale target (an abandoned click) from pausing a video days later.
+	// Room Feed row click -> notes.js handoff (ADR-0010): the videoId is recorded here
+	// (storage, not an in-memory event, so it survives SPA navigation and full reloads)
+	// and consumed on arrival's first Room read to pause when an Unseen dot exists;
+	// the TTL expires a stale click.
 	PENDING_ARRIVAL_TTL_MS: 30_000,
 
-	// How long after arriving from a Room Feed row notes.js treats a video `play`
-	// as load-time churn (the watch page's autoplay kicking in as it settles)
-	// rather than the viewer's deliberate resume: during this window the arrival
-	// pause is re-asserted; afterwards a play is the viewer's. Long enough to
-	// outlast autoplay-on-arrival, short enough not to swallow a real later resume.
-	// See YTB.playAction.
+	// Window after a Room Feed arrival during which a video `play` is treated as
+	// autoplay churn (re-pause) rather than the viewer's resume; see YTB.playAction.
 	PANEL_LOAD_GRACE_MS: 4_000,
 	_arrivalGraceUntil: 0,
 
 	/**
-	 * Arm the short ADR-0010 arrival grace. The clock lives in shared.js because
-	 * either on-video overlay may need to cancel it for an explicit Picture Click.
+	 * Arm the ADR-0010 arrival grace; lives here so either overlay can cancel it
+	 * on an explicit Picture Click.
 	 * @param {number} now
 	 * @returns {number} the grace deadline
 	 */
@@ -223,7 +195,6 @@ const YTB = {
 		return YTB._arrivalGraceUntil;
 	},
 
-	/** @param {number} now */
 	withinArrivalGrace(now = Date.now()) {
 		return Number(now) < YTB._arrivalGraceUntil;
 	},
@@ -233,9 +204,8 @@ const YTB = {
 	},
 
 	/**
-	 * Record the video a Room Feed row points at, for notes.js to consult after
-	 * the navigation to `videoId`. A single slot: a newer click replaces an older
-	 * unconsumed one.
+	 * Record the video a Room Feed row points at for notes.js to consult after
+	 * navigating; a single slot, so a newer click replaces an unconsumed older one.
 	 * @param {string} videoId
 	 * @returns {Promise<boolean>} false when the videoId is missing or context is gone.
 	 */
@@ -249,7 +219,6 @@ const YTB = {
 
 	/**
 	 * Read the pending arrival, or null when absent, malformed, or past its TTL.
-	 * Never throws on a stale/garbage value.
 	 * @returns {Promise<{videoId: string, at: number}|null>}
 	 */
 	async getPendingArrival() {
@@ -270,22 +239,19 @@ const YTB = {
 
 	// --- Settings (per install, chrome.storage.local — mirrors homeSectionHidden) ---
 
-	// The Theme Preference's legal values (ADR-0008/0009). 'light'/'dark' stamp
-	// data-theme on the root everywhere. 'system' is the "Auto" option: in the
-	// popup it follows the OS via @media (prefers-color-scheme); on a YouTube page
-	// it follows YouTube's own theme (see themeMarker below + theme.js).
+	// Theme Preference legal values (ADR-0008/0009): light/dark stamp data-theme
+	// everywhere; system follows the OS in the popup, YouTube's own theme on-page
+	// (see themeMarker, theme.js).
 	THEMES: ['light', 'dark', 'system'],
 
-	// The Notification Position's four edges. Playback Notifications render
-	// centered along the chosen player edge (notes.js): top/bottom are
-	// horizontally centered, left/right vertically centered.
+	// Notification Position's four edges; Playback Notifications center along the
+	// chosen player edge (notes.js).
 	NOTIFICATION_EDGES: ['top', 'bottom', 'left', 'right'],
 
 	/**
-	 * Read every Settings key, coercing unset/junk values to the documented
-	 * defaults so consumers never validate: theme 'system', Spoiler Default on,
-	 * Notification Position bottom, Notes and Buddy Progress shown.
-	 * (The Room Home Section keeps its own getHomeSectionHidden seam above.)
+	 * Read every Settings key, coercing unset/junk values to defaults (theme
+	 * 'system', Spoiler Default on, Notification Position bottom, Notes/Buddy
+	 * Progress shown); Room Home Section has its own getHomeSectionHidden seam.
 	 * @returns {Promise<{theme: string, spoilerDefault: boolean, notificationPosition: string, notesHidden: boolean, buddyProgressHidden: boolean}>}
 	 */
 	async getSettings() {
@@ -300,9 +266,9 @@ const YTB = {
 	},
 
 	/**
-	 * Merge-write a subset of the Settings keys, validating each value so the
-	 * stored state always round-trips getSettings exactly (an illegal theme/edge
-	 * is dropped; visibility/spoiler flags coerce to strict booleans).
+	 * Merge-write a subset of Settings keys, validating each so stored state
+	 * round-trips getSettings exactly (illegal theme/edge dropped, flags coerced
+	 * to booleans).
 	 * @param {{theme?: string, spoilerDefault?: boolean, notificationPosition?: string, notesHidden?: boolean, buddyProgressHidden?: boolean}} partial
 	 * @returns {Promise<boolean>} false when the extension context is gone.
 	 */
@@ -319,13 +285,9 @@ const YTB = {
 	},
 
 	/**
-	 * The pure Theme Preference -> data-theme marker decision (ADR-0008/0009).
-	 * Forced 'light'/'dark' win everywhere. Under Auto ('system', or any
-	 * unexpected/absent value) the marker follows the surrounding page: on a
-	 * YouTube page `pageDark` is a boolean (from `<html dark>`) and the marker
-	 * mirrors it; off-page (the popup, `pageDark === null`) there is nothing to
-	 * follow, so the marker is left unset (null) and the OS
-	 * @media (prefers-color-scheme) fallback rules.
+	 * Theme Preference -> data-theme decision (ADR-0008/0009): forced light/dark
+	 * always wins; under Auto it mirrors the YouTube page's own darkness, or is
+	 * left unset off-page (popup) to fall back to the OS media query.
 	 * @param {string} preference stored Theme Preference
 	 * @param {boolean|null} pageDark YouTube page darkness, or null off-page (popup)
 	 * @returns {'light'|'dark'|null} the data-theme value, or null to leave it unset
@@ -338,8 +300,7 @@ const YTB = {
 	},
 
 	/**
-	 * Show one shared, auto-dismissing page toast. theme.js owns the matching
-	 * styles so every content-script caller gets the same presentation.
+	 * Show one shared, auto-dismissing page toast; theme.js owns the matching styles.
 	 * @param {string} text
 	 */
 	toast(text) {
@@ -361,8 +322,8 @@ const YTB = {
 	},
 
 	/**
-	 * Return the existing Client ID, or mint one ONCE (8 hex chars) and persist it.
-	 * Stable for the life of the install.
+	 * Return the existing Client ID, or mint one ONCE (8 hex chars) and persist it;
+	 * stable for the life of the install.
 	 * @returns {Promise<string>}
 	 */
 	async ensureClientId() {
@@ -376,13 +337,12 @@ const YTB = {
 		return id;
 	},
 
-	// --- API client (talks to BACKEND_URL; wire format defined in task 01) ---
+	// --- API client (talks to BACKEND_URL) ---
 
 	/**
-	 * POST this user's current Progress Record. Reads the Room Code from config.
-	 * Body is exactly the 5 fields below (no updatedAt — the server sets it).
-	 * Tolerates failure silently per the PRD's "minimal error handling": resolves
-	 * to { ok: true } on success, or false on missing code / network / non-2xx.
+	 * POST this user's current Progress Record (Room Code read from config, no
+	 * updatedAt - server sets it); tolerates failure silently per the PRD, resolving
+	 * false on missing code / network / non-2xx.
 	 * @param {{clientId: string, name: string, videoId: string, timestamp: number, duration: number}} record
 	 * @returns {Promise<{ok: true}|false>}
 	 */
@@ -408,10 +368,9 @@ const YTB = {
 	},
 
 	/**
-	 * GET everything live under `code`: Progress Records AND presence rows (mine
-	 * AND the Buddies' — the server does no filtering; consumers split by comparing
-	 * clientId). The server returns `{ progress, presence }`; on any failure this
-	 * resolves to empty arrays so callers never have to null-check.
+	 * GET everything live under `code` (server does no filtering; consumers split
+	 * mine vs Buddies' by clientId); resolves to empty arrays on any failure so
+	 * callers never null-check.
 	 * @param {string} code Room Code (already normalized).
 	 * @returns {Promise<{progress: Array<{clientId: string, name: string, videoId: string, timestamp: number, duration: number, updatedAt: number}>, presence: Array<{clientId: string, name: string, updatedAt: number}>, notes: Array<{id: string, clientId: string, name: string, videoId: string, timestamp: number, kind: string, body: string, spoiler: boolean, createdAt: number}>}>}
 	 */
@@ -428,9 +387,8 @@ const YTB = {
 		try {
 			const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code));
 			if (!res.ok) {
-				// Minimal error handling by design (see PRD): we still render nothing this
-				// cycle, but a non-2xx must not vanish silently — an unlogged GET failure
-				// is a total Buddy blackout (no markers, no thumbnail bars) with no trace.
+				// Minimal error handling by design (PRD), but a silent non-2xx would be an
+				// untraceable total Buddy blackout - so warn.
 				console.warn('[youtube-buddy] getRecords: backend GET returned HTTP', res.status, '- rendering no Buddies this cycle');
 				return empty;
 			}
@@ -466,11 +424,9 @@ const YTB = {
 	},
 
 	/**
-	 * POST a JSON payload and normalize the outcome: `{ ok: true, ...body }` on
-	 * success, else `{ ok: false, category }` with the server's machine-readable
-	 * error category (`network` when fetch throws; `unexpected` for an
-	 * unparseable response body).
-	 * Callers branch on `category`, never on prose.
+	 * POST a JSON payload and normalize the outcome to { ok: true, ...body } or
+	 * { ok: false, category } (network/unexpected on failure); callers branch on
+	 * category, never prose.
 	 */
 	async _postJson(pathAndQuery, payload) {
 		try {
@@ -489,13 +445,10 @@ const YTB = {
 	},
 
 	/**
-	 * Post a text Note or curated-emoji Reaction at a playback position.
-	 * Resolves to `{ ok: true, note }` carrying the COMPLETE server-authoritative
-	 * record (insert it into the active Video Timeline immediately), or
-	 * `{ ok: false, category }`. Requires a Room Code; Sharing does NOT gate Note
-	 * writes (CONTEXT.md: Sharing covers Progress Record reporting only).
-	 * `videoTitle` is the video's title captured at post time (see watchTitle);
-	 * omitted when the page had none, and never a reason for the post to fail.
+	 * Post a text Note or curated-emoji Reaction; resolves { ok: true, note } with
+	 * the complete server record, or { ok: false, category }. Requires a Room
+	 * Code; Sharing does NOT gate Note writes (CONTEXT.md). videoTitle is captured
+	 * at post time (watchTitle) and never required.
 	 * @returns {Promise<{ok: true, note: object}|{ok: false, category: string}>}
 	 */
 	async postNote({ clientId, name, videoId, videoTitle, timestamp, kind, body, spoiler, mentions }) {
@@ -510,17 +463,15 @@ const YTB = {
 			body,
 			spoiler,
 			...(typeof videoTitle === 'string' && videoTitle !== '' ? { videoTitle } : {}),
-			// Mentions are stored Client IDs picked from the roster (ADR-0006).
-			// Omitted entirely when empty, keeping the pre-mentions wire format.
+			// Mentions are roster Client IDs (ADR-0006); omitted entirely when empty.
 			...(Array.isArray(mentions) && mentions.length > 0 ? { mentions } : {}),
 		});
 	},
 
 	/**
-	 * Post a Reply to an existing text Note. Resolves to `{ ok: true, reply }`
-	 * with the complete server record (append it to the open conversation), or
-	 * `{ ok: false, category }` — notably 'reply_cap', 'missing_parent', or
-	 * 'room_full'. Requires a Room Code; Sharing does NOT gate Reply writes.
+	 * Post a Reply to an existing text Note; resolves { ok: true, reply } with the
+	 * complete server record, or { ok: false, category } (reply_cap, missing_parent,
+	 * room_full). Requires a Room Code; Sharing does NOT gate Reply writes.
 	 * @returns {Promise<{ok: true, reply: object}|{ok: false, category: string}>}
 	 */
 	async postReply({ clientId, name, noteId, body, mentions }) {
@@ -536,13 +487,10 @@ const YTB = {
 	},
 
 	/**
-	 * Recommend a video to the Room (ADR-0007; the API keeps its playlist
-	 * name). Reads the Room Code from config. NOT gated by Sharing:
-	 * recommending is an explicit act, not position reporting (Sharing only
-	 * covers Progress Records). Re-adding an existing video is a server-side
-	 * no-op returning the EXISTING item (its original recommender stands).
-	 * Resolves `{ ok: true, item }` with the complete server record, or
-	 * `{ ok: false, category }` — notably 'playlist_full' and 'room_full'.
+	 * Recommend a video to the Room (ADR-0007; API keeps the playlist name),
+	 * reading Room Code from config; NOT gated by Sharing. Re-adding is a server
+	 * no-op returning the existing item. Resolves { ok: true, item } or
+	 * { ok: false, category } (playlist_full, room_full).
 	 * @returns {Promise<{ok: true, item: object}|{ok: false, category: string}>}
 	 */
 	async postPlaylistAdd({ clientId, name, videoId, title }) {
@@ -557,11 +505,9 @@ const YTB = {
 	},
 
 	/**
-	 * Remove one Recommendation for everyone — the un-recommend point delete
-	 * (ADR-0007). Idempotent on the server, which stays permissive (any member
-	 * may delete); the UI only offers it to the recommender, from the
-	 * watch-page pill. Removals emit no Playlist Event. The clientId is the
-	 * acting member (a brand-new clientId is still Room-cap gated).
+	 * Remove one Recommendation for everyone (the un-recommend point delete,
+	 * ADR-0007); idempotent, server-permissive to any member though the UI only
+	 * offers it to the recommender. Emits no Playlist Event.
 	 * @returns {Promise<{ok: true}|{ok: false, category: string}>}
 	 */
 	async deletePlaylistItem({ clientId, videoId }) {
@@ -581,10 +527,9 @@ const YTB = {
 	},
 
 	/**
-	 * Focused conversation read for an open Expanded Note: one parent Note plus
-	 * its Replies oldest-first, cheap enough to poll every 5 seconds without
-	 * pulling the whole Room. `{ ok: false, category: 'missing_parent' }` means
-	 * the Note was deleted while open.
+	 * Focused conversation read for an open Expanded Note (parent + Replies
+	 * oldest-first), cheap enough to poll every 5s without a full Room read;
+	 * missing_parent means the Note was deleted while open.
 	 * @returns {Promise<{ok: true, note: object, replies: Array<object>}|{ok: false, category: string}>}
 	 */
 	async getConversation(code, noteId) {
@@ -607,10 +552,8 @@ const YTB = {
 	},
 
 	/**
-	 * Announce "I'm here" under `code` — a presence row independent of watching and
-	 * of the Sharing toggle. Idempotent upsert (the server refreshes updatedAt +
-	 * TTL), so it doubles as a keep-alive and a backfill for pre-presence installs.
-	 * Best-effort: resolves { ok: true } on success, false otherwise.
+	 * Announce "I'm here" under `code`, independent of watching/Sharing; idempotent
+	 * upsert doubling as a keep-alive and pre-presence backfill.
 	 * @param {string} code Room Code (already normalized).
 	 * @returns {Promise<{ok: true}|false>}
 	 */
@@ -632,8 +575,8 @@ const YTB = {
 	},
 
 	/**
-	 * Remove my membership from `code`, including presence and every Progress
-	 * Record. Idempotent on the server. Best-effort — on failure records TTL out.
+	 * Remove my membership from `code` (presence + every Progress Record),
+	 * idempotent on the server; best-effort, records TTL out on failure.
 	 * @param {string} code Room Code (already normalized).
 	 * @param {string} clientId
 	 * @returns {Promise<{ok: true}|false>}
@@ -653,8 +596,8 @@ const YTB = {
 	// --- utils ---
 
 	/**
-	 * Fold one Room-read outcome into a poller's consecutive-failure state.
-	 * Pollers own the counter; this helper only defines the shared threshold.
+	 * Fold one Room-read outcome into a poller's consecutive-failure state;
+	 * pollers own the counter, this only defines the shared threshold.
 	 * @param {number} prevFailures
 	 * @param {boolean} ok
 	 * @returns {{failures: number, lost: boolean}}
@@ -665,8 +608,7 @@ const YTB = {
 	},
 
 	/**
-	 * Format seconds as "M:SS" (or "H:MM:SS" past an hour) for tooltips.
-	 * e.g. 412 -> "6:52".
+	 * Format seconds as "M:SS" (or "H:MM:SS" past an hour) for tooltips, e.g. 412 -> "6:52".
 	 * @param {number} seconds
 	 * @returns {string}
 	 */
@@ -681,10 +623,8 @@ const YTB = {
 	},
 
 	/**
-	 * Relative age label for a creation time: "just now", "8 min ago",
-	 * "1 hr ago", "4 days ago", "1 week ago" — rounded DOWN to the largest
-	 * useful unit, progressing to months after four weeks and to years after
-	 * twelve months. UI copy prefixes "Posted ".
+	 * Relative age label ("just now", "8 min ago", ... "1 year ago"), rounded down
+	 * to the largest useful unit; UI copy prefixes "Posted ".
 	 * @param {number} thenMs epoch millis (server createdAt)
 	 * @param {number} [nowMs]
 	 * @returns {string}
@@ -707,10 +647,9 @@ const YTB = {
 	},
 
 	/**
-	 * User-facing copy for a failed Note/Reply/Reaction write, keyed by the
-	 * server's machine-readable category. Known safe cases get specific copy;
-	 * everything else gets the action's generic retry message. Never surfaces
-	 * backend prose.
+	 * User-facing copy for a failed write, keyed by the server's machine-readable
+	 * category; unknown categories fall back to a generic retry message. Never
+	 * surfaces backend prose.
 	 * @param {string} category
 	 * @param {'note'|'reply'|'reaction'|'recommendation'} action
 	 * @returns {string}
@@ -724,9 +663,8 @@ const YTB = {
 	},
 
 	/**
-	 * Copy for the author-only delete confirmation in the Expanded Note.
-	 * Deleting a Note cascades to its whole conversation, so the confirmation
-	 * says exactly how many Replies go with it (correct singular/plural).
+	 * Copy for the author-only delete confirmation; a Note's delete cascades to
+	 * its conversation, so this says exactly how many Replies go with it.
 	 * @param {number} replyCount
 	 * @returns {string}
 	 */
@@ -737,9 +675,8 @@ const YTB = {
 	},
 
 	/**
-	 * The playback position "Go here" seeks to: roughly one second BEFORE the
-	 * Note's timestamp (clamped at 0), so resuming playback crosses the Note
-	 * naturally and its own Playback Notification fires on the crossing.
+	 * Where "Go here" seeks to: about one second before the Note's timestamp
+	 * (clamped at 0), so resuming crosses it naturally and fires its own notification.
 	 * @param {number} timestamp the Note's video timestamp in seconds
 	 * @returns {number}
 	 */
@@ -748,11 +685,9 @@ const YTB = {
 	},
 
 	/**
-	 * What activating (click/Enter/Space) a Note Dot or Note Preview does — now
-	 * one decision for every kind: OPEN its Expanded Note. Timeline activation
-	 * never seeks or changes playback (Go here inside the panel is the only seek),
-	 * so this stays a pure seam the executor consults, keeping that invariant in
-	 * one tested place. The panel it opens is shaped by notePanelVariant.
+	 * What activating a Note Dot/Preview does: always OPEN its Expanded Note
+	 * (Timeline activation never seeks; Go here inside the panel is the only
+	 * seek). Panel shape comes from notePanelVariant.
 	 * @param {{kind?: string, spoiler?: boolean, timestamp?: number}} _note
 	 * @returns {{action: 'open'}}
 	 */
@@ -760,20 +695,16 @@ const YTB = {
 		return { action: 'open' };
 	},
 
-	// A Playback Notification's FULL lifetime (a natural forward crossing), by
-	// kind: a text card breathes longer than a Reaction burst. A Post Echo lives
-	// half these — see notificationLifetime, the ONE rule below.
+	// A Playback Notification's full lifetime on a natural crossing; a Post Echo
+	// lives half (see notificationLifetime).
 	NOTE_CARD_MS: 4000, // text-note card lifetime
 	REACTION_BURST_MS: 2000, // Reaction float-and-fade lifetime
 
 	/**
-	 * A Playback Notification's lifetime in ms, keyed on the record kind and the
-	 * trigger — the ONE rule, so the Note presentation layer stays the executor
-	 * and there are no per-kind magic numbers at the call site. A crossing fires
-	 * the FULL lifetime whoever authored the Note; a Post Echo ('echo') lives
-	 * HALF that (the author already knows what they wrote — the receipt clears the
-	 * player fast). Keyed on the trigger, never on authorship, so replaying across
-	 * your own Note after a rewind behaves exactly like a Buddy's.
+	 * A Playback Notification's lifetime in ms, keyed on kind and trigger: a
+	 * crossing gets the full lifetime, a Post Echo half (the author already knows
+	 * what they wrote); keyed on trigger not authorship, so a rewind-replay across
+	 * your own Note behaves like a Buddy's.
 	 * @param {string} kind the record kind ('emoji' for a Reaction, else a text card)
 	 * @param {'crossing'|'echo'} trigger what fired the notification
 	 * @returns {number} lifetime in ms
@@ -784,9 +715,9 @@ const YTB = {
 	},
 
 	/**
-	 * Classify a click relative to YouTube's player. Known controls and other
-	 * interactive player elements are chrome; the remaining player surface is
-	 * the Video Picture. Callers exclude their own overlay controls first.
+	 * Classify a click relative to YouTube's player: known controls are chrome,
+	 * the remaining player surface is the Video Picture. Callers exclude their
+	 * own overlay controls first.
 	 * @param {{closest?: (selector: string) => unknown}|null} target
 	 * @returns {'picture'|'chrome'|'outside'}
 	 */
@@ -803,13 +734,10 @@ const YTB = {
 	},
 
 	/**
-	 * Route an overlay-open click without touching DOM or playback. A gesture
-	 * whose Press Origin was the overlay remains the overlay's interaction: its
-	 * tail click is consumed so the host cannot toggle playback, but YTB changes
-	 * no overlay or playback state. Otherwise a Picture Click is consumed and
-	 * means play unconditionally; player chrome closes the overlay but leaves the
-	 * control to YouTube; an off-player click keeps the existing Pause Hold
-	 * semantics.
+	 * Route an overlay-open click without touching DOM/playback: a Press Origin
+	 * of 'overlay' only consumes the tail click; otherwise a Picture Click plays
+	 * and closes, player chrome closes without playing, and off-player keeps
+	 * Pause Hold semantics.
 	 * @param {{overlayOpen: boolean, region: 'picture'|'chrome'|'outside', pressOrigin: 'overlay'|'elsewhere', pauseHold: boolean, withinGrace: boolean}} state
 	 * @returns {{close: boolean, consume: boolean, play: boolean, cancelArrivalGrace: boolean}}
 	 */
@@ -854,13 +782,9 @@ const YTB = {
 	},
 
 	/**
-	 * What a video `play` event does — a pure decision so notes.js stays a thin
-	 * executor and both contracts are testable. A play inside the arrival grace
-	 * (ADR-0010: the watch page's autoplay settling after a Room Feed row paused us
-	 * on a video with Unseen dots, or a duplicate player spin-up) is 'hold':
-	 * re-pause, whatever else is on screen. Otherwise a play with an Expanded Note
-	 * open is the viewer's deliberate resume — 'dismiss' the panel; with no panel
-	 * it's 'ignore'.
+	 * What a video `play` event does: inside the arrival grace (ADR-0010, autoplay
+	 * settling after a Room Feed pause) it's 'hold' (re-pause); otherwise it
+	 * dismisses an open Expanded Note, or is ignored.
 	 * @param {{withinGrace: boolean, panelOpen: boolean}} state
 	 * @returns {'hold'|'dismiss'|'ignore'}
 	 */
@@ -871,31 +795,18 @@ const YTB = {
 
 	// --- Controls Hold (CONTEXT.md): keep YouTube's chrome awake while a Note is engaged ---
 
-	// The ticker period a Controls Hold re-feeds YouTube's autohide timer on —
-	// comfortably inside YouTube's ~3s inactivity window, so a hand parked
-	// motionless on a Note surface can never let it expire between feeds.
+	// Ticker period for re-feeding YouTube's autohide timer, comfortably inside its
+	// ~3s inactivity window.
 	CONTROLS_HOLD_TICK_MS: 1500,
 
 	/**
-	 * The Controls Hold core: a REFCOUNTED hold on YouTube's control-bar
-	 * autohide. Note Dots swallow the pointer events they receive (so hovering
-	 * one never pops YouTube's storyboard or time pill), which leaves YouTube's
-	 * inactivity timer starving under the viewer's own hovering hand; while at
-	 * least one hold is live this core feeds that timer instead — immediately on
-	 * the first acquire, then on a ticker, so the chrome stays awake by
-	 * YouTube's own rules. Releasing the last hold stops the ticker and hands
-	 * the timer straight back: the chrome fades on YouTube's normal schedule,
-	 * never snapping away, and nothing is left overridden.
-	 *
-	 * `acquire()` returns a ONE-SHOT release: however many times a caller
-	 * invokes it, it decrements once — so unbalanced DOM events (a duplicate
-	 * mouseleave, a sweep racing a real release) can never underflow the count.
-	 * Several surfaces hold at once (a hovered/focused Note Dot or Dot Cluster
-	 * or Note Preview, an open Expanded Note, an open Note Composer); the
-	 * chrome stays awake until the LAST one lets go.
-	 *
-	 * The dispatch and timers are injected seams so the refcount/ticker core is
-	 * testable in workerd, like the other shared client behaviors.
+	 * The Controls Hold core: a REFCOUNTED hold on YouTube's control-bar autohide.
+	 * Note Dots swallow pointer events so hovering never pops YouTube's storyboard/time
+	 * pill, which starves its inactivity timer under a hovering hand; while any hold is
+	 * live this feeds that timer instead (immediate on first acquire, then ticked), and
+	 * the last release hands it straight back so the chrome fades on YouTube's own schedule.
+	 * `acquire()` returns a ONE-SHOT release (repeated calls decrement once, never
+	 * underflowing); dispatch/timers are injected seams so this is testable in workerd.
 	 * @param {{dispatch: (tick: number) => void, tickMs?: number,
 	 *   setTimer?: (fn: () => void, ms: number) => unknown,
 	 *   clearTimer?: (id: unknown) => void}} deps
@@ -910,8 +821,7 @@ const YTB = {
 		let holders = 0;
 		let timer = null;
 		let tick = 0;
-		// Guarded, so a tick already queued when the last hold released (or a
-		// stray timer a host forgot to clear) can never feed after release.
+		// Guarded so a queued tick or stray leftover timer can never feed after release.
 		const feed = () => {
 			if (holders === 0) return;
 			dispatch(tick++);
@@ -939,11 +849,9 @@ const YTB = {
 	},
 
 	/**
-	 * The real Controls Hold dispatch: one synthetic `mousemove` on the player
-	 * root — NOT the progress bar, so YouTube's scrub preview and time pill
-	 * never fire — with coordinates over the Video Picture's centre, jittered
-	 * by a pixel per tick so YouTube reads genuine movement. No-op without a
-	 * player (the popup loads this file too).
+	 * The real Controls Hold dispatch: a synthetic `mousemove` on the player root
+	 * (not the progress bar, so no scrub preview/time pill), jittered by a pixel
+	 * per tick to read as genuine movement; no-op without a player.
 	 * @param {number} tick the hold's feed counter (drives the jitter)
 	 */
 	nudgePlayerControls(tick) {
@@ -964,19 +872,13 @@ const YTB = {
 	},
 
 	/**
-	 * Hover-scope a Controls Hold onto one overlay element: keep YouTube's chrome
-	 * awake ONLY while a real pointer hover sits on the element, handing the timer
-	 * straight back on mouseleave. HOVER ONLY -- never keyboard focus: the Note
-	 * Composer and the Expanded Note both auto-focus on open, so a focus-scoped
-	 * hold would pin the chrome for their whole open lifetime and re-create the
-	 * autohide flicker (fade-then-pop) this scoping exists to kill. (The Note Dot
-	 * / Dot Cluster take the focus side too, via notes.js bindControlsHold; these
-	 * two surfaces do not.) At most one hold is live at a time, and the mouseleave
-	 * release is one-shot, so a stray duplicate event can never underflow the count.
-	 *
-	 * Returns a one-shot teardown that releases any live hover hold -- the caller's
-	 * own close path (closeComposer / removePanel) must call it, because the element
-	 * usually leaves the DOM without a final mouseleave.
+	 * Hover-scope a Controls Hold onto one overlay element: holds only while a
+	 * real pointer hover sits on it, releasing on mouseleave. HOVER ONLY, never
+	 * keyboard focus - the Composer and Expanded Note auto-focus on open, so a
+	 * focus-scoped hold would pin the chrome for their whole lifetime and recreate
+	 * the autohide flicker this exists to kill.
+	 * Returns a one-shot teardown the caller's close path must call, since the
+	 * element usually leaves the DOM without a final mouseleave.
 	 * @param {Element} element the overlay whose hover scopes the hold
 	 * @returns {() => void}
 	 */
@@ -1014,11 +916,9 @@ const YTB = {
 	},
 
 	/**
-	 * Whether the viewer's (paused, panel-open) playhead already sits within
-	 * GO_HERE_NEAR_SECONDS of a Note's moment — |playhead - timestamp| <= 2. When
-	 * true the Expanded Note omits Go here entirely (every variant): there is
-	 * nowhere meaningful to go. A missing/non-finite playhead (no player) is never
-	 * near, so Go here shows.
+	 * Whether the paused playhead already sits within GO_HERE_NEAR_SECONDS of a
+	 * Note's moment; when true, Go here is omitted entirely (nowhere to go). A
+	 * missing/non-finite playhead is never near, so Go here shows.
 	 * @param {number} timestamp the Note's video timestamp in seconds
 	 * @param {number} playhead the viewer's playback position in seconds
 	 * @returns {boolean}
@@ -1030,11 +930,9 @@ const YTB = {
 	},
 
 	/**
-	 * The Notes whose timestamps ordinary forward playback just crossed:
-	 * previousTime < timestamp <= currentTime, in timestamp order. The CALLER
-	 * decides whether the step was natural (small forward delta, not a seek);
-	 * this stays a pure filter so every natural crossing — including replays
-	 * after rewinding — triggers again.
+	 * The Notes whose timestamps ordinary forward playback just crossed
+	 * (previousTime < timestamp <= currentTime); the caller decides whether the
+	 * step was natural, so a replay after rewinding triggers again.
 	 * @param {Array<{timestamp: number}>} notes
 	 * @param {number} previousTime
 	 * @param {number} currentTime
@@ -1052,15 +950,12 @@ const YTB = {
 	// --- Progress-bar geometry: the one time-to-x mapping both on-bar surfaces use ---
 
 	/**
-	 * The progress bar's chapter segments, in bar-local px, measured fresh on every
-	 * call. YouTube lays a CHAPTERED bar out as one `.ytp-chapter-hover-container`
-	 * per chapter — each width proportional to its chapter's duration, separated by
-	 * a 4px gap — and draws its playhead through that segmented geometry, so a
-	 * timestamp's x is NOT `fraction * barWidth` (#159). An unchaptered bar exposes
-	 * a single full-width container, which reduces the mapping to exactly that.
-	 *
-	 * This is the ONE place that reads YouTube's chapter DOM; the mapping itself is
-	 * pure (`timeToX`), and both Note Dots and Buddy markers place through the pair.
+	 * The progress bar's chapter segments, in bar-local px, measured fresh each call.
+	 * A chaptered bar is one `.ytp-chapter-hover-container` per chapter (width
+	 * proportional to duration, 4px gaps), so a timestamp's x is NOT
+	 * `fraction * barWidth` (#159); an unchaptered bar is a single full-width
+	 * segment, which reduces to exactly that.
+	 * The ONE place that reads YouTube's chapter DOM; the pure mapping is timeToX.
 	 * @param {Element|null} bar the `.ytp-progress-bar` element
 	 * @returns {Array<{left: number, width: number}>} segments, left to right
 	 */
@@ -1073,26 +968,18 @@ const YTB = {
 			if (rect.width > 0) segments.push({ left: rect.left - barRect.left, width: rect.width });
 		}
 		segments.sort((a, b) => a.left - b.left);
-		// The chapter DOM has not been built yet (the player initializes async, and
-		// a late ytb:mutation re-renders): the whole bar is one segment, which is
-		// the unchaptered mapping.
+		// Chapter DOM not built yet (async player init, late ytb:mutation re-render):
+		// treat as one unchaptered segment.
 		if (segments.length === 0 && barRect.width > 0) segments.push({ left: 0, width: barRect.width });
 		return segments;
 	},
 
 	/**
-	 * Map a timestamp to its x offset in px from the progress bar's left edge,
-	 * through the bar's measured chapter geometry (#159). Segment widths are
-	 * proportional to chapter durations, so a timestamp's share of the total
-	 * SEGMENT width — the bar minus its inter-chapter gaps — places it inside the
-	 * same segment, at the same offset, that YouTube draws its own playhead at. A
-	 * one-segment (unchaptered) bar reduces to `fraction * barWidth` exactly, so
-	 * this is a no-op there by construction.
-	 *
-	 * A timestamp therefore never lands in an inter-segment gap: the walk consumes
-	 * segment width only, and a time exactly on a chapter boundary resolves to the
-	 * END of the earlier chapter. Pure — the caller measures (`barSegments`), so
-	 * the mapping is unit-tested at the shared.js seam.
+	 * Map a timestamp to its x offset from the bar's left edge through the measured
+	 * chapter geometry (#159): a timestamp's share of the total segment width (gaps
+	 * excluded) places it at the same offset YouTube draws its own playhead at, so it
+	 * never lands in an inter-segment gap (a boundary resolves to the end of the
+	 * earlier chapter); an unchaptered bar reduces to `fraction * barWidth` exactly.
 	 * @param {Array<{left: number, width: number}>} segments bar-local px, left to right
 	 * @param {number} timestamp seconds into the video
 	 * @param {number} duration the video's duration in seconds
@@ -1119,40 +1006,22 @@ const YTB = {
 	// --- Dot Cluster helpers (pure — the fan math, tested at the shared.js seam) ---
 
 	/**
-	 * The Dot Cluster fan (#162), solved as a MINIMUM DISPLACEMENT over every Note
-	 * Dot on the Video Timeline rather than assigned as even rank slots: given each
-	 * dot's at-rest x offset on the bar in px (from `timeToX`), each dot lands as
-	 * close to its true moment as it can, subject to one constraint — no two dot
-	 * centers closer than the Fan Gap. Three properties follow, and they are the
-	 * whole reason the fan is solved this way:
+	 * The Dot Cluster fan (#162): a MINIMUM DISPLACEMENT solve over every Note Dot's
+	 * at-rest x (from `timeToX`), constrained only to keep no two dot centers closer
+	 * than the Fan Gap. A dot with slack never moves, and the constraint is GLOBAL
+	 * (not per group), so a Dot Cluster is exactly the set of dots the constraint
+	 * chains together into one rigid block. The Fan Gap opens to `idealGap` where the
+	 * bar has room and shrinks toward one dot diameter (touch, never cover) where it
+	 * doesn't; only when even that floor can't fit does the chain center on the bar,
+	 * overhanging both ends, rather than cover its own dots.
 	 *
-	 * - A dot with slack does not move at all, so true spacing survives wherever
-	 *   geometry allows (a lone dot has an offset of exactly 0).
-	 * - The constraint is GLOBAL — over every dot on the bar, not per group — so a
-	 *   fanned dot can never land on a dot "outside" its Cluster: there is no
-	 *   outside. A dot the fan would have reached is chained INTO the Cluster, and
-	 *   it too moves only as far as it must.
-	 * - A Dot Cluster is therefore exactly the set of dots the constraint chains
-	 *   together (the block that must move as one). That block is what fans on
-	 *   hover / focus / pin; the rest of the bar stays put.
+	 * Solved as an L2 isotonic regression (PAVA): substituting z_i = x_i - i*gap turns
+	 * "centers >= gap apart, in x order" into "z nondecreasing", whose minimum-displacement
+	 * fit is the pooled block means; the bar's edges are a box constraint (a clamp) on
+	 * that fit.
 	 *
-	 * The **Fan Gap** opens to `idealGap` where the bar has room for it and shrinks
-	 * toward a floor of one dot diameter where it does not (fanned dots may touch,
-	 * never cover), so a crowded bar fans tighter and the fan always stays on the
-	 * bar. Only when even the floor cannot fit (far more dots than the bar can
-	 * hold) does separation win over containment: the chain keeps its floor gap and
-	 * centers on the bar, overhanging both ends, because a fan that covers its own
-	 * dots has stopped being a reachability affordance.
-	 *
-	 * The solve is an L2 isotonic regression (PAVA): substituting z_i = x_i - i*gap
-	 * turns "centers at least `gap` apart, in x order" into "z nondecreasing", whose
-	 * minimum-displacement fit is the pooled block means; the bar's edges are a box
-	 * constraint on that fit, which is exactly a clamp of the unbounded solution.
-	 *
-	 * Pure display math (no DOM): the caller measures the bar and hands the px in,
-	 * the at-rest `left` positions never change, and only hover/focus/pin applies
-	 * the returned offsets as a transform — so all of it is unit-tested at the
-	 * shared.js seam.
+	 * Pure display math (no DOM) - the caller measures the bar and applies the returned
+	 * offsets as a transform, so it is unit-tested at the shared.js seam.
 	 * @param {number[]} xs each dot's px offset from the bar's left edge, at rest
 	 * @param {{idealGap: number, barWidth: number, dotDiameter: number}} options
 	 *   `idealGap` px between fanned dot centers where there is room; `barWidth` the
@@ -1175,16 +1044,15 @@ const YTB = {
 		const n = dots.length;
 		if (n === 0) return { clusters: [], offsets, gap: ideal };
 
-		// The Fan Gap. The n-1 gaps have to fit between the outer circles' edges, so
-		// the bar's room for them is (width - diameter); an unmeasured bar (not laid
-		// out yet) imposes no bound at all and keeps the ideal.
+		// Fan Gap: the n-1 gaps must fit within (width - diameter); an unmeasured bar
+		// imposes no bound and keeps the ideal.
 		const bounded = width > diameter;
 		const room = bounded ? width - diameter : Infinity;
 		const gap = n > 1 ? Math.min(ideal, Math.max(diameter, room / (n - 1))) : ideal;
 
-		// Isotonic (PAVA) fit of z_i = x_i - i*gap: pool adjacent blocks while the
-		// left one's mean exceeds the right's — i.e. while the two would land closer
-		// than the Fan Gap — and each surviving block is a Dot Cluster's rigid core.
+		// PAVA fit of z_i = x_i - i*gap: pool adjacent blocks while the left's mean
+		// exceeds the right's (i.e. would land closer than the Fan Gap); each
+		// surviving block is a Cluster's rigid core.
 		const blocks = []; // { sum, count, start } over the x-sorted dots
 		for (let i = 0; i < n; i++) {
 			let block = { sum: dots[i].x - i * gap, count: 1, start: i };
@@ -1201,10 +1069,9 @@ const YTB = {
 			blocks.push(block);
 		}
 
-		// The bar's edges as a box constraint on that fit: every solved center sits
-		// in [radius, width - radius], which (the fit being nondecreasing) is a plain
-		// clamp of each block's value into [lo, hi]. lo > hi means even the floor gap
-		// cannot fit the chain on the bar — then hold the gap and center the chain.
+		// Bar edges as a box constraint: each solved center in [radius, width-radius]
+		// is a clamp into [lo, hi]; lo > hi means even the floor can't fit, so hold
+		// the gap and center the chain.
 		const radius = diameter / 2;
 		let lo = -Infinity;
 		let hi = Infinity;
@@ -1227,9 +1094,8 @@ const YTB = {
 			}
 		}
 
-		// A Cluster is what the constraint chains together: the dots left in contact
-		// (exactly the Fan Gap apart) once the solve settles, which also re-chains
-		// blocks the bar's edge clamp pressed against each other.
+		// A Cluster is what the constraint chains together: dots left exactly the
+		// Fan Gap apart once the solve settles.
 		const EPS = 1e-6;
 		const clusters = [];
 		let current = null;
@@ -1242,10 +1108,8 @@ const YTB = {
 		}
 
 		for (const cluster of clusters) {
-			// A Cluster of one is displaced by nothing: it has no one to separate
-			// from, and the bar's edges only exist to keep a FAN on the bar — a dot
-			// hanging off the end at rest stays exactly where it is (moving it would
-			// be a hover-time jitter that tells the viewer nothing).
+			// A lone dot has no one to separate from and never moves (would be a
+			// meaningless hover-time jitter).
 			if (cluster.length === 1) continue;
 			for (const i of cluster) offsets[dots[i].index] = solved[i] - dots[i].x;
 		}
@@ -1260,13 +1124,9 @@ const YTB = {
 	// --- Note Band geometry (pure — tested at the shared.js seam) ---
 
 	/**
-	 * The Note Band's numbers (#173; CONTEXT.md: the strip of player pixels
-	 * directly ABOVE the Video Timeline's top edge that the Note layer owns).
-	 * The ONE place they live: notes.js builds its injected CSS from these, and
-	 * the pure helpers below derive from them, so a change here carries every
-	 * dependent surface — the hit extender, its per-side reach, the Expanded
-	 * Note's anchor — along together instead of letting them silently
-	 * re-collide.
+	 * The Note Band's numbers (#173; CONTEXT.md), the ONE place they live -
+	 * notes.js builds its CSS from these, and the helpers below derive from them,
+	 * so a change here carries every dependent surface together.
 	 */
 	NOTE_BAND: {
 		dotLift: 10, // px from the bar's top edge up to a dot's bottom edge (#162)
@@ -1277,7 +1137,7 @@ const YTB = {
 	},
 
 	/**
-	 * Per-side Note Dot hit reach (#202). Each side stops at the nearer of its
+	 * Per-side Note Dot hit reach (#202): each side stops at the nearer of its
 	 * configured cap or the midpoint to that side's nearest neighbour.
 	 * @param {number[]} xs each dot's px offset from the bar's left edge, at rest
 	 * @param {number} dotDiameter the painted glyph's diameter in px
@@ -1304,11 +1164,9 @@ const YTB = {
 	},
 
 	/**
-	 * How far above the bar's top edge the Expanded Note's bottom edge rests,
-	 * derived from the dot geometry itself — the dots' lift, plus their glyph,
-	 * plus the Note Band's breathing room — rather than a hardcoded offset, so
-	 * a future change to the dots' lift carries the panel with it instead of
-	 * landing its bottom edge on the lifted glyphs (#173).
+	 * How far above the bar's top edge the Expanded Note rests: derived from the
+	 * dot geometry (lift + glyph + breathing room) rather than hardcoded, so a
+	 * lift change carries the panel with it (#173).
 	 * @param {{dotLift?: number, dotDiameter?: number, panelGap?: number}} band
 	 * @returns {number} px above the bar's top edge
 	 */
@@ -1321,18 +1179,12 @@ const YTB = {
 
 	/**
 	 * Whether a MutationObserver batch is ENTIRELY the extension's own DOM churn
-	 * (#174). Every YTB-created root carries a `ytb-`-prefixed id or class, so a
-	 * record is ours iff its target sits inside a YTB-owned element (text swaps
-	 * in our tooltips, dots reconciled inside a cluster) or every node it added
-	 * or removed is YTB-owned (mounting/unmounting our roots in YouTube's DOM).
-	 * content.js drops these batches instead of emitting `ytb:mutation`, so a
-	 * render pass can never re-trigger itself — the loop that made YouTube's
-	 * hover-autoplay preview flicker while we mirrored dots into it. Anything
-	 * ambiguous (a record mixing our nodes with YouTube's, or moving none at
-	 * all) counts as NOT ours: the failure mode must be a redundant render
-	 * pass, never a missed one. Pure over duck-typed records (`target`,
-	 * `addedNodes`, `removedNodes`; nodes with `nodeType`, `id`, `classList`,
-	 * `parentNode`), so the rule is unit-tested at the shared.js seam.
+	 * (#174): a record is ours iff its target sits inside a YTB-owned
+	 * (`ytb-`-prefixed) element, or every added/removed node is. content.js drops
+	 * these instead of emitting `ytb:mutation`, so a render pass can never
+	 * re-trigger itself (the loop that made YouTube's hover-autoplay preview
+	 * flicker). Anything ambiguous counts as NOT ours - a redundant render pass
+	 * is safe, a missed one is not.
 	 * @param {Iterable<{target: object, addedNodes: Iterable, removedNodes: Iterable}>} records
 	 * @returns {boolean} true iff there is at least one record and all are YTB-owned
 	 */
@@ -1345,9 +1197,8 @@ const YTB = {
 			}
 			return false;
 		};
-		// A node is YTB-owned if it, or any ancestor still attached to it, is a
-		// YTB element. Removed nodes have no parent anymore, so ownership of a
-		// detached subtree rests on the removed root itself carrying the prefix.
+		// Owned if it or any attached ancestor is a YTB element; a removed node has
+		// no parent, so ownership rests on the removed root itself.
 		const isOwned = (node) => {
 			for (let n = node; n; n = n.parentNode) {
 				if (isYtbElement(n)) return true;
@@ -1365,14 +1216,11 @@ const YTB = {
 	},
 
 	/**
-	 * Whether YouTube's hover-autoplay preview host covers a tile's thumbnail
-	 * box — the geometric half of pairing the preview to the ONE tile it sits
-	 * over (#174; the caller has already matched videoIds). The measured host is
-	 * LARGER than the tile it previews and overflows it on every side, so a
-	 * neighbouring tile can intersect the host's overhang; requiring the
-	 * intersection to cover at least half the tile's own area keeps a duplicate
-	 * of the same videoId elsewhere in the feed owning its own dots. Pure over
-	 * duck-typed rects, so the threshold is unit-tested at the shared.js seam.
+	 * Whether YouTube's hover-autoplay preview host covers a tile's thumbnail box
+	 * (#174, geometric half of preview-to-tile pairing; caller already matched
+	 * videoIds). The host overflows its tile on every side, so requiring the
+	 * intersection to cover at least half the tile's area keeps a duplicate
+	 * elsewhere in the feed owning its own dots.
 	 * @param {{left: number, top: number, right: number, bottom: number}} previewRect
 	 * @param {{left: number, top: number, right: number, bottom: number}} tileRect
 	 * @returns {boolean}
@@ -1389,11 +1237,9 @@ const YTB = {
 	// --- Room Home Section helpers (pure — tested at the shared.js seam) ---
 
 	/**
-	 * The Room's current roster derived from one Room read: one entry per
-	 * distinct Client ID across every record kind (progress, presence, Notes,
-	 * Replies, Playlist Items, Playlist Events), carrying that member's LATEST
-	 * nonblank Display Name (display falls back via buddyName). Sorted by most
-	 * recent activity, newest first.
+	 * The Room's current roster: one entry per distinct Client ID across every
+	 * record kind, carrying their latest nonblank Display Name, sorted newest
+	 * activity first.
 	 * @param {{progress?: Array, presence?: Array, notes?: Array, replies?: Array, playlist?: Array, events?: Array}} records
 	 * @returns {Array<{clientId: string, name: string}>}
 	 */
@@ -1408,8 +1254,8 @@ const YTB = {
 				byId.set(clientId, entry);
 			}
 			if (t > entry.at) entry.at = t;
-			// Only a record that CARRIES a name can update the name — Events are
-			// nameless and must never blank out a known Display Name.
+			// Only a record that carries a name can update it; Events are nameless
+			// and must never blank out a known Display Name.
 			if (typeof name === 'string' && name.trim() !== '' && t > entry.nameAt) {
 				entry.name = name.trim();
 				entry.nameAt = t;
@@ -1425,11 +1271,9 @@ const YTB = {
 	},
 
 	/**
-	 * Fuzzy-search the roster for the @-mention autocomplete. Matches each
-	 * member's display label (buddyName fallback included) case-insensitively:
-	 * prefix matches rank first, then substring, then in-order subsequence
-	 * ("sly" finds "Silly Buddy"); ties keep roster order. An empty query
-	 * returns the whole roster.
+	 * Fuzzy-search the roster for @-mention autocomplete: prefix matches rank
+	 * first, then substring, then in-order subsequence ("sly" finds "Silly
+	 * Buddy"); ties keep roster order, empty query returns everything.
 	 * @param {Array<{clientId: string, name: string}>} roster
 	 * @param {string} query
 	 * @returns {Array<{clientId: string, name: string}>}
@@ -1458,10 +1302,9 @@ const YTB = {
 	},
 
 	/**
-	 * Resolve a stored Mention target (a Client ID) to that member's CURRENT
-	 * Display Name for inline "@Bob" rendering. A member who left the Room (or
-	 * never set a name) falls back to the stable "<Adjective> Buddy" token —
-	 * never a raw Client ID (ADR-0006).
+	 * Resolve a stored Mention Client ID to that member's current Display Name
+	 * for inline "@Bob" rendering; falls back to the stable Adjective-Buddy
+	 * token, never a raw Client ID (ADR-0006).
 	 * @param {Array<{clientId: string, name: string}>} roster
 	 * @param {string} clientId
 	 * @returns {string}
@@ -1472,12 +1315,10 @@ const YTB = {
 	},
 
 	/**
-	 * The current watch page's video title, read at write time by everything that
-	 * freezes a title into a record: the Note Composer (a Note's `videoTitle`) and
-	 * both Recommendation entry points (a Playlist Item's `title`). The `doc` is
-	 * passed in rather than closed over so this file stays DOM-free — it also
-	 * loads in the popup, which has no player — and so the selector fallback stays
-	 * testable. Prefers the metadata heading; falls back to the tab title.
+	 * The current watch page's video title, read at write time wherever a record
+	 * freezes one in (Note videoTitle, Playlist Item title). `doc` is passed in
+	 * (not closed over) since this file also loads in the popup, which has no
+	 * player. Prefers the metadata heading, falls back to the tab title.
 	 * @param {Document} doc
 	 * @returns {string} '' when the page offers no title
 	 */
@@ -1488,11 +1329,9 @@ const YTB = {
 	},
 
 	/**
-	 * The Room Feed's context fragment for the Note a reply/mention row points at:
-	 * `on "Title"`, or '' when the Note carries no title (posted before Notes
-	 * captured one, or from a page that offered none). Deliberately NO placeholder
-	 * — a row that cannot name its video simply doesn't. Plain text: unlike a
-	 * System Message's quoted title, this fragment is never a link.
+	 * The Room Feed's context fragment for a reply/mention row's Note:
+	 * `on "Title"`, or '' with no title (deliberately no placeholder). Plain
+	 * text, never a link.
 	 * @param {?{videoTitle?: string}} note
 	 * @returns {string}
 	 */
@@ -1502,11 +1341,9 @@ const YTB = {
 	},
 
 	/**
-	 * Tooltip for any Room Feed link that opens a video's watch page — a System
-	 * Message / Watch Notice title link, or a Note/Reply row's quoted body (which
-	 * now navigates to the video at your own place, no seek; ADR-0010): `Watch
-	 * "Title"`. Falls back to `Watch this video` when the row has no title,
-	 * mirroring the link's own "a video" label.
+	 * Tooltip for any Room Feed link that opens a video's watch page:
+	 * `Watch "Title"`, falling back to `Watch this video` (mirroring the link's
+	 * own "a video" label) when there is no title.
 	 * @param {?string} title
 	 * @returns {string}
 	 */
@@ -1516,15 +1353,11 @@ const YTB = {
 	},
 
 	/**
-	 * Render plan for one recommend System Message row — pure; home-section.js
-	 * executes it (the deleteConfirmCopy/goHereTarget/dotActivation pattern).
-	 * Live vs struck is a per-EVENT state carried on the buildFeed item as
-	 * `removed`. A struck line renders NO anchor at all — the sole exception to
-	 * the Room Feed's link rule: `linkVideoId` is null, so the title lands on
-	 * the plain-text fallback in the line's own muted color, with no link
-	 * tooltip. Because a line-through conveys nothing to a screen reader, a
-	 * struck line instead carries a "No longer recommended" `rowTooltip` and a
-	 * visually-hidden `srSuffix` inside the sentence.
+	 * Render plan for one recommend System Message row; home-section.js executes
+	 * it. Live vs struck comes from the item's `removed` flag: a struck line has
+	 * NO link (`linkVideoId` null, the sole exception to the Feed's link rule)
+	 * and instead carries a "No longer recommended" rowTooltip + visually-hidden
+	 * srSuffix, since a line-through alone conveys nothing to a screen reader.
 	 * @param {{own?: boolean, removed?: boolean, event: {videoId?: string, title?: string, actorClientId?: string}}} item a buildFeed 'system' item
 	 * @param {Array<{clientId: string, name?: string}>} roster the Room roster, for the recommender's Display Name
 	 * @returns {{struck: boolean, prefix: string, label: string, suffix: string, linkVideoId: ?string, linkTooltip: ?string, rowTooltip: ?string, srSuffix: ?string}}
@@ -1546,14 +1379,10 @@ const YTB = {
 	},
 
 	/**
-	 * "Watched by" attribution for one video, derived live from the Room's
-	 * Progress Records: "You" first (only when you have a record for the
-	 * video), then up to two Buddy Display Names most-recent first (blank
-	 * names via the buddyName fallback), then "and N other(s)". Returns '' when
-	 * nobody in the Room has a Progress Record for the video. The Buddies-only
-	 * variant (`buddiesOnly: true` — the Watched-By Dots tooltip) drops the
-	 * "You" entry entirely: the viewer's own state is YouTube's red Watched
-	 * Bar's to tell, never ours.
+	 * "Watched by" attribution for one video: "You" first (if you have a
+	 * record), then up to two Buddy names most-recent first, then "and N
+	 * other(s)"; '' if nobody has a record. `buddiesOnly` (the Watched-By Dots
+	 * tooltip) drops "You" - that's YouTube's own red Watched Bar's to tell.
 	 * @param {Array<object>} progress Room read progress records (all members).
 	 * @param {string} videoId
 	 * @param {string} myClientId
@@ -1586,13 +1415,9 @@ const YTB = {
 	},
 
 	/**
-	 * A Progress Record's Watch Status (CONTEXT.md): how far a Buddy got through
-	 * a video, in words. Round `timestamp / duration` to the NEAREST 5% first,
-	 * and let that ONE rounded number decide the wording — 80% or more reads
-	 * "Watched", anything less reads the rounded percent floored at 5% (a Buddy
-	 * who HAS a record never reads "0%"). A record with no usable duration
-	 * (missing, zero, or non-finite — or a non-finite timestamp) has NO status:
-	 * its row shows the name alone, and we never render "NaN%".
+	 * A Progress Record's Watch Status (CONTEXT.md): round timestamp/duration to
+	 * nearest 5%, reading "Watched" at 80%+ or the percent (floored at 5%, never
+	 * 0%) below that; null with no usable duration (never renders "NaN%").
 	 * @param {number} timestamp seconds into the video.
 	 * @param {number} duration the video's length in seconds.
 	 * @returns {?string} "Watched", a rounded percent like "45%", or null.
@@ -1608,12 +1433,8 @@ const YTB = {
 
 	/**
 	 * The Watched-By Dots tooltip's rows: one per Buddy with a Progress Record
-	 * for the video — the viewer excluded (YouTube's red Watched Bar tells their
-	 * own state) — newest watcher first, the SAME order the dots render in. Each
-	 * row carries the Buddy's Client ID (the renderer paints its Buddy Color),
-	 * Room-unique Display Name, and Watch Status (null for a record with no
-	 * usable duration). The Room cap bounds this at four rows, so nothing
-	 * collapses and no "and N others" is needed.
+	 * (viewer excluded), newest first, same order the dots render in; the Room
+	 * cap bounds this at four rows so nothing needs to collapse.
 	 * @param {Array<object>} progress Room read progress records (all members).
 	 * @param {string} videoId
 	 * @param {string} myClientId
@@ -1637,10 +1458,9 @@ const YTB = {
 	},
 
 	/**
-	 * The Watched-By Dots cluster's accessible name: the flat equivalent of the
-	 * visual rows ("Watched by Big Buddy Watched, Sam 45%"), so a screen reader
-	 * and a keyboard-focus user get the same names + statuses the pointer shows.
-	 * A row with no Watch Status contributes its name alone.
+	 * The Watched-By Dots cluster's accessible name: flat equivalent of the
+	 * visual rows, so screen reader / keyboard-focus users get the same info the
+	 * pointer shows.
 	 * @param {Array<{name: string, status: ?string}>} rows watchedByRows output.
 	 * @returns {string} '' when there are no rows.
 	 */
@@ -1650,12 +1470,10 @@ const YTB = {
 	},
 
 	/**
-	 * Each viewer's "Recommended for you" grid, derived from the Room's
-	 * Recommendations (ADR-0007): the items whose `addedBy` is NOT the viewer
-	 * (you never recommend to yourself), minus the recommendation instances the
-	 * viewer has Dismissed locally, newest recommendation first. Dismiss is keyed
-	 * by the item's server-minted `id`, so a re-recommend after an un-recommend
-	 * (a new id) resurfaces even a previously Dismissed video.
+	 * Each viewer's "Recommended for you" grid (ADR-0007): items not added by the
+	 * viewer, minus Dismissed instances, newest first. Dismiss keys on the item's
+	 * server-minted id, so a re-recommend (new id) resurfaces even a previously
+	 * Dismissed video.
 	 * @param {Array<{id: string, videoId: string, addedBy: string, addedAt: number}>} playlist Room read items.
 	 * @param {string} myClientId
 	 * @param {Iterable<string>} [dismissedIds] this Room's local Dismissals (item ids).
@@ -1669,13 +1487,11 @@ const YTB = {
 	},
 
 	/**
-	 * The watch-page Recommend Control's state for one video: the Room's
-	 * authoritative `addedBy`, with the member's pending Recommend Intent
-	 * overlaid (see CONTEXT.md "Recommend Intent"). The overlay is what keeps
-	 * the optimistic pill still through a Room read that raced the write; a
-	 * Buddy's `addedBy` outranks a pending 'mine' (recommending a video a Buddy
-	 * already recommended is a server no-op onto THEIR item, so the pill
-	 * settles to "Recommended to you" — a correction, not a flicker).
+	 * The watch-page Recommend Control's state: the Room's authoritative
+	 * `addedBy` with the pending Recommend Intent overlaid (CONTEXT.md), keeping
+	 * the optimistic pill still through a racing Room read; a Buddy's addedBy
+	 * outranks a pending 'mine' (a no-op recommend settles to "Recommended to
+	 * you" as a correction, not a flicker).
 	 * @param {{addedBy?: string, myClientId?: string, pending?: 'mine'|'absent'}} args
 	 * @returns {'idle'|'added'|'recommended'}
 	 */
@@ -1702,13 +1518,9 @@ const YTB = {
 	},
 
 	// --- Dismissed Recommendations (ADR-0007) ---
-	// A Dismiss hides one Recommendation from this viewer's Recommended-for-you
-	// grid only. Stored per install in chrome.storage.local, Room-scoped and
-	// keyed by the item's server-minted `id` (mirroring the seen-set storage); it
-	// never reaches the backend, so the Room-level Recommendation stays intact for
-	// every other member. Keying by instance id — not videoId — means a video
-	// recommended again after an un-recommend (a new id) resurfaces. There is
-	// deliberately no un-dismiss yet.
+	// Hides one Recommendation from this viewer's grid only: local, Room-scoped, keyed
+	// by item id (never reaches the backend), so a re-recommend after un-recommend
+	// resurfaces. Deliberately no un-dismiss yet.
 
 	/**
 	 * The recommendation-instance ids this viewer has Dismissed in one Room.
@@ -1720,8 +1532,8 @@ const YTB = {
 	},
 
 	/**
-	 * Dismiss one Recommendation locally: persist its item id under the Room so
-	 * it stays hidden across reloads. Idempotent, local-only (no backend write).
+	 * Dismiss one Recommendation locally so it stays hidden across reloads;
+	 * idempotent, local-only.
 	 * @param {string} code Room Code (already normalized).
 	 * @param {string} id the recommendation instance id.
 	 * @returns {Promise<Array<string>>} the Room's updated Dismissed list.
@@ -1732,11 +1544,9 @@ const YTB = {
 	},
 
 	/**
-	 * Prune the Room's Dismissed set against a (successful) Room read: ids no
-	 * longer live — aged out on the 14-day TTL, or un-recommended — are dropped so
-	 * the set cannot grow without bound (mirrors pruneSeen). Never prune against a
-	 * FAILED read: its empty playlist would wipe the set and resurface every
-	 * Dismissed card.
+	 * Prune the Room's Dismissed set against a successful Room read (drop dead
+	 * ids so the set can't grow unbounded); never against a FAILED read, whose
+	 * empty playlist would resurface every Dismissed card.
 	 * @param {string} code Room Code (already normalized).
 	 * @param {Iterable<string>} liveIds every Playlist Item id in the read.
 	 * @returns {Promise<Array<string>>} the Room's surviving Dismissed list.
@@ -1748,20 +1558,14 @@ const YTB = {
 	},
 
 	// --- Unseen Mentions & Replies (ADR-0010) ---
-	// A Note or Reply addressed to the viewer is Unseen until Acknowledged; its
-	// Note Dot pulses on the Video Timeline. The derivation is pure (these two
-	// helpers); the seen set lives in chrome.storage.local below — private, per
-	// install, Room-scoped, structurally identical to a Dismiss. It never
-	// reaches the backend.
+	// A Note/Reply addressed to the viewer is Unseen (pulses its dot) until Acknowledged;
+	// the seen set below is local, per-install, Room-scoped, structurally identical to a Dismiss.
 
 	/**
-	 * The Note ids whose Video Timeline dots pulse: each anchors at least one
-	 * Unseen item for the viewer — the Note itself as an Unseen Mention
-	 * (noteAddressesMe), or an Unseen Reply beneath it (replyAddressesMe) —
-	 * exactly the records the Room Feed surfaces, minus the seen set. A
-	 * Reaction never pulses (no Mentions, no Replies — enforced here even
-	 * against a malformed record); a locked Spoiler can. A Reply whose parent
-	 * Note is absent from the read has no dot to anchor to and is ignored.
+	 * The Note ids whose dots pulse: each anchors an Unseen Mention
+	 * (noteAddressesMe) or Unseen Reply (replyAddressesMe) not yet seen -
+	 * exactly what the Room Feed surfaces. A Reaction never pulses; a Reply with
+	 * no parent in the read is ignored.
 	 * @param {{notes?: Array, replies?: Array}} records a Room read
 	 * @param {string} myClientId
 	 * @param {Iterable<string>} [seenIds] the Room's Acknowledged ids
@@ -1787,12 +1591,9 @@ const YTB = {
 	},
 
 	/**
-	 * The exact ids Acknowledging one Note Dot clears: every item addressed to
-	 * the viewer anchored to that dot — the Note itself when it Mentions them,
-	 * plus every Reply beneath it addressed to them. Independent of the seen
-	 * set (re-adding a seen id is a no-op), so Acknowledge stays idempotent.
-	 * Empty for a Reaction, an unknown id, or a dot with nothing addressed to
-	 * the viewer.
+	 * The exact ids Acknowledging one Note Dot clears: the Note itself (if it
+	 * Mentions the viewer) plus every addressed Reply beneath it. Idempotent;
+	 * empty for a Reaction, unknown id, or nothing addressed to the viewer.
 	 * @param {{notes?: Array, replies?: Array}} records a Room read
 	 * @param {string} myClientId
 	 * @param {string} noteId the Acknowledged dot's Note id
@@ -1820,9 +1621,8 @@ const YTB = {
 	},
 
 	/**
-	 * Acknowledge: persist ids into the Room's seen set so the dot never
-	 * pulses again — across reloads, SPA navigations, and sessions. Idempotent,
-	 * local-only (no backend write); a no-op write is skipped entirely.
+	 * Acknowledge: persist ids into the Room's seen set so the dot never pulses
+	 * again, across reloads/navigations/sessions. Idempotent, local-only.
 	 * @param {string} code Room Code (already normalized).
 	 * @param {Iterable<string>} ids Note/Reply ids (from acknowledgeTargets).
 	 * @returns {Promise<Array<string>>} the Room's updated seen list.
@@ -1838,10 +1638,9 @@ const YTB = {
 	},
 
 	/**
-	 * Prune the Room's seen set against a (successful) Room read: ids no longer
-	 * live — aged out on the 14-day TTL, or deleted — are dropped so the set
-	 * cannot grow without bound. Never prune against a FAILED read: its empty
-	 * arrays would wipe the set and resurrect every Acknowledged pulse.
+	 * Prune the Room's seen set against a successful Room read so it can't grow
+	 * unbounded; never against a FAILED read, whose empty arrays would
+	 * resurrect every Acknowledged pulse.
 	 * @param {string} code Room Code (already normalized).
 	 * @param {Iterable<string>} liveIds every Note + Reply id in the read.
 	 * @returns {Promise<Array<string>>} the Room's surviving seen list.
@@ -1878,10 +1677,9 @@ const YTB = {
 	},
 
 	/**
-	 * Whether a Note is addressed to the viewer: a FOREIGN Note whose `mentions`
-	 * include their Client ID (ADR-0006). This is the one "addressed to me" rule
-	 * for Notes — the Room Feed (buildFeed) and the Unseen derivation
-	 * (unseenNoteIds, ADR-0010) both consume it, so the two can never drift.
+	 * Whether a Note is addressed to the viewer: a FOREIGN Note whose mentions
+	 * include their Client ID (ADR-0006). The one rule buildFeed and
+	 * unseenNoteIds both consume, so they never drift.
 	 * @param {?{clientId?: string, mentions?: Array<string>}} note
 	 * @param {string} myClientId
 	 * @returns {boolean}
@@ -1892,9 +1690,8 @@ const YTB = {
 	},
 
 	/**
-	 * Whether a Reply is addressed to the viewer: a FOREIGN Reply that either
-	 * sits under the viewer's own Note or Mentions them. The Room Feed and the
-	 * Unseen derivation share this rule too (see noteAddressesMe).
+	 * Whether a Reply is addressed to the viewer: FOREIGN, and either under the
+	 * viewer's own Note or Mentioning them (shared with noteAddressesMe).
 	 * @param {?{clientId?: string, mentions?: Array<string>}} reply
 	 * @param {?{clientId?: string}} parentNote the Reply's parent Note, or null
 	 * @param {string} myClientId
@@ -1909,25 +1706,14 @@ const YTB = {
 	/**
 	 * Derive the viewer's personalized Room Feed from one Room read (ADR-0007):
 	 *   - Replies by Buddies to Notes the viewer authored;
-	 *   - Notes/Replies whose `mentions` include the viewer (a Reply that is
-	 *     both "to my Note" and "mentions me" appears exactly once);
-	 *   - recommend System Messages from Playlist `added` Events, shown to EVERY
-	 *     member (ADR-0007 amendment): recipients as "X recommended Title" and
-	 *     the recommender as their own "You recommended Title to the Room" —
-	 *     `own` marks which; non-`added` events are ignored so a stale
-	 *     un-recommend never surfaces. Each carries `removed` — a per-EVENT
-	 *     state (ADR-0007, 2026-07-09 amendment): true when a newer `added`
-	 *     Event exists for the same videoId (superseded) OR when the videoId is
-	 *     no longer in the Room's live Recommendation list (un-recommended) —
-	 *     and the renderer strikes the line through (un-recommends emit no event);
-	 *   - Watch Notices ("X started watching Title") shown ONLY to the recommender:
-	 *     one per (Buddy, video) whenever a Buddy has a Progress Record for a
-	 *     video the viewer recommended (`addedBy` == viewer), timestamped by that
-	 *     record's `updatedAt`. Best-effort — cannot tell watched-before from
-	 *     watched-after, and may reorder relative to the true watch instant.
-	 * Items are sorted oldest -> newest (chat order) and grouped under day
-	 * dividers. There is deliberately NO read/unread state — the Feed just
-	 * shows recent activity (records age out server-side after 14 days).
+	 *   - Notes/Replies whose `mentions` include the viewer (deduped if both apply);
+	 *   - recommend System Messages from `added` Events, shown to every member as
+	 *     "X recommended Title" (or "You recommended ... to the Room", `own: true`);
+	 *     each carries `removed` when superseded by a newer add or un-recommended
+	 *     (struck through; un-recommends emit no event);
+	 *   - Watch Notices ("X started watching Title"), recommender-only, one per
+	 *     (Buddy, video) they recommended, best-effort ordered by updatedAt.
+	 * Sorted oldest -> newest and grouped under day dividers; no read/unread state.
 	 * @param {{notes?: Array, replies?: Array, events?: Array, playlist?: Array, progress?: Array}} records
 	 * @param {string} myClientId
 	 * @returns {Array<{dayKey: string, items: Array<{type: 'reply'|'mention'|'system'|'watch', at: number, note?: object, reply?: object, event?: object, own?: boolean, removed?: boolean, videoId?: string, title?: string, clientId?: string, name?: string}>}>}
@@ -1944,8 +1730,8 @@ const YTB = {
 		for (const reply of replies) {
 			if (!reply) continue;
 			const parent = noteById.get(reply.noteId) || null;
-			// "Addressed to me" is the shared replyAddressesMe rule (own writes are
-			// never news to me); the Unseen derivation consumes the same predicate.
+			// Shared replyAddressesMe rule (own writes are never news); Unseen
+			// derivation uses the same predicate.
 			if (!YTB.replyAddressesMe(reply, parent, myClientId)) continue;
 			const toMyNote = Boolean(parent) && parent.clientId === myClientId;
 			items.push({
@@ -1959,19 +1745,10 @@ const YTB = {
 			if (!YTB.noteAddressesMe(note, myClientId)) continue;
 			items.push({ type: 'mention', at: Number(note.createdAt) || 0, note });
 		}
-		// Recommend System Messages: every member gets one per `added` event —
-		// the recommender their own (`own: true`, rendered "You recommended ...")
-		// and everyone else the recipient line (ADR-0007 amendment). Only `added`
-		// events count: un-recommends emit no event, so a non-`added` event is
-		// stale and must never render as a recommendation. Instead, removal is
-		// derived here, per EVENT (ADR-0007, 2026-07-09 amendment): an `added`
-		// Event is `removed` when a NEWER `added` Event exists for the same
-		// videoId (superseded — the backend re-add is a no-op for an already-live
-		// videoId, so a second Event only exists after a delete, making every
-		// older sibling necessarily dead), or when its videoId has dropped out of
-		// the Room's live Recommendation list (currently un-recommended). So a
-		// re-recommend revives only its own fresh line; the old, dead line stays
-		// struck instead of silently reading as live again.
+		// Recommend System Messages: only `added` events count (un-recommends emit none).
+		// `removed` (ADR-0007, 2026-07-09) is per-event: true if a newer `added` event exists
+		// for the same videoId (superseded - a re-add is only possible after a delete) or the
+		// videoId is no longer live, so a re-recommend revives only its own fresh line.
 		const liveRecommendationIds = new Set();
 		for (const item of playlist) {
 			if (item && item.videoId) liveRecommendationIds.add(item.videoId);
@@ -1993,9 +1770,8 @@ const YTB = {
 				removed: at < newestAddedAt.get(event.videoId) || !liveRecommendationIds.has(event.videoId),
 			});
 		}
-		// Watch Notices: for each video the viewer recommended, one notice per
-		// Buddy who has a Progress Record for it. Titles come from the live
-		// Recommendation (the Playlist Item), never the Progress Record.
+		// Watch Notices: one per Buddy with a Progress Record for a video the viewer
+		// recommended; title from the Playlist Item, not the Progress Record.
 		const myRecTitles = new Map();
 		for (const item of playlist) {
 			if (item && item.videoId && item.addedBy === myClientId) myRecTitles.set(item.videoId, item.title);
@@ -2028,13 +1804,10 @@ const YTB = {
 	},
 
 	/**
-	 * Trim a day-grouped Feed (the output of buildFeed) down to its newest
-	 * `limit` items — the Room Feed's reveal window behind "Show more". The
-	 * window is item-level, not day-level: a partly revealed day keeps its
-	 * divider with only the newest tail of its items, and a day left with no
-	 * revealed items is dropped entirely (no divider). Pure — the input groups
-	 * and their item arrays are never mutated — so the window is independently
-	 * unit-testable beside buildFeed, whose contract stays untouched.
+	 * Trim a day-grouped Feed to its newest `limit` items (the "Show more" reveal
+	 * window); item-level not day-level, so a partly revealed day keeps its
+	 * divider with only its newest tail, and an empty day is dropped. Pure -
+	 * never mutates the input.
 	 * @param {Array<{dayKey: string, items: Array}>} groups day-grouped output of buildFeed
 	 * @param {number} limit how many items to keep, counted from the newest
 	 * @returns {{groups: Array<{dayKey: string, items: Array}>, hidden: number}}
@@ -2060,10 +1833,9 @@ const YTB = {
 	},
 
 	/**
-	 * Normalize a Room Code to its canonical slug so the pretty label and the
-	 * typed/pasted form both pair. Lowercases, drops a leading "the ", turns runs
-	 * of whitespace into single hyphens, and collapses/trims stray hyphens. So
-	 * "The Silly Otters", "silly otters", and "silly-otters" all → "silly-otters".
+	 * Normalize a Room Code to its canonical slug (lowercase, drop leading "the ",
+	 * whitespace -> hyphens, collapse/trim stray hyphens) so the pretty label and
+	 * typed/pasted form pair, e.g. "The Silly Otters" -> "silly-otters".
 	 * @param {string} raw
 	 * @returns {string}
 	 */
@@ -2084,9 +1856,9 @@ const YTB = {
 		return (records?.progress?.length || 0) + (records?.presence?.length || 0) > 0;
 	},
 
-	// Fixed colors chosen for contrast on light popup/feed surfaces and YouTube's
-	// dark player. A Room has at most four foreign Buddies, leaving spare choices.
-	BUDDY_COLORS: ['#00a6d6', '#f0a500', '#7655d6', '#00a86b', '#e85d04', '#d936c7', '#558b2f', '#4776e6'],
+	// Fixed colors for contrast on light popup/feed surfaces and YouTube's dark
+	// player; at most four foreign Buddies, so spares remain.
+	BUDDY_COLORS: ['#00a6d6', '#FFB812', '#8649d6', '#00a86b', '#ff8400', '#d936c7', '#d94141', '#4651e5'],
 	_buddyColors: {},
 	_activeRoomCode: '',
 
@@ -2142,9 +1914,9 @@ const YTB = {
 	ADJECTIVES: ['Silly', 'Sleepy', 'Sweaty', 'Big', 'Little', 'Buddy', 'Good-looking', 'Sloppy', 'Zesty', 'Stinky'],
 
 	/**
-	 * Stable 32-bit hash of a Client ID. The SAME id always hashes the same, so
-	 * everything keyed off a Buddy (their color, their fallback name) stays
-	 * stable across videos, thumbnails, the popup, and every viewer.
+	 * Stable 32-bit hash of a Client ID, so everything keyed off a Buddy (color,
+	 * fallback name) stays stable across videos, thumbnails, the popup, and
+	 * every viewer.
 	 * @param {string} clientId
 	 * @returns {number}
 	 */
@@ -2166,14 +1938,9 @@ const YTB = {
 	},
 
 	/**
-	 * The Buddy Color as TEXT ink on an opaque card surface (Note Preview and
-	 * Expanded Note bylines, Playback Notification cards, Room Feed authors).
-	 * The raw fills are picked for dots and markers and miss WCAG AA as small
-	 * text — most of the palette lands under 4.5:1 on the cream surface, and
-	 * some under it on espresso — so blend the identity color toward the theme
-	 * ink, which the --ytb-ink token flips per theme. Over-video text (reaction
-	 * bursts, transparent previews), dots, markers, and swatches keep the raw
-	 * buddyColor.
+	 * The Buddy Color as TEXT ink on an opaque card surface: raw fills miss WCAG
+	 * AA as small text, so blend toward the theme ink (--ytb-ink); over-video
+	 * text, dots, markers, and swatches keep the raw buddyColor.
 	 * @param {string} clientId
 	 * @param {string} [code]
 	 * @returns {string} a CSS color-mix() expression
@@ -2183,11 +1950,10 @@ const YTB = {
 	},
 
 	/**
-	 * Base display label for a Buddy WITHOUT Room context: their trimmed Display
-	 * Name when set, else a stable "<Adjective> Buddy" derived from their Client
-	 * ID (same adjective on every surface and for every viewer). Two members can
-	 * collide on the same base — a shared adjective, or the same typed name — so
-	 * anything user-facing goes through buddyName with a roster to disambiguate.
+	 * Base display label for a Buddy without Room context: trimmed Display Name,
+	 * else a stable "<Adjective> Buddy" from their Client ID. Collisions are
+	 * possible, so user-facing code goes through buddyName with a roster to
+	 * disambiguate.
 	 * @param {string} clientId
 	 * @param {string} [name]
 	 * @returns {string}
@@ -2201,14 +1967,10 @@ const YTB = {
 	},
 
 	/**
-	 * Map every Client ID in a Room roster to a label that is UNIQUE within the
-	 * Room. Base labels come from baseBuddyName; when two or more members share
-	 * one, they are ordered by Client ID (a viewer-independent total order) and
-	 * each successive duplicate gains one more "Very " prefix — so a colliding
-	 * pair reads "Silly Buddy" / "Very Silly Buddy", a triple adds "Very Very …".
-	 * Deterministic: the same roster yields the same label for a given Client ID
-	 * on every surface and for every viewer. Applies to real names too, so two
-	 * "Alex"es become "Alex" / "Very Alex".
+	 * Map every Client ID in a roster to a Room-unique label: base labels from
+	 * baseBuddyName, collisions ordered by Client ID with each successive
+	 * duplicate gaining a "Very " prefix ("Silly Buddy" / "Very Silly Buddy" /
+	 * ...). Deterministic across surfaces and viewers; applies to real names too.
 	 * @param {Array<{clientId: string, name?: string}>} roster
 	 * @returns {Map<string, string>} clientId -> unique display label
 	 */
@@ -2230,10 +1992,8 @@ const YTB = {
 	},
 
 	/**
-	 * Display label for a Buddy. Without a roster, returns the base label (trimmed
-	 * Display Name or the stable "<Adjective> Buddy" fallback). WITH the Room
-	 * roster, returns the Room-unique label (see disambiguateNames) so no two
-	 * members ever read the same on screen. Applies to FOREIGN records only; you
+	 * Display label for a Buddy: the base label without a roster, or the
+	 * Room-unique label (disambiguateNames) with one. FOREIGN records only - you
 	 * never render yourself as a Buddy.
 	 * @param {string} clientId
 	 * @param {string} [name]
@@ -2246,18 +2006,15 @@ const YTB = {
 	},
 
 	/**
-	 * Reduce the structured `{ progress, presence, notes }` records (mine AND the
-	 * Buddies') into a Room view from my perspective. A Buddy is any FOREIGN
-	 * clientId appearing in any set: their latest Progress Record (carries a
-	 * position) is preferred, else their presence row ("joined", no position). The
-	 * Room is capped at MAX_MEMBERS distinct Client IDs across all three sets.
+	 * Reduce `{ progress, presence, notes }` into a Room view from my
+	 * perspective: a Buddy is any FOREIGN clientId, preferring their latest
+	 * Progress Record over a presence-only row. Capped at MAX_MEMBERS distinct
+	 * Client IDs.
 	 * @param {{progress: Array<object>, presence: Array<object>, notes?: Array<object>}} records
 	 * @param {string} myClientId
 	 * @returns {{buddies: Array<object>, iAmMember: boolean, locked: boolean}}
-	 *   buddies — one entry per distinct foreign Buddy, newest-first by updatedAt.
-	 *   iAmMember — I appear in either set under the code.
-	 *   locked — the Room is full of OTHERS and I am not one of them (would be the
-	 *            rejected 6th): render nothing, show "Room full".
+	 *   buddies newest-first by updatedAt; iAmMember whether I appear under the code;
+	 *   locked whether the Room is full of OTHERS with me the rejected 6th (render nothing).
 	 */
 	roomView(records, myClientId) {
 		const progress = (records && records.progress) || [];
@@ -2326,8 +2083,8 @@ const YTB = {
 		}
 		buddies.sort((a, b) => b.updatedAt - a.updatedAt);
 
-		// Distinct OTHERS; 5 of them with no membership of my own = a full Room I'd
-		// be the locked-out 6th of.
+		// Distinct OTHERS; 5 with no membership of my own = a full Room I'd be the
+		// locked-out 6th of.
 		let foreignCount = 0;
 		for (const id of memberIds) if (id !== myClientId) foreignCount++;
 		const locked = !iAmMember && foreignCount >= YTB.MAX_MEMBERS;
@@ -2336,24 +2093,17 @@ const YTB = {
 	},
 };
 
-// The ONE `buddyColors` storage subscription. shared.js owns the cache
-// refresh, so correctness never depends on which content script registered a
-// listener first; pages repaint from the `ytb:buddy-colors` rebroadcast —
-// mirroring renderer.js's `ytb:room-data` rebroadcast of a Room read. Fires in
-// every context that loads this file: content scripts and the popup repaint
-// live (the popup is also the only writer and re-renders itself anyway), and
-// the workerd test harness — where `document` is undefined — just refreshes
-// the cache, hence the guard on the dispatch.
+// The ONE `buddyColors` storage subscription: shared.js owns the cache refresh (load-order
+// independent) and rebroadcasts `ytb:buddy-colors` for pages to repaint (mirrors renderer.js's
+// `ytb:room-data`). The `document` guard lets the workerd test harness just refresh the cache.
 chrome.storage.onChanged.addListener((changes, area) => {
 	if (area !== 'local' || !changes.buddyColors) return;
 	YTB._buddyColors = changes.buddyColors.newValue || {};
 	if (typeof document !== 'undefined') document.dispatchEvent(new CustomEvent('ytb:buddy-colors'));
 });
 
-// The ONE Controls Hold (CONTEXT.md). It lives on the YTB global so notes.js
-// (dots/Clusters/Previews, the Expanded Note) and composer.js consume the SAME
-// refcount regardless of load order: the chrome stays awake until the last
-// engaged Note surface — whichever file owns it — lets go.
+// The ONE Controls Hold (CONTEXT.md), on the YTB global so notes.js and composer.js share the
+// same refcount regardless of load order: the chrome stays awake until the last surface releases.
 YTB.controlsHold = YTB.createControlsHold({
 	dispatch: (tick) => YTB.nudgePlayerControls(tick),
 });

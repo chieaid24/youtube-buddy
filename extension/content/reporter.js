@@ -1,18 +1,6 @@
 // extension/reporter.js
-//
-// Reporter (task 05): POSTs THIS user's own Progress Records from /watch pages,
-// with all the skip-guards so ads, live streams, Shorts, and embeds never
-// produce a record. PRD plan-of-record step 5.
-//
-// Loaded as the 2nd content-script file (after shared.js, before content.js).
-// Content scripts are NOT ES modules — this file communicates only via the
-// `window.YTB` global (from shared.js) and the `ytb:navigate` event dispatched
-// by content.js. No imports. See docs/adr/0001-content-script-owned-sync.md.
-//
-// content.js owns the single navigation observer; we never detect navigation
-// ourselves. The listener below is registered synchronously at top level so it
-// is attached before content.js (which loads last) fires the initial
-// ytb:navigate.
+// POSTs this user's own Progress Records from /watch pages, skipping ads, live streams, Shorts, and embeds.
+// Loaded 2nd (after shared.js, before content.js); talks only via window.YTB and content.js's ytb:navigate event (ADR-0001) - registered synchronously at top level so it catches content.js's initial ytb:navigate.
 
 (() => {
 	'use strict';
@@ -25,26 +13,20 @@
 	let pauseHandler = null;
 	let timeupdateHandler = null;
 
-	// The videoId we are currently reporting for — taken from the latest
-	// ytb:navigate (NOT re-read from the URL at post time, because on SPA nav the
-	// URL/<video> may already point at the NEXT video by the time we POST).
+	// videoId we're reporting for, from the latest ytb:navigate - not re-read from the URL at post time, since SPA nav may already point at the next video.
 	let currentVideoId = null;
 
-	// Last valid { timestamp, duration } observed for currentVideoId, kept fresh
-	// via `timeupdate`. Used to report the OUTGOING video's final position on SPA
-	// navigation, since a fresh read at nav time can already be the next video.
+	// Last valid { timestamp, duration } for currentVideoId, kept fresh via timeupdate, so SPA nav can flush the outgoing video's real final position.
 	let lastPosition = null;
 
 	// --- guards ------------------------------------------------------------
 
-	// An embedded player runs in an iframe, or is a top-level /embed/ page. Either
-	// way the content script must not report from it.
+	// An embedded player is an iframe or a top-level /embed/ page - never report from either.
 	function isEmbed() {
 		return window.top !== window.self || location.pathname.startsWith('/embed/');
 	}
 
-	// During an ad the player carries `ad-showing`, and `video.currentTime` is the
-	// AD's clock — reading it would corrupt the record.
+	// During an ad the player carries `ad-showing` and `video.currentTime` is the ad's clock, not ours.
 	function isAdShowing() {
 		return !!document.querySelector('.html5-video-player.ad-showing');
 	}
@@ -53,8 +35,7 @@
 		return document.querySelector('video');
 	}
 
-	// The live { timestamp, duration } of the main player, or null when it can't
-	// / shouldn't be read right now (no element, or an ad is showing).
+	// The live { timestamp, duration } of the main player, or null when it can't/shouldn't be read (no element, or an ad).
 	function readPosition() {
 		if (isAdShowing()) return null;
 		const v = mainVideo();
@@ -74,8 +55,7 @@
 		if (!config.sharing || !config.code) return; // Sharing off, or unpaired.
 
 		const clientId = await YTB.ensureClientId();
-		// postProgress reads the Room Code from config itself; we pass only the
-		// 5 record fields. A failed POST resolves falsy and is swallowed.
+		// postProgress reads the Room Code itself; a failed POST resolves falsy and is swallowed.
 		await YTB.postProgress({
 			clientId,
 			name: config.name,
@@ -116,9 +96,7 @@
 		pauseHandler = () => postCurrent();
 		v.addEventListener('pause', pauseHandler);
 
-		// Cheap: just keep the latest valid position so navigate-away can flush the
-		// OUTGOING video's real final time. The POST cadence is the interval / pause
-		// / nav events — not this snapshot.
+		// Cheap: just keeps the latest valid position for navigate-away to flush; POST cadence is interval/pause/nav, not this snapshot.
 		timeupdateHandler = () => {
 			const pos = readPosition();
 			if (pos && Number.isFinite(pos.duration)) lastPosition = pos;
@@ -136,9 +114,7 @@
 		if (!YTB.isContextActive()) return;
 		const nextVideoId = (e.detail && e.detail.videoId) || null;
 
-		// Leaving the current video (to another video, or off /watch entirely):
-		// flush its final position before we lose it. Prefer the snapshot, which
-		// predates the new video clobbering the shared <video> element.
+		// Leaving the current video: flush its final position first, preferring the snapshot since the new video clobbers the shared <video> element.
 		if (currentVideoId && currentVideoId !== nextVideoId) {
 			post(currentVideoId, lastPosition || readPosition());
 		}

@@ -1,15 +1,5 @@
-// extension/presence.js
-//
-// Presence asserter: announces "I'm here" under the active Room Code while the
-// user is anywhere on YouTube — independent of watching and of the Sharing
-// toggle. This is what makes a member appear to others the instant they have a
-// code set, not only once they POST a Progress Record (the reporter's job).
-//
-// Loaded after shared.js (needs window.YTB) and before content.js, so its
-// ytb:navigate listener is attached before content.js fires the initial event.
-// A pure consumer of content.js's navigation events — it never detects
-// navigation itself. Content scripts are NOT ES modules. See ADR-0001
-// (docs/adr/0001-content-script-owned-sync.md).
+// Presence asserter: announces "I'm here" under the active Room Code, independent of watching/Sharing.
+// Loaded after shared.js, before content.js; a pure consumer of its ytb:navigate events (ADR-0001).
 
 (() => {
 	'use strict';
@@ -18,9 +8,7 @@
 
 	let lastAssert = 0;
 
-	// (Re)assert presence if the throttle window has elapsed. Best-effort and
-	// independent of Sharing — presence means "I joined this Code", not "I'm
-	// sharing my video position". Not gated to /watch: any page counts.
+	// Reasserts if the throttle has elapsed; independent of Sharing, not gated to /watch.
 	async function maybeAssert() {
 		if (!YTB.isContextActive()) return;
 		if (Date.now() - lastAssert < ASSERT_INTERVAL_MS) return;
@@ -30,8 +18,7 @@
 		YTB.assertPresence(code);
 	}
 
-	// Every navigation (not just /watch) is a chance to (re)assert; the throttle
-	// keeps it to ~once per 5 min per tab regardless of how often the user nav's.
+	// Every navigation is a chance to reassert; the throttle caps actual sends.
 	document.addEventListener('ytb:navigate', maybeAssert);
 	YTB.onContextInvalidated(() => document.removeEventListener('ytb:navigate', maybeAssert));
 })();

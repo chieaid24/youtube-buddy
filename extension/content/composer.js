@@ -1,22 +1,5 @@
 // composer.js - the Add Note composer, attached to YouTube's player controls.
-// Purely consumes content.js navigation/mutation events; it does not observe the
-// page itself. The button is re-applied because YouTube frequently rebuilds the
-// controls during SPA navigation.
-//
-// The composer is player-bound, not viewport-bound: it lives INSIDE
-// #movie_player, anchored above its Add Note button, clamped fully within the
-// video, so it scrolls out with the player and survives fullscreen transitions.
-// Opening captures the current timestamp and pauses in place (tracking whether
-// the video was playing); closing, posting a Note, or posting a Reaction
-// resumes only if opening paused a playing video. Every dismissal — the X,
-// Escape, the button toggle, any outside click — discards the draft without
-// confirmation. Successful posts hand the complete server record to notes.js
-// via `ytb:note-posted` for immediate Video Timeline reconciliation.
-//
-// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face injected
-// by theme.js (the shared on-video apricot foundation); theme.js also isolates
-// keystrokes in the Note textarea and the Spoiler checkbox from YouTube's
-// player hotkeys.
+// Player-bound (lives inside #movie_player, clamped to it, survives fullscreen); opening pauses and closing/posting resumes only if it paused a playing video; every dismissal discards the draft silently. Styling uses theme.js's --ytb-* tokens, which also isolates textarea/checkbox keystrokes from YouTube's hotkeys.
 
 (function () {
 	'use strict';
@@ -27,19 +10,12 @@
 	let openToken = 0;
 	let pauseLeaseActive = false; // opening the composer paused a playing video
 	let composerPressOrigin = 'elsewhere'; // capture-time origin for the next click (ADR-0011)
-	// The composer's HOVER-SCOPED Controls Hold (CONTEXT.md): the same
-	// YTB.controlsHold refcount notes.js consumes, held ONLY while the pointer
-	// hovers the open composer panel -- not for its whole open lifetime, and NOT
-	// on keyboard focus (the textarea auto-focuses on open; a focus-scoped hold
-	// would pin YouTube's chrome and flicker its timeline when the pointer left
-	// the video). YTB.bindHoverHold wires it; this holds the teardown closeComposer
-	// calls to release any hold still live on dismissal.
+	// Hover-scoped Controls Hold (CONTEXT.md): held only while the pointer hovers the
+	// panel, not on focus (auto-focus would pin the chrome for as long as it's open).
 	let holdRelease = null;
 
-	// Settings (live via chrome.storage.onChanged): the Spoiler Default seeds
-	// the composer's checkbox on each open. The Add Note (+) button is removed
-	// entirely while Notes Visibility is off OR while Unpaired (no Room Code) —
-	// you need a Room to read Notes, so you need one to write them.
+	// Spoiler Default seeds the checkbox on each open; the + button is removed while
+	// Notes Visibility is off or Unpaired (need a Room to read Notes, so to write them).
 	let spoilerDefault = true;
 	let notesHidden = false;
 	let hasRoomCode = false; // Room membership gates the + button (Unpaired hides it)
@@ -70,10 +46,8 @@
 		}
 	});
 
-	// Styling consumes the namespaced --ytb-* tokens + 'YTB Rounded' face
-	// injected by theme.js (the shared on-video apricot foundation). The Add
-	// Note BUTTON stays player-native white — it lives inside YouTube's own
-	// control bar, where an apricot chip would clash.
+	// The Add Note BUTTON stays player-native white (it lives in YouTube's own
+	// control bar, where an apricot chip would clash); the panel uses theme.js's tokens.
 	function ensureStyles() {
 		if (document.getElementById('ytb-composer-styles')) return;
 		const style = document.createElement('style');
@@ -157,8 +131,7 @@
       #${COMPOSER_ID} textarea:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
       #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 4px; text-align: right; color: var(--ytb-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
       #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-      /* min-height keeps the Spoiler toggle's whole label a 24px hit target
-         (UA-006); the footer's own height already absorbs it. */
+      /* min-height keeps the Spoiler label a 24px hit target (UA-006). */
       #${COMPOSER_ID} label { display: flex; align-items: center; gap: 4px; min-height: 24px; font-size: 13px; font-weight: 600; color: var(--ytb-ink-muted); }
       #${COMPOSER_ID} input[type='checkbox'] { accent-color: var(--ytb-accent-600); }
       #${COMPOSER_ID} .ytb-note-post {
@@ -185,11 +158,8 @@
 		(document.head || document.documentElement).appendChild(style);
 	}
 
-	/**
-	 * Close and discard the draft. Resumes playback only when opening the
-	 * composer paused a playing video (a video that was already paused stays
-	 * paused). Pass `resume: false` on navigation, where the video is changing.
-	 */
+	// Close and discard the draft; resumes playback only if opening paused it.
+	// Pass resume: false on navigation, where the video is changing.
 	function closeComposer({ resume = true } = {}) {
 		openToken += 1;
 		holdRelease?.(); // hand the autohide timer back to YouTube
@@ -260,21 +230,16 @@
 		head.append(title, time, close);
 		composer.append(head);
 
-		// Sharing does not gate Note writes (CONTEXT.md): in a Room the composer
-		// always builds its form, whether Sharing is on or off. (The + button that
-		// opens this only exists inside a Room, so config always carries a code.)
+		// Sharing does not gate Note writes (CONTEXT.md): the form always builds in a Room.
 		buildForm(composer, config, timestamp);
 
-		// Keep composer interactions inside the composer: no player seeks/pauses,
-		// and the document-level outside-click dismissal never sees these events.
+		// Keep interactions inside the composer: no player seeks/pauses or outside-click dismissal.
 		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'click', 'dblclick']) {
 			composer.addEventListener(type, (e) => e.stopPropagation());
 		}
 
 		host.append(composer);
-		// Hover-scope the Controls Hold onto the composer panel: it keeps YouTube's
-		// chrome awake only while the pointer hovers, and closeComposer (every
-		// dismissal path funnels through it) releases any hold still live on close.
+		// Hover-scoped Controls Hold; closeComposer releases any hold still live on close.
 		holdRelease = YTB.bindHoverHold(composer);
 		positionComposer(composer, button);
 		composer.querySelector('textarea')?.focus();
@@ -286,8 +251,7 @@
 		error.className = 'ytb-note-error';
 		error.setAttribute('role', 'status');
 
-		// One-click Reactions, above the Note field: clicking immediately submits
-		// that Reaction (never a Spoiler) and discards any typed draft.
+		// One-click Reactions: clicking immediately submits (never a Spoiler), discarding any draft.
 		const emojis = document.createElement('div');
 		emojis.className = 'ytb-note-emojis';
 		emojis.setAttribute('role', 'group');
@@ -307,8 +271,7 @@
 		textarea.rows = 1;
 		textarea.placeholder = 'Write a Note...';
 		textarea.setAttribute('aria-label', 'Note text');
-		// The @-mention popover must attach BEFORE our own keydown listener so an
-		// open popover consumes Enter/Escape instead of posting/closing.
+		// Must attach before our keydown listener so an open popover consumes Enter/Escape first.
 		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
 		const counter = document.createElement('div');
 		counter.className = 'ytb-note-meta';
@@ -317,7 +280,7 @@
 		foot.className = 'ytb-note-foot';
 		const spoiler = document.createElement('input');
 		spoiler.type = 'checkbox';
-		spoiler.checked = spoilerDefault; // seeded from the Spoiler Default setting on EVERY opening
+		spoiler.checked = spoilerDefault; // seeded from Spoiler Default on every opening
 		const spoilerLabel = document.createElement('label');
 		spoilerLabel.append(spoiler, document.createTextNode('Spoiler'));
 		const post = document.createElement('button');
@@ -360,20 +323,17 @@
 				clientId,
 				name: config.name,
 				videoId: currentVideoId,
-				// Frozen at post time, so a Buddy's Room Feed can name the video this
-				// conversation is on. Best-effort: '' is simply not sent.
+				// Frozen at post time so a Buddy's Room Feed can name the video (best-effort).
 				videoTitle: YTB.watchTitle(document),
 				timestamp,
 				kind,
 				body,
 				spoiler: kind === 'emoji' ? false : spoiler.checked,
-				// Only Mentions whose inline "@Name" text survived editing count;
-				// a one-click Reaction discards the draft, so it mentions nobody.
+				// Only Mentions whose "@Name" text survived editing count; a Reaction mentions nobody.
 				mentions: kind === 'text' && mentionCtl ? mentionCtl.mentions() : [],
 			});
 			if (result.ok) {
-				// Immediate Video Timeline reconciliation, then close (resuming only
-				// if opening paused a playing video).
+				// Immediate Video Timeline reconciliation, then close.
 				document.dispatchEvent(new CustomEvent('ytb:note-posted', { detail: { note: result.note } }));
 				closeComposer();
 				return;
@@ -385,9 +345,8 @@
 		}
 
 		textarea.addEventListener('input', updateMeta);
-		// theme.js's window-capture guard swallows real keydowns on this textarea
-		// (YouTube's player hotkeys never see them) and re-dispatches them as
-		// ytb:keydown with the original event in detail.
+		// theme.js's guard swallows real keydowns (YouTube's hotkeys never see them) and
+		// re-dispatches as ytb:keydown with the original event in detail.
 		textarea.addEventListener('ytb:keydown', (event) => {
 			const key = event.detail.original;
 			if (key.key === 'Escape') {
@@ -400,13 +359,9 @@
 				submit({ kind: 'text', body: textarea.value.trim() });
 			}
 		});
-		// The guard covers the Spoiler checkbox too (Tab or any mouse click leaves
-		// it focused, where YouTube's Enter hotkey used to activate — re-toggle —
-		// it instead of posting). Enter posts through the same path as textarea
-		// Enter; Escape must close here explicitly because guarded keys never
-		// reach the document-level Escape listener. Space is deliberately
-		// unhandled: the native toggle is the checkbox's default action, which
-		// the guard preserves.
+		// The guard covers the focused checkbox too (Enter used to re-toggle it instead of
+		// posting); Escape must close here since guarded keys never reach the document
+		// listener. Space is left unhandled so the checkbox's native toggle still fires.
 		spoiler.addEventListener('ytb:keydown', (event) => {
 			const key = event.detail.original;
 			if (key.key === 'Escape') {
@@ -444,11 +399,8 @@
 				openComposer(button);
 			});
 		}
-		// Append to the end of the left control cluster, i.e. after the timecode
-		// and any neighbouring extensions' buttons (e.g. Language Reactor). Only
-		// (re)insert when the button is missing or detached from the current
-		// control bar, so we never fight a neighbour for the same slot on every
-		// mutation -- we tolerate its position instead of re-anchoring adjacently.
+		// Only (re)insert when missing/detached, so we don't fight a neighbour extension
+		// for position on every mutation -- we tolerate wherever it lands instead.
 		if (button.parentElement !== leftControls) leftControls.appendChild(button);
 	}
 
@@ -467,16 +419,14 @@
 		ensureButton();
 		repositionIfOpen();
 	});
-	// Layout and fullscreen changes move the player; the composer follows its
-	// button (fullscreen transitions do NOT close it).
+	// Layout/fullscreen changes move the player; the composer follows its button, never closes.
 	window.addEventListener('resize', repositionIfOpen);
 	document.addEventListener('fullscreenchange', repositionIfOpen);
 	document.addEventListener('keydown', (event) => {
 		if (event.key === 'Escape') closeComposer();
 	});
-	// Record the Press Origin before the composer's descendants see pointerdown.
-	// A textarea selection dragged onto the picture later clicks a common player
-	// ancestor, but the shared routing matrix still treats it as composer-owned.
+	// Record the Press Origin before the composer's descendants see pointerdown, so a drag
+	// that later clicks a common player ancestor still routes as composer-owned.
 	document.addEventListener(
 		'pointerdown',
 		(event) => {
@@ -491,10 +441,8 @@
 		true,
 	);
 
-	// Share the capture-phase Picture Click rule with the Expanded Note. Composer
-	// controls and the Add Note toggle keep their own handlers. Everything else
-	// routes through the pure decision seam before YouTube can arm its deferred
-	// picture toggle; player chrome still receives the click unchanged.
+	// Shares the capture-phase Picture Click rule with the Expanded Note (ADR-0011); composer
+	// controls keep their own handlers, everything else routes through the shared decision seam.
 	document.addEventListener(
 		'click',
 		(event) => {
