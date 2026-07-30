@@ -35,6 +35,8 @@
 				"content/mentions.js",
 				"content/reporter.js",
 				"content/renderer.js",
+				"content/notes-style.js",
+				"content/notes-alerts.js",
 				"content/notes.js",
 				"content/presence.js",
 				"content/composer.js",
