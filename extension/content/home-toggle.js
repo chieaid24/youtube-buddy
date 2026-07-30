@@ -36,7 +36,7 @@
 	const ROW_ID = 'ytb-home-toggle';
 	const LAUNCHER_CLASS = 'ytb-ht-launcher';
 	const RELAY_ID = 'ytb-control-panel-relay';
-	const RELAY_PAGE = 'control-panel-relay.html';
+	const RELAY_PAGE = 'pages/control-panel-relay.html';
 	const OPEN_MESSAGE = 'ytb:open-control-panel';
 	const OPEN_FAILED_MESSAGE = 'ytb:open-control-panel-failed';
 	const TOOLBAR_FALLBACK_COPY = 'Open YouTube Buddy from the toolbar icon';

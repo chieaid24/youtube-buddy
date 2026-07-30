@@ -18,32 +18,32 @@
 			"48": "icons/icon-48.png",
 			"128": "icons/icon-128.png"
 		},
-		"default_popup": "popup.html"
+		"default_popup": "popup/popup.html"
 	},
 	"content_scripts": [
 		{
 			"matches": ["*://*.youtube.com/*"],
 			"js": [
-				"shared.js",
-				"theme.js",
-				"room-code.js",
-				"mentions.js",
-				"reporter.js",
-				"renderer.js",
-				"notes.js",
-				"presence.js",
-				"composer.js",
-				"home-section.js",
-				"home-toggle.js",
-				"playlist-add.js",
-				"content.js"
+				"content/shared.js",
+				"content/theme.js",
+				"content/room-code.js",
+				"content/mentions.js",
+				"content/reporter.js",
+				"content/renderer.js",
+				"content/notes.js",
+				"content/presence.js",
+				"content/composer.js",
+				"content/home-section.js",
+				"content/home-toggle.js",
+				"content/playlist-add.js",
+				"content/content.js"
 			],
 			"run_at": "document_idle"
 		}
 	],
 	"web_accessible_resources": [
 		{
-			"resources": ["control-panel-relay.html", "control-panel-relay.js"],
+			"resources": ["pages/control-panel-relay.html", "pages/control-panel-relay.js"],
 			"matches": ["*://*.youtube.com/*"]
 		}
 	]

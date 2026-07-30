@@ -141,7 +141,7 @@ async function seedPairedRoom(context: BrowserContext) {
 	const extensions = await context.newPage();
 	const extensionId = await (await extensionItem(extensions)).getAttribute('id');
 	const popup = await context.newPage();
-	await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+	await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
 	// popup.js mints a clientId on open (read-then-write); wait for that write
 	// to land or it would clobber the seeded clientId in a losing race.
 	await popup.waitForFunction(async () => (await chrome.storage.local.get('clientId')).clientId);
@@ -1160,7 +1160,7 @@ test('Control Panel Launcher opens the real action popup through a home-only Rel
 		// A directly navigated extension page gives the test access to the runtime
 		// API without itself being a Chrome-owned POPUP context.
 		const runtime = await context.newPage();
-		await runtime.goto(`chrome-extension://${extensionId}/popup.html`);
+		await runtime.goto(`chrome-extension://${extensionId}/popup/popup.html`);
 		const popupContextCount = () => runtime.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length);
 		await expect.poll(popupContextCount).toBe(0);
 
@@ -1171,7 +1171,7 @@ test('Control Panel Launcher opens the real action popup through a home-only Rel
 		const relay = page.locator('#ytb-control-panel-relay');
 		await expect(toggle).toHaveAttribute('aria-checked', 'true');
 		await expect(launcher).toBeVisible();
-		await expect(relay).toHaveAttribute('src', `chrome-extension://${extensionId}/control-panel-relay.html`);
+		await expect(relay).toHaveAttribute('src', `chrome-extension://${extensionId}/pages/control-panel-relay.html`);
 		expect(
 			await relay.evaluate((frame) => {
 				const rect = frame.getBoundingClientRect();
@@ -1209,7 +1209,7 @@ test('Control Panel Launcher uses the shared toolbar toast when openPopup fails'
 		const toggle = page.locator('#ytb-home-toggle');
 		const launcher = toggle.locator('.ytb-ht-launcher');
 		await expect(page.locator('#ytb-control-panel-relay')).toHaveCount(1);
-		const relay = page.frames().find((frame) => frame.url().endsWith('/control-panel-relay.html'));
+		const relay = page.frames().find((frame) => frame.url().endsWith('/pages/control-panel-relay.html'));
 		expect(relay).toBeDefined();
 		await relay!.evaluate(() => {
 			Object.defineProperty(chrome.action, 'openPopup', {
@@ -1242,7 +1242,7 @@ test('opens the extension popup without runtime errors', async () => {
 		expect(extensionId).toMatch(/^[a-p]{32}$/);
 
 		const popup = await context.newPage();
-		await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
 		await expect(popup.locator('h1')).toContainText('YouTube Buddy');
 		await expect(popup.locator('.brand-mark')).toBeVisible();
 		expect(

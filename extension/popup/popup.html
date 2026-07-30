@@ -7,12 +7,12 @@
 		     its themeMarker helper — is defined before theme.js stamps the Theme
 		     Preference. It only defines the YTB global (no DOM), so it is safe to
 		     run in <head>; popup.js/room-code.js still load at the end of body. -->
-		<script src="shared.js"></script>
+		<script src="../content/shared.js"></script>
 		<!-- theme.js is the single home of the bundled Nunito subset: it injects
 		     the 'YTB Rounded' @font-face (and the namespaced on-video tokens,
 		     inert here) so the popup and the on-video Note UI share one blob. It
 		     stamps the marker from the stored preference (ADR-0008/0009). -->
-		<script src="theme.js"></script>
+		<script src="../content/theme.js"></script>
 		<style>
 			:root {
 				/* --- Accent: soft apricot ramp (hue ~55) --- */
@@ -1071,7 +1071,7 @@
 	<body>
 		<header class="header">
 			<div class="brand">
-				<img class="brand-mark" src="icons/youtube-buddy.svg" alt="" aria-hidden="true" />
+				<img class="brand-mark" src="../icons/youtube-buddy.svg" alt="" aria-hidden="true" />
 				<h1>YouTube Buddy<span class="hdot" aria-hidden="true">.</span></h1>
 			</div>
 			<div id="name-field">
@@ -1309,7 +1309,7 @@
 			</div>
 		</div>
 
-		<script src="room-code.js"></script>
+		<script src="../content/room-code.js"></script>
 		<script src="popup.js"></script>
 	</body>
 </html>

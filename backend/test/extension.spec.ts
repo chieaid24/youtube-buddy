@@ -69,7 +69,7 @@ beforeAll(async () => {
 	// loaded here purely for its side effect of populating window.YTB. The `as
 	// string` keeps the literal specifier for the bundler while telling TypeScript
 	// to treat it as a dynamic (non-module) import rather than erroring on it.
-	await import('../../extension/shared.js' as string);
+	await import('../../extension/content/shared.js' as string);
 });
 
 describe('extension member API', () => {

@@ -247,7 +247,7 @@ export async function seedPaired(context: BrowserContext, storage: Record<string
 	const id = await item.getAttribute('id');
 	await extensions.close();
 	const popup = await context.newPage();
-	await popup.goto(`chrome-extension://${id}/popup.html`);
+	await popup.goto(`chrome-extension://${id}/popup/popup.html`);
 	await popup.waitForFunction(async () => (await chrome.storage.local.get('clientId')).clientId);
 	await popup.evaluate((s) => chrome.storage.local.set(s as Record<string, unknown>), {
 		code: 'silly-otters',
