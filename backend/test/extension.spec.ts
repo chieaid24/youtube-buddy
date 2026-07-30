@@ -65,11 +65,17 @@ beforeAll(async () => {
 			},
 		},
 	});
-	// shared.js is a classic content script (no import/export; ADR-0001), so it is
-	// loaded here purely for its side effect of populating window.YTB. The `as
-	// string` keeps the literal specifier for the bundler while telling TypeScript
-	// to treat it as a dynamic (non-module) import rather than erroring on it.
+	// The shared files are classic content scripts (no import/export; ADR-0001),
+	// loaded purely for their side effect of populating window.YTB, in the same
+	// order the manifest loads them. The `as string` keeps the literal specifier
+	// for the bundler while telling TypeScript to treat each as a dynamic
+	// (non-module) import rather than erroring on it.
 	await import('../../extension/content/shared.js' as string);
+	await import('../../extension/content/shared-api.js' as string);
+	await import('../../extension/content/shared-notes.js' as string);
+	await import('../../extension/content/shared-geometry.js' as string);
+	await import('../../extension/content/shared-room.js' as string);
+	await import('../../extension/content/shared-buddies.js' as string);
 });
 
 describe('extension member API', () => {

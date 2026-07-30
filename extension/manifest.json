@@ -25,6 +25,11 @@
 			"matches": ["*://*.youtube.com/*"],
 			"js": [
 				"content/shared.js",
+				"content/shared-api.js",
+				"content/shared-notes.js",
+				"content/shared-geometry.js",
+				"content/shared-room.js",
+				"content/shared-buddies.js",
 				"content/theme.js",
 				"content/room-code.js",
 				"content/mentions.js",

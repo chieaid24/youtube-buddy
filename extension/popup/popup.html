@@ -3,11 +3,16 @@
 	<head>
 		<meta charset="utf-8" />
 		<title>YouTube Buddy</title>
-		<!-- shared.js first (as in the content-script order) so window.YTB — and
-		     its themeMarker helper — is defined before theme.js stamps the Theme
-		     Preference. It only defines the YTB global (no DOM), so it is safe to
-		     run in <head>; popup.js/room-code.js still load at the end of body. -->
+		<!-- The shared files first (content-script order) so window.YTB — incl.
+		     themeMarker — is defined before theme.js stamps the Theme Preference.
+		     They only define the YTB global (no DOM), so they are safe in <head>;
+		     popup.js/room-code.js still load at the end of body. -->
 		<script src="../content/shared.js"></script>
+		<script src="../content/shared-api.js"></script>
+		<script src="../content/shared-notes.js"></script>
+		<script src="../content/shared-geometry.js"></script>
+		<script src="../content/shared-room.js"></script>
+		<script src="../content/shared-buddies.js"></script>
 		<!-- theme.js is the single home of the bundled Nunito subset: it injects
 		     the 'YTB Rounded' @font-face (and the namespaced on-video tokens,
 		     inert here) so the popup and the on-video Note UI share one blob. It
