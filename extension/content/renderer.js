@@ -1,4 +1,4 @@
-// extension/renderer.js
+// extension/content/renderer.js
 // Buddy markers on the player bar + thumbnail Watched-By Dots (display-only; no Note UI).
 // The Room's single poller: rebroadcasts each read as ytb:room-data for the other modules.
 // Loaded 3rd so ytb:* listeners attach before the first ytb:navigate (ADR-0001); reads run regardless of Sharing.
@@ -35,7 +35,7 @@
 	let baselineReady = false; // skip toasts on the very first read (no false "joined")
 	let pollTimer = null;
 	let readFailures = 0; // consecutive failed Room reads, folded via YTB.connectionState
-	let connectionLost = false; // failures >= 2 — rides every ytb:room-data broadcast
+	let connectionLost = false; // failures >= 2 - rides every ytb:room-data broadcast
 
 	// Buddy Progress Visibility: hidden draws nothing, but polling/rebroadcasting continues.
 	let buddyProgressHidden = false;
@@ -136,7 +136,7 @@
 					roomCode: activeRoomCode,
 					myClientId,
 					locked: Boolean(locked),
-					// False on a failed GET — never truth; notes.js prunes Unseen state only when ok (ADR-0010).
+					// False on a failed GET - never truth; notes.js prunes Unseen state only when ok (ADR-0010).
 					ok: Boolean(r.ok),
 					// >= 2 consecutive failed reads (YTB.connectionState); on every broadcast so consumers need no counter.
 					connectionLost,
@@ -177,7 +177,7 @@
 	 */
 	function renderWatchMarker(videoId) {
 		const bar = document.querySelector('.ytp-progress-bar');
-		if (!bar) return; // player not ready yet — a later ytb:mutation retries
+		if (!bar) return; // player not ready yet - a later ytb:mutation retries
 
 		// Hidden Buddy Progress leaves `desired` empty, so reconciliation below
 		// strips markers (and regrows them when re-shown).
@@ -227,7 +227,7 @@
 	}
 
 	// ---------------------------------------------------------------------------
-	// Thumbnails: Watched-By Dots — a top-left cluster of flat dots, one per
+	// Thumbnails: Watched-By Dots - a top-left cluster of flat dots, one per
 	// Buddy with a Progress Record for that video, newest first, viewer excluded
 	// (YouTube's own Watched Bar covers that). Hover/focus shows a "Watched by
 	// <names>" tooltip. YouTube-thumbnail-DOM fragility is deliberately
@@ -236,7 +236,7 @@
 
 	// YouTube's hover-autoplay preview host: a document-level singleton, larger
 	// than the tile it covers. While it covers a decorated tile, the cluster is
-	// mirrored into the host, which owns it (#174) — the tile's own is swept,
+	// mirrored into the host, which owns it (#174) - the tile's own is swept,
 	// never left to stacking-order luck.
 	const PREVIEW_HOST_SELECTOR = 'ytd-video-preview';
 
@@ -278,7 +278,7 @@
 			// would double it.
 			if (anchor.closest('#ytb-home-section')) continue;
 
-			// Preview-host anchors belong to renderPreviewDots — decorating both
+			// Preview-host anchors belong to renderPreviewDots - decorating both
 			// would double the dots.
 			if (anchor.closest(PREVIEW_HOST_SELECTOR)) continue;
 
@@ -288,7 +288,7 @@
 			if (!records || records.length === 0) continue;
 
 			const box = thumbBoxFor(anchor);
-			// A visible preview covers this tile — the mirror owns the cluster;
+			// A visible preview covers this tile - the mirror owns the cluster;
 			// ours goes unclaimed and is swept.
 			if (coveredBoxes.has(box)) continue;
 
@@ -302,7 +302,7 @@
 		}
 
 		// Sweep: any unclaimed cluster (recycled tile, stale mirror, ceded tile)
-		// is an orphan and goes — at most one per video survives.
+		// is an orphan and goes - at most one per video survives.
 		for (const cluster of document.querySelectorAll('.' + THUMB_DOTS_CLASS)) {
 			if (!claimed.has(cluster)) cluster.remove();
 		}
@@ -396,7 +396,7 @@
 
 	/**
 	 * Mirror the Watched-By Dots into YouTube's hover-autoplay preview while it
-	 * covers a decorated tile, so they stay visible and hoverable — the mirror
+	 * covers a decorated tile, so they stay visible and hoverable - the mirror
 	 * stays a descendant of the host, since a document-level float would fire a
 	 * synthetic mouseleave and cancel the autoplay. A hidden/un-watched/gone
 	 * preview leaves its mirror unclaimed for the sweep.
@@ -643,7 +643,7 @@
 	});
 
 	// Buddy Color re-assignment; shared.js's listener already refreshed the
-	// cache by the time this fires (#115) — just repaint from cached records.
+	// cache by the time this fires (#115) - just repaint from cached records.
 	document.addEventListener('ytb:buddy-colors', () => {
 		if (!YTB.isContextActive()) return;
 		renderWatchMarker(currentVideoId);

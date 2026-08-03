@@ -1,6 +1,6 @@
 // extension/content/shared-room.js
 // Room Home helpers on window.YTB: roster, Room Feed, Watched-By, the
-// Recommended-for-you set (ADR-0007) and the Unseen set (ADR-0010) — pure
+// Recommended-for-you set (ADR-0007) and the Unseen set (ADR-0010) - pure
 // derivations plus their Room-scoped local storage.
 
 (() => {
@@ -92,8 +92,8 @@
 		},
 
 		// Render plan for one recommend System Message row; home-section.js
-		// executes it. A struck line (`removed`) has NO link — the sole exception
-		// to the Feed's link rule — and carries a tooltip + visually-hidden
+		// executes it. A struck line (`removed`) has NO link - the sole exception
+		// to the Feed's link rule - and carries a tooltip + visually-hidden
 		// suffix, since a line-through alone conveys nothing to a screen reader.
 		systemLine(item, roster) {
 			const event = (item && item.event) || {};
@@ -113,7 +113,7 @@
 
 		// "Watched by" attribution for one video: "You" first, then up to two
 		// Buddy names most-recent first, then "and N other(s)"; '' if nobody has
-		// a record. `buddiesOnly` (the Watched-By Dots tooltip) drops "You" —
+		// a record. `buddiesOnly` (the Watched-By Dots tooltip) drops "You" -
 		// that's YouTube's own red Watched Bar's to tell.
 		watchedByLabel(progress, videoId, myClientId, roster, { buddiesOnly = false } = {}) {
 			const latest = new Map(); // clientId -> latest record (for its name)
@@ -151,7 +151,7 @@
 		},
 
 		// The Watched-By Dots tooltip's rows: one per Buddy with a Progress Record
-		// (viewer excluded), newest first — same order the dots render in; the
+		// (viewer excluded), newest first - same order the dots render in; the
 		// Room cap bounds this at four rows.
 		watchedByRows(progress, videoId, myClientId, roster) {
 			const latest = new Map(); // clientId -> latest record for this video
@@ -224,7 +224,7 @@
 			return YTB._roomLists.update('dismissedRecommendations', code, (room) => room.filter((id) => live.has(id)));
 		},
 
-		// Unseen set (ADR-0010): the Note ids whose dots pulse — each anchors an
+		// Unseen set (ADR-0010): the Note ids whose dots pulse - each anchors an
 		// Unseen Mention or Unseen Reply not yet seen, exactly what the Room Feed
 		// surfaces. A Reaction never pulses; a Reply with no parent is ignored.
 		unseenNoteIds(records, myClientId, seenIds) {
@@ -352,7 +352,7 @@
 			}
 			// Only `added` events count (un-recommends emit none). `removed`
 			// (ADR-0007) is per-event: a newer `added` for the same videoId
-			// supersedes it, and a dead videoId strikes it — so a re-recommend
+			// supersedes it, and a dead videoId strikes it - so a re-recommend
 			// revives only its own fresh line.
 			const liveRecommendationIds = new Set();
 			for (const item of playlist) {
@@ -410,7 +410,7 @@
 
 		// Trim a day-grouped Feed to its newest `limit` items ("Show more");
 		// item-level, so a partly revealed day keeps its divider with only its
-		// newest tail and an empty day is dropped. Pure — never mutates the input.
+		// newest tail and an empty day is dropped. Pure - never mutates the input.
 		tailFeed(groups, limit) {
 			const source = Array.isArray(groups) ? groups : [];
 			const total = source.reduce((sum, group) => sum + (((group && group.items) || []).length || 0), 0);
@@ -421,7 +421,7 @@
 			for (const group of source) {
 				const items = (group && group.items) || [];
 				if (toSkip >= items.length) {
-					toSkip -= items.length; // whole day hidden — its divider renders nowhere
+					toSkip -= items.length; // whole day hidden - its divider renders nowhere
 					continue;
 				}
 				trimmed.push({ dayKey: group.dayKey, items: items.slice(toSkip) });

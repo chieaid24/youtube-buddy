@@ -7,7 +7,7 @@ export const TTL_SECONDS = 14 * 24 * 3600;
 // A Room holds at most this many distinct Client IDs (you + up to 4 Buddies); enforced best-effort on POST.
 export const MAX_MEMBERS = 5;
 
-// A text Note (and each Reply) is a short message, not an essay.
+// A text Note (and each Reply) is a short message.
 export const NOTE_MAX_CHARS = 100;
 
 // Max Replies per Note conversation; best-effort under KV's eventual consistency, so a race can momentarily

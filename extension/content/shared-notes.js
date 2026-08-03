@@ -33,7 +33,7 @@
 		REACTION_BURST_MS: 2000,
 
 		// Lifetime keyed on kind and trigger (not authorship): a crossing gets the
-		// full lifetime, a Post Echo half — so a rewind-replay across your own
+		// full lifetime, a Post Echo half - so a rewind-replay across your own
 		// Note behaves like a Buddy's.
 		notificationLifetime(kind, trigger) {
 			const full = kind === 'emoji' ? YTB.REACTION_BURST_MS : YTB.NOTE_CARD_MS;
@@ -132,7 +132,7 @@
 				acquire() {
 					holders += 1;
 					if (holders === 1) {
-						feed(); // wake NOW — the parked pointer is invisible to YouTube
+						feed(); // wake NOW - the parked pointer is invisible to YouTube
 						timer = setTimer(feed, tickMs);
 					}
 					let released = false;
@@ -170,7 +170,7 @@
 		},
 
 		// Hover-scope a Controls Hold onto one overlay element. HOVER ONLY, never
-		// keyboard focus — the Composer and Expanded Note auto-focus on open, so a
+		// keyboard focus - the Composer and Expanded Note auto-focus on open, so a
 		// focus-scoped hold would pin the chrome for their whole lifetime. Returns
 		// a one-shot teardown the caller's close path must call (the element
 		// usually leaves the DOM without a final mouseleave).

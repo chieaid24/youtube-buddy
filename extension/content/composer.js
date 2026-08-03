@@ -280,7 +280,7 @@
 		foot.className = 'ytb-note-foot';
 		const spoiler = document.createElement('input');
 		spoiler.type = 'checkbox';
-		spoiler.checked = spoilerDefault; // seeded from Spoiler Default on every opening
+		spoiler.checked = spoilerDefault;
 		const spoilerLabel = document.createElement('label');
 		spoilerLabel.append(spoiler, document.createTextNode('Spoiler'));
 		const post = document.createElement('button');

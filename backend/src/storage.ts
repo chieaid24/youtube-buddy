@@ -2,13 +2,10 @@ import { MAX_EVENTS, MAX_MEMBERS, TTL_SECONDS } from './constants';
 import type { Env } from './types';
 
 // Whether a Client ID may write into the Room: returning members keep their slot, a brand-new one needs the
-// distinct count below MAX_MEMBERS. Member id is readable from the key name alone (validation guarantees
-// segments never contain ':' and Client IDs never equal a reserved infix): first segment for progress
-// (`${code}:${clientId}:${videoId}`), second for presence/note (`${code}:presence|note:${clientId}:...`), third
-// for reply (`${code}:reply:${noteId}:${clientId}:${id}`). Playlist (`${code}:playlist:${videoId}`) and event
-// (`${code}:event:${ts}:${id}`) keys carry no member id, so those few (capped) values are read for
-// addedBy/actorClientId. KV's eventual consistency (no transactions) can momentarily admit a 6th member on a
-// race or truncated listing - acceptable for a friends-only weak-secret app.
+// distinct count below MAX_MEMBERS. Member id is read from the key name alone (segments never contain ':',
+// Client IDs never equal a reserved infix); playlist/event keys carry no member id, so those few (capped)
+// values are read for addedBy/actorClientId. KV's eventual consistency (no transactions) can momentarily
+// admit a 6th member on a race or truncated listing - acceptable for a friends-only weak-secret app.
 export async function roomHasCapacityFor(env: Env, prefix: string, clientId: string): Promise<boolean> {
 	const existing = await env.PROGRESS.list({ prefix });
 	const members = new Set<string>();

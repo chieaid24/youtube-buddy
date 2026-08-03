@@ -1,6 +1,6 @@
 // extension/content/shared-geometry.js
 // Progress-bar and Note Band geometry on window.YTB, plus the #174 ownership
-// predicates — pure math, tested at the shared.js seam.
+// predicates - pure math, tested at the shared.js seam.
 
 (() => {
 	const YTB = window.YTB;
@@ -148,7 +148,7 @@
 			};
 		},
 
-		// The Note Band's numbers (#173; CONTEXT.md), the ONE place they live —
+		// The Note Band's numbers (#173; CONTEXT.md), the ONE place they live -
 		// notes.js builds its CSS from these and the helpers below derive from
 		// them, so a change here carries every dependent surface together.
 		NOTE_BAND: {
@@ -192,7 +192,7 @@
 		// (#174): a record is ours iff its target sits inside a `ytb-`-prefixed
 		// element, or every added/removed node is. content.js drops these instead
 		// of emitting `ytb:mutation`, so a render pass can never re-trigger
-		// itself. Anything ambiguous counts as NOT ours — a redundant render pass
+		// itself. Anything ambiguous counts as NOT ours - a redundant render pass
 		// is safe, a missed one is not.
 		ytbOwnedChurn(records) {
 			const isYtbElement = (node) => {

@@ -1,14 +1,11 @@
 // extension/content/notes.js
-// Note/Reaction presentation on the watch page: Video Timeline dots, hover
-// Note Previews, the Expanded Note panel, the Playback Notification triggers,
-// and Unseen pulses (ADR-0010) — see CONTEXT.md for the behavior spec.
-// Renders and Acknowledges nothing while Notes Visibility is off.
-// Class names + stylesheet live in notes-style.js; the notification stack in
-// notes-alerts.js. theme.js isolates Reply-textarea keystrokes from YouTube's
-// hotkeys, re-dispatched as `ytb:keydown`.
-// Pure consumer per ADR-0001: content.js owns navigation/mutation events,
-// renderer.js owns Room polling (rebroadcast as `ytb:room-data`); composer.js
-// hands freshly posted records via `ytb:note-posted`.
+// Note/Reaction presentation on the watch page: Timeline dots, Note Previews,
+// the Expanded Note panel, Playback Notification triggers, Unseen pulses
+// (ADR-0010; CONTEXT.md). Renders/Acknowledges nothing while Notes off.
+// Class names + stylesheet in notes-style.js; notification stack in
+// notes-alerts.js; theme.js isolates Reply-textarea keys as `ytb:keydown`.
+// Pure consumer (ADR-0001): content.js owns nav/mutation, renderer.js owns
+// Room polling (`ytb:room-data`), composer.js hands posts via `ytb:note-posted`.
 
 (function () {
 	'use strict';
@@ -48,14 +45,13 @@
 	let roster = []; // full Room roster (incl. me), for Room-unique Buddy labels
 	let currentVideoId = null;
 	let lastPlaybackTime = null; // previous timeupdate, for natural crossings
-	// Unseen state (ADR-0010): seenSet mirrors the persisted seen list;
-	// unseenDotIds is the derived pulse set, kept synchronous so renderDots
-	// (runs every timeupdate) never awaits storage.
+	// Unseen state (ADR-0010): seenSet mirrors the persisted list; unseenDotIds
+	// is the derived pulse set, synchronous so renderDots never awaits storage.
 	let seenSet = new Set();
 	let unseenDotIds = new Set();
 
-	// Expanded Note state. pauseLease: true iff OPENING (the first panel in a
-	// chain of replacements) paused a playing video, so dismissal knows to resume.
+	// pauseLease: true iff OPENING (the first of a replacement chain) paused a
+	// playing video, so dismissal knows to resume.
 	let openNote = null;
 	let pauseLease = false;
 	let panelPressOrigin = 'elsewhere'; // capture-time origin for the next click (ADR-0011)
@@ -68,11 +64,10 @@
 	let pendingArrival = null;
 	let notesHidden = false; // Notes Visibility off: zero Note UI on the player
 
-	// Controls Hold state (CONTEXT.md): dots swallow the pointer events that
-	// would keep YouTube's chrome awake, so YTB.controlsHold re-feeds its timer
-	// while a Note surface is engaged. Keyed by Cluster wrapper;
-	// sweepControlsHolds catches wrappers that left the DOM without a
-	// mouseleave/focusout, so a hold can never leak.
+	// Controls Hold state (CONTEXT.md): dots swallow the pointer events that keep
+	// YouTube's chrome awake, so YTB.controlsHold re-feeds its timer while a Note
+	// surface is engaged. Keyed by Cluster wrapper; sweepControlsHolds catches
+	// wrappers that left the DOM without a mouseleave/focusout so a hold can't leak.
 	const holdBySurface = new Map(); // wrapper Element -> { hover: release|null, focus: release|null }
 	let panelHoldRelease = null; // teardown for the Expanded Note's hover-scoped hold
 
@@ -198,8 +193,8 @@
 		tryPendingArrival(); // arrival pause depends on the Unseen set just computed
 	}
 
-	// Acknowledge one Note Dot: clears every Unseen item anchored to it (the
-	// Mention and all Unseen Replies) at once and stops its pulse for good.
+	// Acknowledge one Note Dot: clears every Unseen item anchored to it (Mention
+	// + Unseen Replies) at once and stops its pulse for good.
 	function acknowledgeDot(noteId) {
 		if (notesHidden || !noteId || !unseenDotIds.has(noteId)) return;
 		const ids = YTB.acknowledgeTargets(currentRecords(), myClientId, noteId);
@@ -210,8 +205,7 @@
 		renderDots();
 	}
 
-	// unseenDotIds is Room-wide; scope it to the current video's notes before
-	// the arrival-pause decision.
+	// unseenDotIds is Room-wide; scope to the current video for the arrival pause.
 	function hasUnseenDotOnCurrentVideo() {
 		for (const note of notesForCurrentVideo()) {
 			if (unseenDotIds.has(note.id)) return true;
@@ -219,10 +213,9 @@
 		return false;
 	}
 
-	// A Room Feed row asked to pause on arrival IF something is Unseen
-	// (ADR-0010). On the target video, consume the one-shot handshake now
-	// regardless of the outcome (so it never refires), then pause only when
-	// Notes are visible AND a dot on this video is Unseen.
+	// A Room Feed row asked to pause on arrival iff something is Unseen
+	// (ADR-0010). Consume the one-shot handshake now regardless of outcome (so it
+	// never refires), then pause only when Notes are visible AND a dot is Unseen.
 	function tryPendingArrival() {
 		const arrival = pendingArrival;
 		if (!arrival) return;
@@ -258,8 +251,8 @@
 		}
 	});
 
-	// composer.js posted a Note/Reaction: insert it into the Video Timeline
-	// immediately (no waiting for the 60s Room poll), then fire its Post Echo.
+	// composer.js posted a Note/Reaction: insert into the Timeline immediately
+	// (no 60s Room-poll wait), then fire its Post Echo.
 	document.addEventListener('ytb:note-posted', (event) => {
 		const note = event.detail && event.detail.note;
 		if (!note || !note.id || !note.videoId) return;
@@ -272,12 +265,10 @@
 	});
 
 	// Post Echo: the author's own Playback Notification, fired the instant they
-	// post — the second trigger alongside a natural crossing. Rebases the
-	// crossing window past the Note's own timestamp so the composer's
-	// lease-aware resume can't replay it.
+	// post - the second trigger alongside a natural crossing. Rebases the crossing
+	// window past the Note's timestamp so the composer's resume can't replay it.
 	function postEcho(note) {
-		// Guard, not a live path: composer.js already removed the + button while
-		// Notes are off.
+		// Guard, not a live path: composer.js removes the + button while Notes off.
 		if (notesHidden || note.videoId !== currentVideoId) return;
 		const timestamp = Number(note.timestamp);
 		if (Number.isFinite(timestamp)) {
@@ -319,8 +310,7 @@
 				if (!Number.isFinite(timestamp)) continue;
 				desired.set(note.id, {
 					note,
-					// Spoiler state follows the playhead and can relock when the video
-					// is revisited from an earlier point.
+					// Spoiler follows the playhead; relocks when revisited from earlier.
 					locked: Boolean(note.spoiler) && playhead < timestamp,
 					passed: playhead >= timestamp,
 					timestamp,
@@ -354,8 +344,7 @@
 			(id) => Math.round(YTB.timeToX(segments, desired.get(id).timestamp, duration) * LAYOUT_UNITS_PER_PX) / LAYOUT_UNITS_PER_PX,
 		);
 
-		// Solve the fan for the WHOLE bar in one go (#162), recomputed every
-		// render as the bar resizes.
+		// Solve the fan for the WHOLE bar in one go (#162), recomputed every render.
 		const { clusters, offsets } = YTB.solveDotFan(px, {
 			idealGap: CLUSTER_FAN_GAP,
 			barWidth,
@@ -387,8 +376,7 @@
 				for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
 					wrapper.addEventListener(type, (e) => e.stopPropagation());
 				}
-				// Hide any storyboard YouTube already showed crossing the scrubber
-				// en route; restore on leave.
+				// Hide any storyboard YouTube showed crossing the scrubber; restore on leave.
 				wrapper.addEventListener('mouseenter', () => setStoryboardSuppressed(wrapper, true));
 				wrapper.addEventListener('mouseleave', () => setStoryboardSuppressed(wrapper, false));
 				bindControlsHold(wrapper);
@@ -539,8 +527,7 @@
 		dot.style.background = color;
 		// The open Note's own hover preview is redundant next to its panel.
 		dot.classList.toggle(DOT_OPEN_CLASS, Boolean(openNote) && openNote.id === id);
-		// Unseen dots pulse until Acknowledged (ADR-0010); the eye-catch outranks
-		// the passed paint.
+		// Unseen dots pulse until Acknowledged (ADR-0010); outranks the passed paint.
 		const unseen = unseenDotIds.has(id);
 		dot.classList.toggle(DOT_UNSEEN_CLASS, unseen);
 		dot.classList.toggle(DOT_PASSED_CLASS, passed && !unseen);
@@ -570,8 +557,7 @@
 		buildPreview(dot.querySelector('.' + PREVIEW_CLASS), note, who, locked, count);
 	}
 
-	// Activating any Note Dot/Preview opens its Expanded Note without seeking;
-	// YTB.dotActivation owns the routing.
+	// Activating any Note Dot/Preview opens its Expanded Note without seeking (routing: YTB.dotActivation).
 	function onDotActivate(dot) {
 		const note = findNote(dot.dataset.ytbNoteId);
 		if (!note) return;
@@ -598,8 +584,7 @@
 	function buildPreview(preview, note, who, locked, count) {
 		preview.replaceChildren();
 		preview.classList.toggle('ytb-preview-reaction', note.kind === 'emoji' && !locked);
-		// Corner timestamp (a hovered dot swallows the hover, so YouTube shows no
-		// time pill of its own).
+		// Corner timestamp (the dot swallows hover, so YouTube shows no time pill).
 		const time = document.createElement('div');
 		time.className = 'ytb-preview-time';
 		time.textContent = '@' + YTB.formatTime(note.timestamp);
@@ -616,8 +601,8 @@
 			preview.append(emoji, author);
 			return;
 		}
-		// Text Note: body is the hero, author beneath, Reply count last. A locked
-		// Spoiler keeps this layout with the body masked and count withheld.
+		// Text Note: body, author, Reply count; a locked Spoiler masks the body
+		// and withholds the count.
 		const body = document.createElement('div');
 		body.className = locked ? 'ytb-preview-spoiler' : 'ytb-preview-body';
 		body.textContent = locked ? 'Spoiler' : note.body;
@@ -720,8 +705,7 @@
 	async function openPanel(note) {
 		const host = player();
 		if (!host || !note) return;
-		// Captured before anything hides it: the hovered Note Preview if one is
-		// on screen, else the bare dot.
+		// Captured before anything hides it: hovered Preview if on screen, else the dot.
 		const sourceRect = panelGrowthSource(note);
 		acknowledgeDot(note.id); // opening Acknowledges its dot (ADR-0010)
 		const video = document.querySelector('video');
@@ -1120,8 +1104,7 @@
 	}
 
 	function appendLocalReply(panel, note, reply) {
-		// Reconciled by server id: the next Room read / conversation poll can't
-		// duplicate this record.
+		// Reconciled by server id: the next Room read/poll can't duplicate this record.
 		const list = repliesFor(note.id);
 		if (!list.some((existing) => existing.id === reply.id)) {
 			repliesByNoteId.set(note.id, [...list, reply]);

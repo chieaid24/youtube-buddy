@@ -64,7 +64,7 @@
 		}
 		// Row holding Like/Share/Save; pill stays here even when Save hides under "..." overflow (accepted open tuning point).
 		const actions = document.querySelector('ytd-watch-metadata #actions #top-level-buttons-computed');
-		if (!actions) return; // metadata not built yet — a later ytb:mutation retries
+		if (!actions) return; // metadata not built yet - a later ytb:mutation retries
 
 		let button = document.getElementById(BUTTON_ID);
 		if (!button) {
@@ -77,7 +77,7 @@
 				const videoId = currentVideoId;
 				if (!videoId || (state !== 'idle' && state !== 'recommended')) return;
 				const now = Date.now();
-				if (now - (lastPillClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent — no visual lockout
+				if (now - (lastPillClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent - no visual lockout
 				lastPillClickAt.set(videoId, now);
 				// Optimistic: flip the pill NOW, write goes out underneath (ADR-0007 un-recommend is the author-only point delete).
 				recommendIntents.set(videoId, { intent: state === 'idle' ? 'mine' : 'absent', title: YTB.watchTitle(document) });
@@ -92,8 +92,8 @@
 
 	const STATE_LABELS = {
 		idle: 'Recommend to Buddies',
-		added: 'Recommended to you', // a Buddy's Recommendation — nothing to toggle
-		recommended: 'Unrecommend', // mine — the action offered, click to un-recommend
+		added: 'Recommended to you', // a Buddy's Recommendation - nothing to toggle
+		recommended: 'Unrecommend', // mine - the action offered, click to un-recommend
 	};
 
 	// Pill text lives in its own span so the Recommend Celebration can crossfade the label without touching the button's own opacity.
@@ -239,14 +239,14 @@
 	}
 
 	function showWriteFailure(videoId, intent, category) {
-		if (videoId !== currentVideoId) return; // navigated away — the revert lands silently
+		if (videoId !== currentVideoId) return; // navigated away - the revert lands silently
 		const button = document.getElementById(BUTTON_ID);
 		if (!button) return;
 		const message = intent === 'absent' && category !== 'network' ? "Couldn't unrecommend" : errorLabel(category);
 		showFeedback(button, message);
 	}
 
-	// Transient feedback popover — the ONLY failure surface the pill owns; the label itself is a state, never a message.
+	// Transient feedback popover - the ONLY failure surface the pill owns; the label itself is a state, never a message.
 	function showFeedback(button, message) {
 		document.getElementById(FEEDBACK_ID)?.remove();
 		const feedback = document.createElement('span');
@@ -347,7 +347,7 @@
 			return;
 		}
 		const listbox = openMenuList();
-		if (!listbox) return; // menu not open (yet) — keep the capture until it expires
+		if (!listbox) return; // menu not open (yet) - keep the capture until it expires
 
 		const { videoId, title } = pendingKebab;
 		pendingKebab = null;
@@ -468,7 +468,7 @@
 			recommenderByVideoId = new Map();
 			recommendIntents.clear();
 		}
-		// A plain failed read (ok: false) rewrites nothing — emptiness is not truth.
+		// A plain failed read (ok: false) rewrites nothing - emptiness is not truth.
 		const button = document.getElementById(BUTTON_ID);
 		if (button) syncWatchButton(button);
 		if (!hasRoomCode) document.getElementById(BUTTON_ID)?.remove();
