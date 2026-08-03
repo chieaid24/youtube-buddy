@@ -1192,7 +1192,16 @@ describe('room home section helpers', () => {
 		const notes = [
 			{ id: 'n1', clientId: me, name: 'Aidan', videoId: 'v1', timestamp: 5, kind: 'text', body: 'mine', createdAt: base },
 			// A Reaction is never a Feed row (kind 'emoji'; parallel to Unseen).
-			{ id: 'n4', clientId: 'bob22222', name: 'Bob', videoId: 'v1', timestamp: 8, kind: 'emoji', body: '\u{1F525}', createdAt: base + 1200 },
+			{
+				id: 'n4',
+				clientId: 'bob22222',
+				name: 'Bob',
+				videoId: 'v1',
+				timestamp: 8,
+				kind: 'emoji',
+				body: '\u{1F525}',
+				createdAt: base + 1200,
+			},
 			{
 				id: 'n2',
 				clientId: 'bob22222',
@@ -1231,7 +1240,18 @@ describe('room home section helpers', () => {
 		// (reply-to-mine AND mention) exactly once as a reply. The Reaction (n4)
 		// never appears. Recommend events all surface — my own (e3) included —
 		// in timestamp order.
-		expect(first.map((item) => item.type)).toEqual(['note', 'mention', 'note', 'reply', 'note', 'mention', 'reply', 'note', 'system', 'system']);
+		expect(first.map((item) => item.type)).toEqual([
+			'note',
+			'mention',
+			'note',
+			'reply',
+			'note',
+			'mention',
+			'reply',
+			'note',
+			'system',
+			'system',
+		]);
 		expect(first.map((item) => item.at)).toEqual([
 			base,
 			base + 1000,

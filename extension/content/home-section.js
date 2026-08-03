@@ -253,7 +253,13 @@
 		const action = document.createElement('span');
 		action.className = 'ytb-hs-action';
 		action.textContent =
-			item.type === 'reply' ? ' replied to your note ' : item.type === 'mention' ? ' mentioned you ' : item.reply ? ' replied ' : ' left a note ';
+			item.type === 'reply'
+				? ' replied to your note '
+				: item.type === 'mention'
+					? ' mentioned you '
+					: item.reply
+						? ' replied '
+						: ' left a note ';
 
 		// A Spoiler Note's body never renders in the Feed (Replies carry no flag).
 		const spoiler = !item.reply && Boolean(record.spoiler);
