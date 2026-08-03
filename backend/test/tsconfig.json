@@ -3,12 +3,6 @@
 	"compilerOptions": {
 		"types": ["@cloudflare/vitest-pool-workers/types", "@types/chrome", "node"]
 	},
-	"include": [
-		"./*.spec.ts",
-		"./env.d.ts",
-		"../worker-configuration.d.ts",
-		"../../extension/content/shared.js",
-		"../../extension/content/room-code.js"
-	],
+	"include": ["./*.spec.ts", "./env.d.ts", "./globals.d.ts", "../worker-configuration.d.ts"],
 	"exclude": []
 }

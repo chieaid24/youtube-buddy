@@ -2138,24 +2138,9 @@ declare global {
 				myClientId: string,
 				roster?: Array<{ clientId: string; name?: string }>,
 			): Array<{ clientId: string; name: string; status: string | null }>;
-			watchedByAriaLabel(rows: Array<{ name: string; status: string | null }>): string;
-			buildFeed(
-				records: object,
-				myClientId: string,
-			): Array<{
-				dayKey: string;
-				items: Array<{
-					type: string;
-					at: number;
-					note?: { id: string } | null;
-					reply?: object;
-					event?: { actorClientId?: string; videoId?: string; title?: string; type?: string };
-					videoId?: string;
-					title?: string;
-					clientId?: string;
-					name?: string;
-				}>;
-			}>;
+			watchedByAriaLabel(rows: Array<{ clientId?: string; name: string; status: string | null }>): string;
+			// Loose here on purpose: the local `buildFeed` wrapper pins the Feed shape.
+			buildFeed(records: object, myClientId: string): Array<{ dayKey: string; items: any[] }>;
 			dayLabel(dayKey: string, nowMs?: number): string;
 			tailFeed<Group extends { dayKey: string; items: unknown[] }>(groups: Group[], limit: number): { groups: Group[]; hidden: number };
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
@@ -2219,6 +2204,33 @@ declare global {
 			notificationLifetime(kind: string, trigger: 'crossing' | 'echo'): number;
 			notePanelVariant(note: { kind?: string; spoiler?: boolean; timestamp?: number }, playhead: number): 'text' | 'reaction' | 'spoiler';
 			nearNoteMoment(timestamp: number, playhead: number): boolean;
+			deleteConfirmCopy(replyCount: number): string;
+			goHereTarget(timestamp: number): number;
+			timeToX(segments: Array<{ left: number; width: number }>, timestamp: number, duration: number): number;
+			solveDotFan(
+				xs: number[],
+				options?: { idealGap?: number; barWidth?: number; dotDiameter?: number },
+			): { clusters: number[][]; offsets: number[]; gap: number };
+			NOTE_BAND: { dotLift: number; dotDiameter: number; hitMaxSideReach: number; hitHeight: number; panelGap: number };
+			dotHitReaches(xs: number[], dotDiameter: number, maxSideReach: number): Array<{ left: number; right: number }>;
+			panelBarClearance(band: { dotLift?: number; dotDiameter?: number; panelGap?: number }): number;
+			ytbOwnedChurn(records: object[]): boolean;
+			previewOwnsTile(preview: object | null, tile: object | null): boolean;
+			systemLine(
+				item: { type?: string; own?: boolean; removed?: boolean; event?: object } | null,
+				roster: Array<{ clientId: string; name?: string }>,
+			): {
+				struck: boolean;
+				prefix: string;
+				label: string;
+				suffix: string;
+				linkVideoId: string | null;
+				linkTooltip: string | null;
+				rowTooltip: string | null;
+				srSuffix: string | null;
+			};
+			recommendPillState(args: object): 'idle' | 'recommended' | 'added';
+			recommendIntentSettled(args: object): boolean;
 		};
 	}
 }
