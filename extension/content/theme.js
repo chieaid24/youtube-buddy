@@ -1,5 +1,4 @@
 // extension/theme.js
-//
 // Injects the --ytb-* design tokens (DESIGN.md 1/2/4) and bundled Nunito
 // font, shared by popup.html and every on-video Note surface. Stamps the
 // Theme Preference (ADR-0008/0009) on <html>, isolates on-video keystrokes
@@ -56,7 +55,7 @@
 	--ytb-neutral-hover: oklch(34% 0.02 52);
 	/* Text on filled buttons: warm near-white on danger/neutral fills, and a
 	   FIXED dark warm ink on apricot fills in BOTH themes (pastel apricot is
-	   too light for white text) — same contract as the popup. */
+	   too light for white text) - same contract as the popup. */
 	--ytb-on-fill: oklch(99% 0.005 62);
 	--ytb-on-accent: oklch(28% 0.022 50);
 

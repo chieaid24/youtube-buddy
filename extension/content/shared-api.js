@@ -11,7 +11,7 @@
 		// tolerates failure silently per the PRD.
 		async postProgress({ clientId, name, videoId, timestamp, duration }) {
 			const { code } = await YTB.getConfig();
-			if (!code) return false; // Unpaired — nothing to share.
+			if (!code) return false; // Unpaired - nothing to share.
 			try {
 				const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code), {
 					method: 'POST',
@@ -187,7 +187,7 @@
 		// Announce "I'm here" under `code`, independent of watching/Sharing;
 		// idempotent upsert doubling as a keep-alive.
 		async assertPresence(code) {
-			if (!code) return false; // Unpaired — nobody to appear to.
+			if (!code) return false; // Unpaired - nobody to appear to.
 			const { name } = await YTB.getConfig();
 			const clientId = await YTB.ensureClientId();
 			if (!YTB.isContextActive()) return false;

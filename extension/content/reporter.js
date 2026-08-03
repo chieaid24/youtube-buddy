@@ -6,7 +6,7 @@
 	'use strict';
 
 	const POST_INTERVAL_MS = 60_000; // post every ~60s while playing
-	const MIN_TIMESTAMP_SECONDS = 5; // below this is noise — skip
+	const MIN_TIMESTAMP_SECONDS = 5; // below this is noise - skip
 
 	let intervalId = null;
 	let boundVideo = null;

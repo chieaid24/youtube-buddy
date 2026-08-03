@@ -1,7 +1,7 @@
 // extension/content/shared.js
 // Core of the window.YTB global (ADR-0001: classic scripts, no ES modules; the
 // popup and every content script talk only via window.YTB). The shared-*.js
-// siblings extend this object — load order lives in manifest.json/popup.html.
+// siblings extend this object - load order lives in manifest.json/popup.html.
 
 const YTB = {
 	// A Chrome extension reload/update revokes an already-injected content

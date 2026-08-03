@@ -51,7 +51,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 	const prefix = `${code}:`;
 	const path = url.pathname;
 
-	// Presence: a member appears the instant they join, independent of watching. Stored under `${code}:presence:${id}`.
+	// Presence: a member appears the instant they join, independent of watching.
 	if (req.method === 'POST' && path === '/presence') {
 		const body = (await req.json()) as Partial<PresenceBody>;
 		if (!isValidClientId(body.clientId)) {

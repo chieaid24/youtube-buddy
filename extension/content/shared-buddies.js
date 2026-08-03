@@ -103,7 +103,7 @@
 		},
 
 		// Base label without Room context: trimmed Display Name, else a stable
-		// "<Adjective> Buddy". Collisions possible — user-facing code goes through
+		// "<Adjective> Buddy". Collisions possible - user-facing code goes through
 		// buddyName with a roster.
 		baseBuddyName(clientId, name) {
 			const trimmed = String(name ?? '').trim();
@@ -133,7 +133,7 @@
 			return labels;
 		},
 
-		// Display label for a Buddy (FOREIGN records only — you never render
+		// Display label for a Buddy (FOREIGN records only - you never render
 		// yourself as a Buddy); a roster enables disambiguation.
 		buddyName(clientId, name, roster) {
 			if (roster) return YTB.disambiguateNames(roster).get(clientId) || YTB.baseBuddyName(clientId, name);

@@ -13,7 +13,7 @@
 		if (!YTB.isContextActive()) return;
 		if (Date.now() - lastAssert < ASSERT_INTERVAL_MS) return;
 		const { code } = await YTB.getConfig();
-		if (!code) return; // Unpaired — nobody to appear to.
+		if (!code) return; // Unpaired - nobody to appear to.
 		lastAssert = Date.now();
 		YTB.assertPresence(code);
 	}
