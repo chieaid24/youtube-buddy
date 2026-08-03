@@ -1,18 +1,12 @@
 // extension/renderer.js
-//
-// Draws Buddies' Progress markers on the player bar and Watched-By Dots on
-// thumbnails (display-only); also the Room's single poller, rebroadcasting
-// each read as ytb:room-data for notes.js/home-section.js/etc (this file
-// renders no Note UI itself). Loaded 3rd (after shared.js+reporter.js) so its
-// ytb:* listeners attach before content.js's first ytb:navigate (ADR-0001);
-// reads run regardless of Sharing, which only gates POSTs.
+// Buddy markers on the player bar + thumbnail Watched-By Dots (display-only; no Note UI).
+// The Room's single poller: rebroadcasts each read as ytb:room-data for the other modules.
+// Loaded 3rd so ytb:* listeners attach before the first ytb:navigate (ADR-0001); reads run regardless of Sharing.
 
 (function () {
 	'use strict';
 
 	// --- constants ---
-	// Each Buddy's color comes from YTB.buddyColor; the CSS defaults below only
-	// matter before one is assigned.
 
 	const MARKER_CLASS = 'ytb-watch-marker';
 	const TOOLTIP_CLASS = 'ytb-watch-tooltip';
@@ -26,7 +20,6 @@
 	const STYLE_ID = 'ytb-renderer-style';
 	const PRESENCE_POLL_MS = 60_000; // re-GET cadence for live markers + presence
 
-	// The dots' inset from the thumbnail's top-left corner, and their geometry.
 	const DOTS_INSET = 8;
 	const DOT_SIZE = 8;
 	const DOT_GAP = 4;
@@ -44,8 +37,7 @@
 	let readFailures = 0; // consecutive failed Room reads, folded via YTB.connectionState
 	let connectionLost = false; // failures >= 2 — rides every ytb:room-data broadcast
 
-	// Buddy Progress Visibility (Settings): hidden draws neither markers nor
-	// thumbnail bars, but polling/rebroadcasting ytb:room-data continues unaffected.
+	// Buddy Progress Visibility: hidden draws nothing, but polling/rebroadcasting continues.
 	let buddyProgressHidden = false;
 
 	injectStyle();
@@ -61,10 +53,8 @@
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * GET every record for the Room Code, indexed by videoId -> latest record per
-	 * Buddy. Empties the cache when Unpaired or Room-full (locked out); a FAILED
-	 * read keeps the previous cache (Connection Lost) but still broadcasts. No
-	 * age filter needed — server TTL already drops records past 14 days.
+	 * GET the Room's records into the cache. Empties when Unpaired or locked out;
+	 * a FAILED read keeps the previous cache (Connection Lost) but still broadcasts.
 	 */
 	async function refresh() {
 		if (!YTB.isContextActive()) return;
@@ -88,8 +78,7 @@
 		readFailures = conn.failures;
 		connectionLost = conn.lost;
 		if (!records.ok) {
-			// A failed read isn't truth: keep the previous cache/roster/baseline
-			// as-is (Connection Lost, PRD #137); still broadcast so consumers see it.
+			// A failed read isn't truth: keep the previous cache/roster/baseline (Connection Lost, #137); still broadcast.
 			broadcastRoomData(records, false);
 			return;
 		}
@@ -101,18 +90,16 @@
 		);
 		if (!YTB.isContextActive()) return;
 
-		// Toast new arrivals; the first read only seeds the baseline (no false "joined").
 		notePresence(view.buddies);
 
-		// Locked out of a full Room: I'm not a member and 5 others already are.
+		// Locked out of a full Room.
 		if (view.locked) {
 			buddyByVideoId = new Map();
 			broadcastRoomData(null, true);
 			return;
 		}
 
-		// videoId -> (clientId -> latest record), then flattened; presence rows have
-		// no videoId, so they never produce a marker (only a toast/roster).
+		// Rows without a videoId (presence) never produce a marker.
 		const byVideo = new Map();
 		for (const r of records.progress) {
 			if (!r || r.clientId === myClientId || !r.videoId) continue;
@@ -133,9 +120,8 @@
 		broadcastRoomData(records, false);
 	}
 
-	// Hands each Room read to the other modules (notes.js, home-section.js,
-	// mentions.js, playlist-add.js) — none of them poll; this is the single
-	// poller. `records` is null for an empty broadcast (no code, or locked out).
+	// Single-poller hand-off to the other modules (none of them poll).
+	// `records` is null for an empty broadcast (no code, or locked out).
 	function broadcastRoomData(records, locked) {
 		const r = records || {};
 		document.dispatchEvent(
@@ -150,28 +136,22 @@
 					roomCode: activeRoomCode,
 					myClientId,
 					locked: Boolean(locked),
-					// False on a failed GET (empty arrays still broadcast) — consumers
-					// must not treat that as truth; notes.js only prunes Unseen state
-					// (ADR-0010) when ok.
+					// False on a failed GET — never truth; notes.js prunes Unseen state only when ok (ADR-0010).
 					ok: Boolean(r.ok),
-					// >= 2 consecutive failed reads (YTB.connectionState); carried on
-					// every broadcast so consumers track onset/recovery without their
-					// own failure counter.
+					// >= 2 consecutive failed reads (YTB.connectionState); on every broadcast so consumers need no counter.
 					connectionLost,
 				},
 			}),
 		);
 	}
 
-	// Reset the toast baseline when Unpaired, so rejoining later doesn't replay
-	// every existing member as a fresh "joined".
+	// Unpaired reset, so rejoining doesn't replay every member as a fresh "joined".
 	function resetPresenceBaseline() {
 		knownBuddyIds = new Set();
 		baselineReady = false;
 	}
 
-	// Diff against the last-seen set and toast any new clientId once the
-	// baseline is established; `buddies` already excludes me and dedups by clientId.
+	// Toast clientIds new since the last read; the first read only seeds the baseline.
 	function notePresence(buddies) {
 		const current = new Set();
 		for (const b of buddies) {

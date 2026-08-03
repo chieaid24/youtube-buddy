@@ -155,7 +155,7 @@ window.YTBRoomCode = (function () {
 
 	const feedbackTimers = new WeakMap();
 
-	// Copies text to the clipboard, flashing feedback (and a checkmark on button, if given); writeText overrides the Clipboard API in tests.
+	// Copy-to-clipboard with flashed feedback; writeText overrides the Clipboard API in tests.
 	async function copy({ text, feedback, button, writeText, durationMs = 1500 }) {
 		const previousTimer = feedbackTimers.get(feedback);
 		if (previousTimer) clearTimeout(previousTimer);

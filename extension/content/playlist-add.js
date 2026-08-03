@@ -1,6 +1,6 @@
-// The two Recommend Controls (grid renders in home-section.js; ADR-0007, CONTEXT.md "Recommend Control"): the watch-page pill
-// (optimistic Recommend Intent; toggles idle/"Unrecommend") and the thumbnail kebab-menu row (DOM fragility deliberately accepted, issue #56/ADR-0005).
-// Pure consumer per ADR-0001; enabled only with a Room Code set, and adding is NOT gated by Sharing.
+// Both Recommend Controls (ADR-0007): the watch-page pill (optimistic Recommend Intent) and the thumbnail
+// kebab-menu row (YouTube-menu DOM fragility deliberately accepted, #56/ADR-0005); the grid renders in home-section.js.
+// Pure consumer per ADR-0001; needs a Room Code; adding is NOT gated by Sharing.
 
 (function () {
 	'use strict';
@@ -10,22 +10,22 @@
 	const STYLE_ID = 'ytb-playlist-add-style';
 	const FEEDBACK_ID = 'ytb-playlist-feedback';
 	const FEEDBACK_MS = 2000;
-	// Invisible per-video click cooldown (CONTEXT.md "Recommend Intent"): clicks within this window are silently ignored, no visual lockout.
+	// Invisible per-video click cooldown (CONTEXT.md "Recommend Intent"): silent, never a visual lockout.
 	const CLICK_COOLDOWN_MS = 1000;
-	// Recommend Celebration (CONTEXT.md): purely cosmetic "Recommended!" + confetti beat on idle -> recommend, then crossfades to "Unrecommend".
+	// Recommend Celebration (CONTEXT.md): cosmetic confetti beat on idle -> recommend, then crossfades to "Unrecommend".
 	const CELEBRATION_MS = 1200;
 	const CELEBRATION_LABEL = 'Recommended!';
 	const CONFETTI_COUNT = 14;
 	const CONFETTI_COLORS = ['--ytb-accent-500', '--ytb-accent-600', '--ytb-accent-800'];
 
 	let currentVideoId = null;
-	// videoId -> recommending member's clientId (addedBy), from ok ytb:room-data reads. A failed read never rewrites it — emptiness is not truth.
+	// videoId -> addedBy clientId, from ok ytb:room-data reads; a failed read never rewrites it -- emptiness is not truth.
 	let recommenderByVideoId = new Map();
 	// videoId -> { intent: 'mine'|'absent', title }: not-yet-confirmed Recommend Intents, overlaid on every Room read so a racing read can't flip the pill back.
 	const recommendIntents = new Map();
 	// videoId -> epoch ms of the last accepted pill click (the cooldown gate).
 	let lastPillClickAt = new Map();
-	// videoIds with a playlist write in flight — at most one per video; a mid-flight toggle goes out as a single delta once the write settles.
+	// at most one write in flight per video; a mid-flight toggle goes out as one delta once it settles.
 	const writesInFlight = new Set();
 	let activeRoomCode = null; // a Room change orphans the old Room's intents
 	let myClientId = null;
@@ -49,14 +49,12 @@
 		if (!YTB.isContextActive()) return { ok: false, category: 'unexpected' };
 		myClientId = myClientId || clientId;
 		const result = await YTB.postPlaylistAdd({ clientId, name, videoId, title });
-		// Server record is authoritative: re-recommending a Buddy's item is a no-op that returns THEIR item, so the pill must not claim it as ours.
+		// Re-recommending a Buddy's item is a no-op returning THEIR item; the pill must not claim it as ours.
 		if (result.ok) recommenderByVideoId.set(videoId, (result.item && result.item.addedBy) || clientId);
 		return result;
 	}
 
-	// ---------------------------------------------------------------------------
-	// Watch page: the "Recommend to Buddies" pill in the actions row.
-	// ---------------------------------------------------------------------------
+	// --- Watch page: the "Recommend to Buddies" pill in the actions row. ---
 
 	function ensureWatchButton() {
 		if (!YTB.isContextActive()) return;

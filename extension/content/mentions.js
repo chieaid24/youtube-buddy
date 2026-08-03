@@ -1,8 +1,6 @@
-// extension/mentions.js
-// @-mention autocomplete for the Add Note composer and Reply input (ADR-0006: a Mention targets a stored Client ID, never display-name text).
-// window.YTBMentions: roster() (cached from renderer.js's ytb:room-data) and attach(textarea), whose controller's mentions() yields Client IDs still present as "@Name" text at submit time.
-// attach() must be called BEFORE the caller's own ytb:keydown listener, so the popover can consume nav/pick keys with stopImmediatePropagation.
-// Loaded after shared.js, before notes.js/composer.js. Pure consumer (ADR-0001) - only touches its own popover DOM.
+// @-mention autocomplete for the Add Note composer and Reply input (ADR-0006:
+// a Mention targets a stored Client ID, never display-name text). window.YTBMentions = { attach, roster }.
+// attach() must run BEFORE the host's own ytb:keydown listener so the popover can consume nav/pick keys.
 
 (function () {
 	'use strict';
@@ -23,7 +21,7 @@
 
 	injectStyle();
 
-	// The "@token" the caret sits in, or null; "@" must start a word and the query must be whitespace-free up to the caret.
+	// The "@token" under the caret, or null; "@" must start a word, query whitespace-free.
 	function activeToken(textarea) {
 		const caret = textarea.selectionStart;
 		if (typeof caret !== 'number') return null;
@@ -41,7 +39,7 @@
 		let options = []; // [{ element, member }]
 		let activeIndex = 0;
 		let token = null;
-		const picked = []; // [{ clientId, text }] — text presence gates mentions()
+		const picked = []; // [{ clientId, text }]; text presence gates mentions()
 
 		function close() {
 			popover?.remove();
@@ -59,7 +57,6 @@
 			popover.className = POPOVER_CLASS;
 			popover.setAttribute('role', 'listbox');
 			popover.setAttribute('aria-label', 'Mention a Buddy');
-			// Below the field, aligned to its left edge.
 			popover.style.left = textarea.offsetLeft + 'px';
 			popover.style.top = textarea.offsetTop + textarea.offsetHeight + 4 + 'px';
 			// Keep player/document handlers from treating popover clicks as outside-clicks or seeks.
@@ -98,7 +95,7 @@
 				close();
 				return;
 			}
-			// Mentionable = current Room members minus the author; search over the FULL roster so labels match the rest of the UI, then cap.
+			// Search the FULL roster so labels match the rest of the UI; then drop self and cap.
 			const candidates = YTB.filterRoster(roster, token.query)
 				.filter((member) => member.clientId !== myClientId)
 				.slice(0, MAX_VISIBLE);
@@ -123,8 +120,7 @@
 			setActive(0);
 		}
 
-		// ytb:keydown re-dispatches from theme.js's capture guard; registered before the host's own listener so
-		// stopImmediatePropagation keeps Enter/Escape from also posting/closing while the popover is open.
+		// ytb:keydown comes from theme.js's capture guard; registered before the host's listener so stopImmediatePropagation wins.
 		textarea.addEventListener('ytb:keydown', (event) => {
 			if (!popover || !popover.isConnected) return;
 			const key = event.detail.original;
@@ -151,7 +147,7 @@
 		});
 
 		return {
-			// Client IDs to submit: only Mentions whose inline "@Name" text survived editing, deduped, capped at Room size.
+			// Only Mentions whose inline "@Name" text survived editing; deduped, capped at Room size.
 			mentions() {
 				const value = textarea.value;
 				const ids = [];
@@ -172,7 +168,7 @@
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
-		// Consumes the namespaced --ytb-* tokens injected by theme.js, matching the composer/panel it floats in.
+		// Consumes theme.js's --ytb-* tokens.
 		style.textContent = `
       .${POPOVER_CLASS} {
         position: absolute;

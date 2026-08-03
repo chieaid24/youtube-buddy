@@ -1,9 +1,7 @@
 // extension/home-section.js
-//
-// The Room Home Section (ADR-0005): Room Feed + Recommended for you (ADR-0007)
-// above YouTube's home grid, or a Create/Join prompt when Unpaired. Gated to
-// the home route + Room Home Toggle; Connection Lost (PRD #137) retains stale
-// content; styled via theme.js's --ytb-* tokens (ADR-0009).
+// Room Home Section (ADR-0005): Room Feed + Recommended for you (ADR-0007) above
+// the home grid, or Create/Join when Unpaired. Gated to home route + Room Home
+// Toggle; Connection Lost retains stale content (PRD #137); --ytb-* themed (ADR-0009).
 
 (function () {
 	'use strict';
@@ -11,7 +9,7 @@
 	const SECTION_ID = 'ytb-home-section';
 	const STYLE_ID = 'ytb-home-section-style';
 
-	let lastDetail = null; // last renderable ytb:room-data payload; a failed read for the same Room keeps this (Connection Lost, PRD #137)
+	let lastDetail = null; // last renderable ytb:room-data; a same-Room failed read keeps it (PRD #137)
 	let connectionLost = false; // true at >= 2 consecutive failed Room reads
 	let onHome = false;
 	let myClientId = null;
@@ -21,12 +19,8 @@
 	let dismissedIds = new Set(); // this Room's local Dismissals (item ids)
 	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
 
-	// Feed's reveal window: transient view state, never persisted (the Feed has
-	// no read/unread state by design). Only the newest `revealCount` items
-	// render; "Show more" reveals FEED_PAGE more; resets on a new home visit or
-	// Room Code change. `lastFeedTotal` is the prior render's item count, so a
-	// poll appending items while scrolled up grows the window instead of
-	// sliding visible rows out of view.
+	// Feed reveal window: transient, never persisted; resets on a new home visit or Room change.
+	// lastFeedTotal lets a poll that appends while scrolled up grow the window instead of sliding rows away.
 	const FEED_PAGE = 20;
 	// "At the bottom" tolerance: scrollTop rarely lands exactly on scrollHeight - clientHeight.
 	const PIN_PX = 8;
@@ -51,13 +45,11 @@
 		return location.pathname === '/';
 	}
 
-	// ---------------------------------------------------------------------------
-	// Injection: above the home grid, re-attempted on mutations until it lands.
-	// ---------------------------------------------------------------------------
+	// --- Injection: above the home grid, retried on mutations until it lands ---
 
 	function ensureSection() {
 		if (!YTB.isContextActive()) return null;
-		// Absent off the home route, while the Room Home Toggle is off, or until the toggle preference is known.
+		// Absent off home, while toggled off, or until the preference is known.
 		if (!onHome || hiddenPref !== false) {
 			document.getElementById(SECTION_ID)?.remove();
 			return null;
@@ -65,10 +57,10 @@
 		let section = document.getElementById(SECTION_ID);
 		if (section && section.isConnected) return section;
 
-		// The section sits directly above the home grid so YouTube's layout pushes it down.
+		// Directly above the home grid so YouTube's layout pushes it down.
 		const browse = document.querySelector('ytd-browse[page-subtype="home"]:not([hidden])');
 		const grid = browse && browse.querySelector('ytd-rich-grid-renderer');
-		if (!grid || !grid.parentElement) return null; // grid not built yet — retry on ytb:mutation
+		if (!grid || !grid.parentElement) return null; // grid not built yet - retried on ytb:mutation
 
 		section = document.createElement('section');
 		section.id = SECTION_ID;
@@ -78,9 +70,7 @@
 		return section;
 	}
 
-	// ---------------------------------------------------------------------------
-	// Rendering.
-	// ---------------------------------------------------------------------------
+	// --- Rendering ---
 
 	function render(section) {
 		section = section || document.getElementById(SECTION_ID);
@@ -89,8 +79,7 @@
 		const detail = lastDetail;
 		const roomCode = detail && detail.roomCode;
 
-		// Chat rule: capture scroll state before the rebuild wipes it - pinned to
-		// bottom follows the newest item, else preserve the viewer's exact spot.
+		// Chat rule: capture scroll before the rebuild - pinned follows the newest item, else keep the exact spot.
 		const prevScroll = section.querySelector('.ytb-hs-feed-scroll');
 		const pinned = pinOverride || !prevScroll || prevScroll.scrollHeight - prevScroll.clientHeight - prevScroll.scrollTop <= PIN_PX;
 		const prevTop = prevScroll ? prevScroll.scrollTop : 0;
@@ -112,8 +101,7 @@
 		}
 		head.append(buildCloseButton());
 
-		// Connection Lost (PRD #137): quiet status line while the Room can't be
-		// read; never shown while Unpaired (flag only set once there's a code).
+		// Connection Lost (PRD #137): quiet status line; never shown while Unpaired.
 		let conn = null;
 		if (roomCode && connectionLost) {
 			conn = document.createElement('p');
@@ -138,14 +126,12 @@
 		if (conn) section.replaceChildren(head, conn, body);
 		else section.replaceChildren(head, body);
 
-		// Follow the newest item only if already pinned; otherwise restore the exact scroll position.
 		const scroll = section.querySelector('.ytb-hs-feed-scroll');
 		if (scroll) scroll.scrollTop = pinned ? scroll.scrollHeight : prevTop;
 	}
 
-	// Close control: a third writer of homeSectionHidden (alongside the guide
-	// toggle and popup Settings) - hides the section (absent, not collapsed);
-	// the guide row brings it back. Optimistic; chrome.storage.onChanged syncs peers.
+	// Third writer of homeSectionHidden (with the guide toggle + popup Settings):
+	// a hide, never a leave; optimistic, chrome.storage.onChanged syncs peers.
 	function buildCloseButton() {
 		const close = document.createElement('button');
 		close.type = 'button';
@@ -184,9 +170,8 @@
 		const groups = YTB.buildFeed(detail, myClientId);
 		const total = groups.reduce((sum, group) => sum + group.items.length, 0);
 
-		// Items appended while scrolled up must not slide the read row out of the
-		// window: grow revealCount by the delta. Pinned, count stays put and the
-		// window slides instead - unbounded DOM growth is not allowed.
+		// Scrolled up, grow revealCount by the delta so appended items don't slide rows away;
+		// pinned, the window slides instead (no unbounded DOM growth).
 		if (lastFeedTotal !== null && !pinned && total > lastFeedTotal) revealCount += total - lastFeedTotal;
 		lastFeedTotal = total;
 
@@ -202,8 +187,7 @@
 		return column;
 	}
 
-	// Renders the newest `revealCount` items (YTB.tailFeed) behind an inline
-	// "Show more" above the topmost day divider; absent once nothing is hidden.
+	// Newest revealCount items behind an inline "Show more"; absent once nothing is hidden.
 	function fillFeedScroll(scroll, groups, roster) {
 		const { groups: visible, hidden } = YTB.tailFeed(groups, revealCount);
 		scroll.replaceChildren();
@@ -221,8 +205,7 @@
 				revealCount += FEED_PAGE;
 				fillFeedScroll(scroll, groups, roster);
 				scroll.scrollTop = prevTop + (scroll.scrollHeight - prevHeight);
-				// Keep the keyboard anchored on the rebuild's successor control or first
-				// revealed row; preventScroll avoids undoing the compensation above.
+				// Re-anchor keyboard focus after the rebuild; preventScroll keeps the compensation above.
 				const next = scroll.querySelector('.ytb-hs-more');
 				const anchor = next || scroll.querySelector('.ytb-hs-item');
 				if (anchor) {
@@ -248,8 +231,7 @@
 
 	function buildFeedRow(item, roster) {
 		const record = item.reply || item.note;
-		// Note this row points at: parent Note for a Reply/Reply-Mention, or the
-		// Note itself for a Note-Mention; absent leaves the body non-clickable.
+		// Parent Note for a Reply, the Note itself for a Mention; absent leaves the body non-clickable.
 		const target = item.note;
 		const canOpen = Boolean(target && target.videoId);
 
@@ -260,21 +242,20 @@
 		author.className = 'ytb-hs-author';
 		author.textContent = YTB.buddyName(record.clientId, record.name, roster);
 		author.style.color = YTB.buddyTextColor(record.clientId);
-		author.dataset.ytbColorCid = record.clientId; // live repaint hook (issue #115)
+		author.dataset.ytbColorCid = record.clientId; // live repaint hook (#115)
 
 		const action = document.createElement('span');
 		action.className = 'ytb-hs-action';
 		action.textContent = item.type === 'reply' ? ' replied to your note ' : ' mentioned you ';
 
-		// Only the quoted body links (CONTEXT.md Feed link rule); it navigates to
-		// the video at the viewer's own place (no &t= seek, ADR-0010) and records
-		// an arrival handshake so notes.js pauses on an Unseen dot there.
+		// Only the quoted body links (CONTEXT.md Feed link rule): no &t= seek (ADR-0010),
+		// plus an arrival handshake so notes.js pauses on an Unseen dot there.
 		const body = document.createElement(canOpen ? 'a' : 'span');
 		body.className = canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text';
 		body.textContent = '"' + record.body + '"';
 		if (canOpen) {
 			body.href = '/watch?v=' + encodeURIComponent(target.videoId);
-			// Tooltip names where the link lands (the reply row doesn't otherwise show the video).
+			// Tooltip names the destination video (the row doesn't otherwise show it).
 			body.title = YTB.titleLinkTooltip(target.videoTitle);
 			body.addEventListener('click', () => {
 				YTB.setPendingArrival(target.videoId);
@@ -286,7 +267,7 @@
 		when.textContent = YTB.relativeTime(item.at);
 
 		row.append(author, action, body);
-		// Which video the conversation is on - plain text, never a link; omitted if the Note predates title capture.
+		// Video context: plain text, never a link; absent if the Note predates title capture.
 		const context = YTB.videoContext(target);
 		if (context) {
 			const span = document.createElement('span');
@@ -298,9 +279,8 @@
 		return row;
 	}
 
-	// The video title is a System Message/Watch Notice row's ONLY link (CONTEXT.md
-	// Feed link rule); falls back to plain text without a videoId (a struck
-	// System Message uses this deliberately - systemLine passes null).
+	// The row's ONLY link (CONTEXT.md Feed link rule); plain text without a videoId
+	// (a struck System Message passes null deliberately).
 	function buildTitleLink(videoId, title) {
 		const label = title || 'a video';
 		if (!videoId) return document.createTextNode(label);
@@ -312,10 +292,8 @@
 		return link;
 	}
 
-	// Recommendation System Message (ADR-0007): sentence comes from the pure
-	// systemLine plan (shared.js). A struck line (buildFeed's `removed` flag)
-	// renders no anchor, plus a row tooltip and visually-hidden suffix for
-	// screen readers, since the stored event title survives an un-recommend.
+	// System Message (ADR-0007), rendered from the pure systemLine plan; a struck line
+	// gets no anchor, plus a tooltip and screen-reader suffix (title survives un-recommend).
 	function buildSystemRow(item, roster) {
 		const line = YTB.systemLine(item, roster);
 		const row = document.createElement('div');
@@ -337,8 +315,7 @@
 		return row;
 	}
 
-	// Watch Notice, shown only to the recommender: a Buddy has a Progress Record
-	// for one of the viewer's Recommendations; the title is the row's only link.
+	// Watch Notice (recommender only): a Buddy started one of your Recommendations; title is the only link.
 	function buildWatchRow(item, roster) {
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item ytb-hs-system';
@@ -395,14 +372,13 @@
 		link.href = '/watch?v=' + encodeURIComponent(item.videoId);
 		// No native title= tooltip (alt keeps it accessible); hover shows the card wash instead.
 		const img = document.createElement('img');
-		// A normal in-page image load on youtube.com — no extra host permission.
+		// A normal in-page image load on youtube.com - no extra host permission.
 		img.src = 'https://i.ytimg.com/vi/' + encodeURIComponent(item.videoId) + '/mqdefault.jpg';
 		img.alt = item.title;
 		img.loading = 'lazy';
 		link.append(img);
 
-		// Dismiss (ADR-0007): hides this Recommendation for this viewer in this
-		// Room only - a private, persisted chrome.storage.local write, never a backend call.
+		// Dismiss (ADR-0007): private per-viewer, per-Room chrome.storage.local write, never a backend call.
 		const dismiss = document.createElement('button');
 		dismiss.type = 'button';
 		dismiss.className = 'ytb-hs-remove';
@@ -519,8 +495,7 @@
 	async function commitCode(code) {
 		await YTB.setConfig({ code });
 		await YTB.assertPresence(code);
-		// Nudge renderer.js's poller to re-read immediately instead of waiting out
-		// its 60s cycle; re-emits the current location like a same-page navigation.
+		// Nudge renderer.js's poller to re-read now instead of waiting out its 60s cycle.
 		document.dispatchEvent(
 			new CustomEvent('ytb:navigate', {
 				detail: { url: location.href, videoId: null },
@@ -528,10 +503,7 @@
 		);
 	}
 
-	// ---------------------------------------------------------------------------
-	// Wiring: pure consumer, registered synchronously (before content.js fires
-	// the initial ytb:navigate).
-	// ---------------------------------------------------------------------------
+	// --- Wiring: pure consumer, registered before content.js's first ytb:navigate ---
 
 	document.addEventListener('ytb:navigate', () => {
 		if (!YTB.isContextActive()) return;
@@ -556,16 +528,14 @@
 		// Connection Lost (PRD #137) only applies once there's a Room Code; Unpaired broadcasts never carry the flag.
 		connectionLost = Boolean(detail && detail.roomCode && detail.connectionLost);
 
-		// A failed read is not truth: retain the last-known detail so the Feed and
-		// grid don't rebuild from empty arrays - but only for the SAME Room, so
-		// switching Rooms mid-outage doesn't keep showing the old one.
+		// A failed read is not truth: keep the last-known detail, but only for the
+		// SAME Room so switching Rooms mid-outage doesn't keep showing the old one.
 		const failedRead = Boolean(detail && detail.roomCode && !detail.ok && !detail.locked);
 		if (!(failedRead && lastDetail && lastDetail.roomCode === detail.roomCode)) {
 			lastDetail = detail;
 		}
 
-		// Load this Room's persisted Dismissals before rendering; on a Room switch
-		// start fresh, otherwise merge so an in-flight Dismiss can't flicker back.
+		// On a Room switch start Dismissals fresh; otherwise merge so an in-flight Dismiss can't flicker back.
 		const code = (lastDetail && lastDetail.roomCode) || '';
 		if (code !== dismissedRoom) {
 			dismissedIds = new Set();
@@ -589,23 +559,21 @@
 		if (section) render(section);
 	});
 
-	// Room Home Toggle (home-toggle.js) flip: remove the section, or re-inject and render it from the latest Room data.
+	// Room Home Toggle flip (home-toggle.js).
 	document.addEventListener('ytb:home-section-visibility', (event) => {
 		if (!YTB.isContextActive()) return;
 		hiddenPref = Boolean(event.detail && event.detail.hidden);
 		applyVisibility();
 	});
 
-	// The same preference can also flip in the popup's Settings view;
-	// storage.onChanged is the only signal that reaches this tab (idempotent with the path above).
+	// Popup-Settings flips reach this tab only via storage.onChanged (idempotent with the path above).
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
 		hiddenPref = changes.homeSectionHidden.newValue === true;
 		applyVisibility();
 	});
 
-	// Buddy Color re-assignment (#115): restyle author names in place from the
-	// refreshed cache - not a re-render, which would disturb Feed scroll/reveal state.
+	// Buddy Color re-assignment (#115): restyle in place - a re-render would disturb Feed scroll/reveal state.
 	document.addEventListener('ytb:buddy-colors', () => {
 		if (!YTB.isContextActive()) return;
 		const section = document.getElementById(SECTION_ID);
@@ -615,7 +583,6 @@
 		}
 	});
 
-	// Re-gate after a visibility flip: gone while hidden, re-injected and rendered when shown again.
 	function applyVisibility() {
 		const section = ensureSection();
 		if (section) render(section);
@@ -718,7 +685,6 @@
       #${SECTION_ID} .ytb-hs-more:hover { background: var(--ytb-accent-100); }
       #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-item { margin: 4px 0; overflow-wrap: anywhere; }
-      /* Only the quoted body is the link; hover/focus affordances live on it. */
       #${SECTION_ID} a.ytb-hs-text-link {
         color: inherit;
         text-decoration: none;
@@ -748,10 +714,9 @@
       }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:hover { text-decoration: underline; }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link:focus-visible { text-decoration: underline; outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
-      /* Struck System Message (superseded/un-recommended, ADR-0007): strikes the
-         sentence, timestamp stays legible; the title is plain text with no anchor. */
+      /* Struck System Message (ADR-0007): sentence struck, timestamp stays legible. */
       #${SECTION_ID} .ytb-hs-struck > span { text-decoration: line-through; }
-      /* Visually hidden text for assistive tech: a line-through alone conveys nothing to a screen reader. */
+      /* Screen-reader-only text: a line-through alone conveys nothing to AT. */
       #${SECTION_ID} .ytb-hs-sr {
         position: absolute;
         width: 1px; height: 1px;
@@ -771,8 +736,7 @@
       }
       /* isolate makes the card a stacking context so the ::before wash (z-index -1) stays behind its own content. */
       #${SECTION_ID} .ytb-hs-card { position: relative; isolation: isolate; flex: 0 0 132px; width: 132px; }
-      /* Pointer hover fades in an accent-050 wash behind the whole card (#200);
-         bleeds within the 12px row gap so adjacent washes never collide. Keyboard focus uses rings instead. */
+      /* Card hover wash (#200) bleeds within the 12px row gap so adjacent washes never collide; keyboard focus uses rings. */
       #${SECTION_ID} .ytb-hs-card::before {
         content: ''; position: absolute; z-index: -1; inset: -6px -4px;
         border-radius: var(--ytb-r-lg); background: var(--ytb-accent-050);
@@ -791,7 +755,7 @@
       }
       #${SECTION_ID} .ytb-hs-card-title:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-watched { margin-top: 0; font-size: 11px; color: var(--ytb-ink-muted); }
-      /* Dismiss control: dark scrim + light glyph, theme-independent on purpose so it stays legible on any thumbnail frame. */
+      /* Theme-independent dark scrim + light glyph: legible on any thumbnail frame. */
       /* 24x24 hit target around a 20px visual scrim (UA-005): transparent border widens the box while background-clip keeps the circle at 20px. */
       #${SECTION_ID} .ytb-hs-remove {
         position: absolute; top: 1px; right: 1px;
