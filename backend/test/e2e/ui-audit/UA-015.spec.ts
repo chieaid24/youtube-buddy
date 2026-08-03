@@ -2,7 +2,7 @@
 // ON/OFF signal, so it needs >= 3:1 against the guide background in both
 // YouTube themes. Red while the light guide renders #f6a96b on white (1.94:1).
 import { expect, test } from '@playwright/test';
-import { contrastRatio, launchExtension, nudgeUntil, homeFixture, resolveColor, routeBackend, seedPaired } from './harness';
+import { contrastRatio, launchExtension, openHomePanel, homeFixture, resolveColor, routeBackend, seedPaired } from './harness';
 
 test('UA-015: the ON icon reads at 3:1 on light and dark guides', async () => {
 	const context = await launchExtension();
@@ -14,13 +14,19 @@ test('UA-015: the ON icon reads at 3:1 on light and dark guides', async () => {
 		await seedPaired(context);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
-		await nudgeUntil(page, () => {
-			const t = document.getElementById('ytb-home-toggle');
-			return Boolean(t && t.getAttribute('aria-checked') === 'true');
-		});
+		// Opening the panel turns the toggle ON, whose apricot icon is the signal we measure.
+		await openHomePanel(page);
+		await expect(page.locator('#ytb-home-toggle')).toHaveAttribute('aria-checked', 'true');
 
 		const measure = async (bg: string) => {
-			const color = await page.evaluate(() => getComputedStyle(document.querySelector('#ytb-home-toggle .ytb-ht-icon')!).color);
+			// The icon color transitions (140ms) on ON and on the theme flip; let it
+			// settle before sampling so we read the resting color, not a mid-transition frame.
+			const color = await page.evaluate(async () => {
+				const icon = document.querySelector('#ytb-home-toggle .ytb-ht-icon')!;
+				await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+				await Promise.all(icon.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+				return getComputedStyle(icon).color;
+			});
 			return contrastRatio([...(await resolveColor(page, color))], [...(await resolveColor(page, bg))]);
 		};
 

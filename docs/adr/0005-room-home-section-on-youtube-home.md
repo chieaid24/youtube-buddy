@@ -1,17 +1,27 @@
-# Room Home Section is injected into the YouTube home page, not the action popup
+# Room Home is a floating overlay panel, not embedded in the home grid
 
-The Shared Playlist and Room Feed need a home surface. Two options were on the table: (a) extend the existing action popup, which is already the identity / Room-management surface; or (b) inject a compact section into YouTube's own home page, above the recommendations grid. We chose (b): the **Room Home Section**.
+The Shared Playlist and Room Feed need a home surface. The action popup was rejected early (it is transient, Chrome-positioned, and small, while the Feed and Recommendations are ambient browsing surfaces); the surface lives on YouTube's home route instead, as the **Room Home Panel**.
 
-The Shared Playlist and the Room Feed are ambient, browsing-time surfaces. You want them exactly where you decide what to watch next — the home grid — not hidden behind a toolbar click that most users open only to change settings. Surfacing them there makes "what are my Buddies queuing / saying" a passive part of the home page rather than an action you must remember to take. The popup stays focused on identity, the Room Code, roster, and Sharing.
+It first shipped **embedded**: a `<section>` inserted directly above the recommendations grid (`ytd-rich-grid-renderer`), which YouTube's own layout then pushed down. That embedding was the mistake this ADR corrects. It made the panel a hostage of YouTube's layout DOM twice over — the grid insertion point plus the guide-row toggle in `ytd-guide-renderer` — so it shifted the grid, had to re-inject after every SPA navigation, and broke whenever YouTube reshaped its home markup. It also forced a wide, horizontal Feed-left / Recommended-right layout to avoid pushing the grid too far down.
 
-This is consistent with **ADR-0001**: the content script owns all on-page rendering, there is no background service worker, and `content.js` is the sole navigation/DOM observer (it already emits `ytb:navigate` / `ytb:mutation`). The Room Home Section is one more consumer of those events plus the existing Room read.
+## Decision
 
-We deliberately keep the section **short and horizontally laid out** (Feed left, Playlist right), small and scrollable, so it never pushes YouTube's grid far down the page. It renders only on the home route and must re-inject itself after SPA navigations back to home.
+Room Home renders as a **floating overlay panel**, not part of YouTube's layout flow. The panel is a `position: fixed` element appended to `<body>` over a slightly-dim scrim; it reads **no** YouTube layout DOM. The only remaining YouTube-DOM touch is the opener — the Room Home Toggle row still injected into the left guide — which is deliberately isolated to one module.
+
+Concretely:
+
+- **Left-docked and portrait.** The panel pins to the left edge, beside the guide, roomy (about 440px) rather than thin, `max-height` about 80vh with its own internal scroll. Feed stacks **above** Recommended — the floating panel is free to be vertical, so it no longer forces the horizontal split the embedded band needed.
+- **Ephemeral, opened on demand.** The Room Home Toggle **opens** the panel; the panel's close control, a scrim click, Esc, or an SPA navigation all close it. There is no persisted visibility preference — the old `homeSectionHidden` is retired and its popup Settings toggle removed. The toggle reflects the live open state.
+- **The scrim blocks, and that is accepted.** A slightly-dim scrim covers the page while the panel is open, catching outside clicks to close. Because the panel is opened deliberately and dismisses on navigation, the page is never left blocked by accident.
+
+This is consistent with **ADR-0001**: the content script owns all on-page rendering, there is no background service worker, and `content.js` remains the sole navigation/DOM observer. The panel is one more pure consumer of `ytb:navigate` / `ytb:room-data`, and the toggle and panel coordinate open/close purely through in-page CustomEvents — no storage round-trip, since both are content-script modules in the same page.
+
+Longer term, this panel is the shell that will absorb the identity / Room / Settings controls currently in the action popup, consolidating the extension into a single in-page Control Panel hub. Building it as a floating shell now is what makes that consolidation possible without another layout fight.
 
 ## Consequences
 
-- A new content-script surface and a new consumer of the Room read live on the home page. It must gate strictly to the home route, tolerate YouTube's lazy-loaded grid, and re-inject after client-side navigation.
-- The section depends on YouTube's home DOM structure, which is more fragile than the self-owned popup; a YouTube layout change can misplace it. The logic is isolated to one module so it can be repaired without touching Feed or Playlist data code.
-- Unpaired users get a compact Create / Join prompt inside the section — a second entry point to Room setup beyond the popup. The popup remains the source of truth for identity and Room membership; both entry points must stay behaviorally consistent (reuse the same `YTB` / `YTBRoomCode` calls).
-- The personalized Feed is derived entirely on the client from the existing Room read plus Playlist Events, so this surface adds **no** new read fan-out or per-recipient storage.
-- If YouTube ever makes home-page injection untenable, the same Feed + Playlist components could fall back into the popup without changing the backend contracts.
+- The panel's own rendering no longer depends on YouTube's home DOM at all — the biggest fragility of the embedded version is gone. Only the guide-row opener still targets YouTube markup, and that is contained to one module and retried on `ytb:mutation`.
+- Visibility is no longer persisted. The three former writers of `homeSectionHidden` (guide row, section header close, popup Settings) collapse to two ephemeral controls (guide row opens, panel close/scrim/Esc/navigation closes) coordinating by CustomEvent; the popup loses its Room Home toggle and its `homeSectionHidden` storage seam.
+- The panel blocks the page while open. This is a real behavior change from the embedded band (which was non-blocking) and is the deliberate price of a focused, floating surface opened on demand.
+- Unpaired users still get a compact Create / Join prompt inside the panel — a second entry point to Room setup beyond the popup; both must stay behaviorally consistent (reuse the same `YTB` / `YTBRoomCode` calls).
+- The Feed is still derived entirely on the client from the existing Room read plus Playlist Events, so this surface adds **no** new read fan-out or per-recipient storage.

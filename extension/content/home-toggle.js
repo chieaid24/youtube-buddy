@@ -1,11 +1,13 @@
 // extension/home-toggle.js
 //
 // The Room Home Toggle: a "Buddy Room" row injected into YouTube's left
-// guide on the home route, pixel-matched to native entries, controlling
-// whether home-section.js renders. State lives in chrome.storage.local.
-// Guide-DOM targeting is deliberately fragile, contained to this module
-// (ADR-0001 pure consumer): retried on content.js's throttled ytb:mutation
-// until the guide exists. Also hosts the Control Panel Launcher (ADR-0012).
+// guide on the home route, pixel-matched to native entries. It OPENS the
+// floating Room Home Panel (ADR-0005); open state is ephemeral, owned by
+// home-section.js and mirrored here via ytb:home-panel-state CustomEvents
+// (no storage). Guide-DOM targeting is deliberately fragile, contained to
+// this module (ADR-0001 pure consumer): retried on content.js's throttled
+// ytb:mutation until the guide exists. Also hosts the Control Panel
+// Launcher (ADR-0012).
 
 (function () {
 	'use strict';
@@ -32,25 +34,19 @@
 		'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z';
 
 	let onHome = false;
-	let hidden = null; // null until the stored preference has been read
-	let flipping = false; // one persisted flip at a time
+	let panelOpen = false; // mirrors home-section.js's ephemeral open state
 	let relayLoaded = false;
 
 	injectStyle();
+	ensureRow();
 
-	YTB.getHomeSectionHidden().then((value) => {
-		if (hidden === null) hidden = value;
-		ensureRow();
-	});
-
-	// A popup-Settings flip of homeSectionHidden reflects here live (our own
-	// click also lands here - idempotent).
-	chrome.storage.onChanged.addListener((changes, area) => {
-		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
-		hidden = changes.homeSectionHidden.newValue === true;
+	// home-section.js owns the panel's open state and broadcasts every change;
+	// the row's ON/OFF simply mirrors "panel open" (our own request lands here too).
+	document.addEventListener('ytb:home-panel-state', (event) => {
+		if (!YTB.isContextActive()) return;
+		panelOpen = Boolean(event.detail && event.detail.open);
 		const row = document.getElementById(ROW_ID);
 		if (row) syncRow(row);
-		else ensureRow();
 	});
 
 	function isHomePath() {
@@ -67,9 +63,9 @@
 
 	function ensureRow() {
 		if (!YTB.isContextActive()) return;
-		// Off the home route (or before state is known) the row has no business
-		// here; the section module gates itself the same way.
-		if (!onHome || hidden === null) {
+		// Off the home route the row has no business here; the panel module gates
+		// itself the same way.
+		if (!onHome) {
 			removeHomeControls();
 			return;
 		}
@@ -86,7 +82,7 @@
 		row.id = ROW_ID;
 		row.type = 'button';
 		row.setAttribute('role', 'switch');
-		row.title = 'Show or hide the Buddy Room section on Home';
+		row.title = 'Open or close the Buddy Room panel';
 
 		const iconWrap = document.createElement('span');
 		iconWrap.className = 'ytb-ht-icon';
@@ -117,28 +113,21 @@
 
 		row.append(iconWrap, label, launcher);
 
-		row.addEventListener('click', async () => {
-			if (flipping || hidden === null) return;
-			flipping = true;
-			hidden = !hidden;
-			syncRow(row);
-			await YTB.setHomeSectionHidden(hidden);
-			flipping = false;
-			// home-section.js also reads the stored preference on load, so neither
-			// module depends on the other having run first.
-			document.dispatchEvent(new CustomEvent('ytb:home-section-visibility', { detail: { hidden } }));
+		row.addEventListener('click', () => {
+			// home-section.js owns the state: request a toggle, then mirror the
+			// state it broadcasts back (synchronous, same tick).
+			document.dispatchEvent(new CustomEvent('ytb:home-panel-request-toggle'));
 		});
 
 		syncRow(row);
 		slot.append(row, ensureRelayFrame(slot));
 	}
 
-	/** aria-checked mirrors "section shown"; the is-on class tints the buddies
+	/** aria-checked mirrors "panel open"; the is-on class tints the buddies
 	 * icon apricot - the row's only signal. */
 	function syncRow(row) {
-		const shown = hidden === false;
-		row.setAttribute('aria-checked', String(shown));
-		row.classList.toggle('is-on', shown);
+		row.setAttribute('aria-checked', String(panelOpen));
+		row.classList.toggle('is-on', panelOpen);
 	}
 
 	/** Hidden extension-origin frame that can call chrome.action.openPopup, so

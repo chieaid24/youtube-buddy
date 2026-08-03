@@ -4,7 +4,17 @@
 // U+2014 + U+2026 and its Dismiss glyph U+00D7, and the watch marker tooltip
 // uses U+00B7. Emoji in user-authored Note bodies are content, not copy.
 import { expect, test } from '@playwright/test';
-import { launchExtension, makeData, nudgeUntil, homeFixture, playbackFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
+import {
+	launchExtension,
+	makeData,
+	nudgeUntil,
+	openHomePanel,
+	homeFixture,
+	playbackFixture,
+	PIXEL_PNG,
+	routeBackend,
+	seedPaired,
+} from './harness';
 
 const nonAscii = (text: string) => [...text].filter((c) => c.charCodeAt(0) > 0x7e);
 
@@ -37,6 +47,7 @@ test('UA-011: rendered UI copy is printable ASCII', async () => {
 		// user-authored emoji, so every non-ASCII hit is OUR copy).
 		const home = await context.newPage();
 		await home.goto('https://www.youtube.com/');
+		await openHomePanel(home);
 		await nudgeUntil(home, () => document.querySelectorAll('#ytb-home-section .ytb-hs-card').length >= 2);
 		state.down = true;
 		await home.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));

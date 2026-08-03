@@ -7,6 +7,7 @@ import {
 	launchExtension,
 	makeData,
 	nudgeUntil,
+	openHomePanel,
 	playbackFixture,
 	homeFixture,
 	PIXEL_PNG,
@@ -78,6 +79,7 @@ test('UA-001b: Room Feed authors pass AA for every Buddy Color in both themes', 
 		const popup = await seedPaired(context);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 		await nudgeUntil(page, () => document.querySelectorAll('#ytb-home-section .ytb-hs-author').length >= 1);
 		// Sam's "replied to your note" row (buddy-1).
 		await sweep(popup, page, '#ytb-home-section .ytb-hs-author', 'feed');

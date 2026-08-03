@@ -275,6 +275,15 @@ export async function nudgeUntil(page: Page, predicate: () => boolean | Promise<
 	}
 }
 
+/** Open the ephemeral Room Home Panel via the guide toggle; waits for the panel to mount (ADR-0005). */
+export async function openHomePanel(page: Page) {
+	await nudgeUntil(page, () => Boolean(document.getElementById('ytb-home-toggle')));
+	if (!(await page.evaluate(() => Boolean(document.getElementById('ytb-home-section'))))) {
+		await page.locator('#ytb-home-toggle').click();
+	}
+	await nudgeUntil(page, () => Boolean(document.getElementById('ytb-home-section')));
+}
+
 /** Resolve any CSS color (oklch, color-mix, var-fed) to sRGB via canvas. */
 export async function resolveColor(page: Page, cssColor: string, host = 'body'): Promise<[number, number, number, number]> {
 	return page.evaluate(

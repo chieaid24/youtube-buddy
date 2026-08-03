@@ -4,7 +4,7 @@
 // and 10px/12px type. The Connection Lost line's negative positioning shim
 // is placement, not rhythm, and is not asserted.
 import { expect, test } from '@playwright/test';
-import { launchExtension, makeData, nudgeUntil, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
+import { launchExtension, makeData, nudgeUntil, openHomePanel, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
 
 const SCALE = new Set([0, 4, 8, 12, 16, 20, 24]);
 const RADII = new Set([8, 12, 16, 999]);
@@ -36,6 +36,7 @@ test('UA-017: home-section values sit on the token scales', async () => {
 		await seedPaired(context);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 		await nudgeUntil(page, () => document.querySelectorAll('#ytb-home-section .ytb-hs-card').length >= 2);
 
 		const rows = await page.evaluate(

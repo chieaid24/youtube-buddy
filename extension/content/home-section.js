@@ -1,21 +1,25 @@
 // extension/home-section.js
-// Room Home Section (ADR-0005): Room Feed + Recommended for you (ADR-0007) above
-// the home grid, or Create/Join when Unpaired. Gated to home route + Room Home
-// Toggle; Connection Lost retains stale content (PRD #137); --ytb-* themed (ADR-0009).
+// Room Home Panel (ADR-0005): a floating, left-docked, ephemeral overlay over a
+// dim scrim holding the Room Feed + Recommended for you (ADR-0007), or Create/Join
+// when Unpaired. Opened by the Room Home Toggle; closed by its close control, a
+// scrim click, Esc, or SPA navigation. Owns the ephemeral open state and mirrors
+// it to the toggle via ytb:home-panel-state. Connection Lost retains stale content
+// (PRD #137); --ytb-* themed (ADR-0009).
 
 (function () {
 	'use strict';
 
-	const SECTION_ID = 'ytb-home-section';
+	const SECTION_ID = 'ytb-home-section'; // the panel
+	const OVERLAY_ID = 'ytb-home-overlay'; // the scrim/root that hosts it
 	const STYLE_ID = 'ytb-home-section-style';
 
 	let lastDetail = null; // last renderable ytb:room-data; a same-Room failed read keeps it (PRD #137)
 	let connectionLost = false; // true at >= 2 consecutive failed Room reads
 	let onHome = false;
+	let open = false; // ephemeral: the panel exists only while open (ADR-0005)
+	let lastNavUrl = null; // tells a real navigation from a same-URL poller nudge
 	let myClientId = null;
 	let pendingPair = false; // one Create/Join request at a time
-	let pendingHide = false; // one header-close write at a time
-	let hiddenPref = null; // null until the stored preference is read, so the section never flashes in
 	let dismissedIds = new Set(); // this Room's local Dismissals (item ids)
 	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
 
@@ -36,38 +40,85 @@
 
 	injectStyle();
 
-	YTB.getHomeSectionHidden().then((value) => {
-		if (hiddenPref === null) hiddenPref = value;
-		ensureSection();
-	});
-
 	function isHomePath() {
 		return location.pathname === '/';
 	}
 
-	// --- Injection: above the home grid, retried on mutations until it lands ---
+	// Owns the ephemeral open state; the toggle requests a flip and mirrors what we broadcast.
+	function setOpen(next) {
+		next = Boolean(next);
+		if (next === open) return;
+		open = next;
+		if (open) {
+			resetFeedWindow(); // each open starts the Feed fresh
+			const panel = ensureOverlay();
+			panel?.querySelector('.ytb-hs-close')?.focus();
+		} else {
+			teardownOverlay();
+		}
+		document.dispatchEvent(new CustomEvent('ytb:home-panel-state', { detail: { open } }));
+	}
 
-	function ensureSection() {
+	// --- The floating overlay: scrim + panel on <body>, no YouTube-layout DOM ---
+
+	function ensureOverlay() {
 		if (!YTB.isContextActive()) return null;
-		// Absent off home, while toggled off, or until the preference is known.
-		if (!onHome || hiddenPref !== false) {
-			document.getElementById(SECTION_ID)?.remove();
+		if (!open) {
+			teardownOverlay();
 			return null;
 		}
-		let section = document.getElementById(SECTION_ID);
-		if (section && section.isConnected) return section;
+		let root = document.getElementById(OVERLAY_ID);
+		let panel = document.getElementById(SECTION_ID);
+		if (!root || !root.isConnected) {
+			root = document.createElement('div');
+			root.id = OVERLAY_ID;
+			root.addEventListener('click', (event) => {
+				if (event.target === root) setOpen(false); // scrim click closes; panel clicks don't
+			});
+			root.addEventListener('keydown', onOverlayKeydown);
 
-		// Directly above the home grid so YouTube's layout pushes it down.
-		const browse = document.querySelector('ytd-browse[page-subtype="home"]:not([hidden])');
-		const grid = browse && browse.querySelector('ytd-rich-grid-renderer');
-		if (!grid || !grid.parentElement) return null; // grid not built yet - retried on ytb:mutation
+			panel = document.createElement('section');
+			panel.id = SECTION_ID;
+			panel.setAttribute('role', 'dialog');
+			panel.setAttribute('aria-modal', 'true');
+			panel.setAttribute('aria-label', 'YouTube Buddy Room');
+			root.appendChild(panel);
+			(document.body || document.documentElement).appendChild(root);
+		}
+		render(panel);
+		return panel;
+	}
 
-		section = document.createElement('section');
-		section.id = SECTION_ID;
-		section.setAttribute('aria-label', 'YouTube Buddy Room');
-		grid.parentElement.insertBefore(section, grid);
-		render(section);
-		return section;
+	function teardownOverlay() {
+		document.getElementById(OVERLAY_ID)?.remove();
+	}
+
+	// Esc closes; Tab is trapped inside the modal panel.
+	function onOverlayKeydown(event) {
+		if (event.key === 'Escape') {
+			event.stopPropagation();
+			setOpen(false);
+		} else if (event.key === 'Tab') {
+			trapFocus(event);
+		}
+	}
+
+	function trapFocus(event) {
+		const panel = document.getElementById(SECTION_ID);
+		if (!panel) return;
+		const focusables = Array.from(
+			panel.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+		).filter((el) => el.offsetParent !== null);
+		if (focusables.length === 0) return;
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
 	}
 
 	// --- Rendering ---
@@ -130,23 +181,15 @@
 		if (scroll) scroll.scrollTop = pinned ? scroll.scrollHeight : prevTop;
 	}
 
-	// Third writer of homeSectionHidden (with the guide toggle + popup Settings):
-	// a hide, never a leave; optimistic, chrome.storage.onChanged syncs peers.
+	// Closes the panel (ephemeral): a close, never a leave - no Room state is touched.
 	function buildCloseButton() {
 		const close = document.createElement('button');
 		close.type = 'button';
 		close.className = 'ytb-hs-close';
 		close.append(YTBTheme.icon('close'));
-		close.title = 'Hide the Buddy Room section (turn it back on from the guide)';
-		close.setAttribute('aria-label', 'Hide the Buddy Room section');
-		close.addEventListener('click', async () => {
-			if (pendingHide || hiddenPref !== false) return;
-			pendingHide = true;
-			hiddenPref = true;
-			applyVisibility();
-			await YTB.setHomeSectionHidden(true);
-			pendingHide = false;
-		});
+		close.title = 'Close the Buddy Room panel';
+		close.setAttribute('aria-label', 'Close the Buddy Room panel');
+		close.addEventListener('click', () => setOpen(false));
 		return close;
 	}
 
@@ -507,17 +550,18 @@
 
 	document.addEventListener('ytb:navigate', () => {
 		if (!YTB.isContextActive()) return;
-		const wasHome = onHome;
+		const url = location.href;
+		const navigated = url !== lastNavUrl;
+		lastNavUrl = url;
 		onHome = isHomePath();
-		// A new visit to home resets the reveal window; same-page navigates (e.g. commitCode's nudge) keep it.
-		if (onHome && !wasHome) resetFeedWindow();
-		ensureSection();
+		// A real navigation closes the panel; a same-URL poller nudge (commitCode) leaves it open.
+		if (navigated && open) setOpen(false);
 	});
 
-	document.addEventListener('ytb:mutation', () => {
+	// The Room Home Toggle requests an open/close; we own the state (ADR-0005).
+	document.addEventListener('ytb:home-panel-request-toggle', () => {
 		if (!YTB.isContextActive()) return;
-		// YouTube rebuilds browse contents lazily; keep the section present without re-rendering.
-		ensureSection();
+		setOpen(!open);
 	});
 
 	document.addEventListener('ytb:room-data', async (event) => {
@@ -555,22 +599,7 @@
 			for (const id of persisted) dismissedIds.add(id);
 		}
 
-		const section = ensureSection();
-		if (section) render(section);
-	});
-
-	// Room Home Toggle flip (home-toggle.js).
-	document.addEventListener('ytb:home-section-visibility', (event) => {
-		if (!YTB.isContextActive()) return;
-		hiddenPref = Boolean(event.detail && event.detail.hidden);
-		applyVisibility();
-	});
-
-	// Popup-Settings flips reach this tab only via storage.onChanged (idempotent with the path above).
-	chrome.storage.onChanged.addListener((changes, area) => {
-		if (area !== 'local' || !changes.homeSectionHidden || !YTB.isContextActive()) return;
-		hiddenPref = changes.homeSectionHidden.newValue === true;
-		applyVisibility();
+		if (open) ensureOverlay();
 	});
 
 	// Buddy Color re-assignment (#115): restyle in place - a re-render would disturb Feed scroll/reveal state.
@@ -583,13 +612,8 @@
 		}
 	});
 
-	function applyVisibility() {
-		const section = ensureSection();
-		if (section) render(section);
-	}
-
 	YTB.onContextInvalidated(() => {
-		document.getElementById(SECTION_ID)?.remove();
+		teardownOverlay();
 	});
 
 	/** Inject the section stylesheet once (consumes theme.js's --ytb-* tokens). */
@@ -598,9 +622,25 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
+      /* Scrim/root: covers the page, dims it slightly, catches outside clicks; docks the panel top-left below the masthead. */
+      #${OVERLAY_ID} {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-start;
+        padding: 72px 16px 16px;
+        background: rgba(0, 0, 0, 0.18);
+      }
+      /* The floating panel: portrait, roomy, with its own internal scroll. */
       #${SECTION_ID} {
         box-sizing: border-box;
-        margin: 12px 8px 4px;
+        display: flex;
+        flex-direction: column;
+        width: 440px;
+        max-width: calc(100vw - 32px);
+        max-height: calc(100vh - 96px);
         padding: 12px 16px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
@@ -609,8 +649,9 @@
         font-family: var(--ytb-font);
         font-size: 13px;
         line-height: 1.45;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
       }
-      #${SECTION_ID} .ytb-hs-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+      #${SECTION_ID} .ytb-hs-head { flex: none; display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
       #${SECTION_ID} .ytb-hs-dot {
         align-self: center;
         width: 8px; height: 8px;
@@ -642,9 +683,10 @@
       #${SECTION_ID} .ytb-hs-close:focus-visible { background: var(--ytb-accent-050); color: var(--ytb-ink); outline: none; }
       #${SECTION_ID} .ytb-hs-close:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-close svg { width: 14px; height: 14px; }
-      #${SECTION_ID} .ytb-hs-body { display: flex; gap: 12px; align-items: stretch; }
-      #${SECTION_ID} .ytb-hs-feed { flex: 1 1 46%; min-width: 0; }
-      #${SECTION_ID} .ytb-hs-playlist { flex: 1 1 54%; min-width: 0; }
+      /* Portrait stack: Feed above Recommended (ADR-0005); the body scrolls if the two exceed the panel. */
+      #${SECTION_ID} .ytb-hs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+      #${SECTION_ID} .ytb-hs-feed { min-width: 0; }
+      #${SECTION_ID} .ytb-hs-playlist { min-width: 0; }
       #${SECTION_ID} .ytb-hs-col-head {
         display: flex; justify-content: space-between; align-items: baseline;
         margin-bottom: 4px;
@@ -652,7 +694,7 @@
       }
       #${SECTION_ID} .ytb-hs-count { font-weight: 500; }
       #${SECTION_ID} .ytb-hs-feed-scroll {
-        max-height: 148px;
+        max-height: 240px;
         overflow-y: auto;
         padding: 8px;
         border-radius: 12px;
@@ -729,9 +771,8 @@
       /* Connection Lost (PRD #137): quiet and deemphasized - the retained content below stays the focus. */
       #${SECTION_ID} .ytb-hs-conn { margin: -4px 0 8px; font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-pl-row {
-        display: flex; gap: 12px;
-        overflow-x: auto;
-        /* Room for the card hover wash's bleed (x:auto also clips y); extra bottom clears the scrollbar. */
+        display: flex; flex-wrap: wrap; gap: 12px;
+        /* Cards wrap into rows in the portrait panel; padding leaves room for the card hover wash's bleed. */
         padding: 8px 6px 10px;
       }
       /* isolate makes the card a stacking context so the ::before wash (z-index -1) stays behind its own content. */

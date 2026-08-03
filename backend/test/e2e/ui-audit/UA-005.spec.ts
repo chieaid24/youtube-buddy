@@ -1,7 +1,7 @@
 // UA-005: the recommendation card's Dismiss control must offer a >= 24x24
 // hit area (DESIGN.md 1.3). Red while the button is 20x20.
 import { expect, test } from '@playwright/test';
-import { launchExtension, makeData, nudgeUntil, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
+import { launchExtension, makeData, nudgeUntil, openHomePanel, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
 
 test('UA-005: every Dismiss control is at least 24x24', async () => {
 	const context = await launchExtension();
@@ -15,6 +15,7 @@ test('UA-005: every Dismiss control is at least 24x24', async () => {
 		await seedPaired(context);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 		await nudgeUntil(page, () => document.querySelectorAll('#ytb-home-section .ytb-hs-remove').length >= 2);
 		const rects = await page.evaluate(() =>
 			[...document.querySelectorAll('#ytb-home-section .ytb-hs-remove')].map((el) => {
