@@ -17,6 +17,7 @@ type FeedItem = {
 	videoId: string;
 	title: string;
 	note: { id: string };
+	reply: { id: string };
 	event: { id: string; videoId: string; title: string; actorClientId: string };
 };
 type FeedGroup = { dayKey: string; items: FeedItem[] };
@@ -1186,10 +1187,21 @@ describe('room home section helpers', () => {
 		expect(window.YTB.watchedByAriaLabel([])).toBe('');
 	});
 
-	it('builds the personalized Feed: replies to mine, mentions of me, and System Messages', () => {
+	it('builds the Room Feed: every text comment surfaces; replies to mine and mentions of me keep the emphasized types', () => {
 		const base = new Date(2026, 6, 4, 12, 0, 0).getTime(); // local noon — no midnight straddle
 		const notes = [
 			{ id: 'n1', clientId: me, name: 'Aidan', videoId: 'v1', timestamp: 5, kind: 'text', body: 'mine', createdAt: base },
+			// A Reaction is never a Feed row (kind 'emoji'; parallel to Unseen).
+			{
+				id: 'n4',
+				clientId: 'bob22222',
+				name: 'Bob',
+				videoId: 'v1',
+				timestamp: 8,
+				kind: 'emoji',
+				body: '\u{1F525}',
+				createdAt: base + 1200,
+			},
 			{
 				id: 'n2',
 				clientId: 'bob22222',
@@ -1222,17 +1234,52 @@ describe('room home section helpers', () => {
 		// Two local days -> two divider groups, both ascending.
 		expect(groups).toHaveLength(2);
 		const first = groups[0].items;
-		// My own note (n1), my own reply (r2), the unrelated note (n3), and the
-		// not-for-me reply (r5) are all absent. r4 (reply-to-mine AND mention)
-		// appears exactly once, as a reply. Recommend events all surface — my own
-		// (e3) included — in timestamp order.
-		expect(first.map((item) => item.type)).toEqual(['mention', 'reply', 'mention', 'reply', 'system', 'system']);
-		expect(first.map((item) => item.at)).toEqual([base + 1000, base + 2000, base + 4000, base + 5000, base + 6500, base + 7000]);
-		expect(first[1].note.id).toBe('n1'); // a reply item carries its parent Note
-		expect(first[4].event.actorClientId).toBe(me); // my own recommend line...
-		expect(first[4].own).toBe(true); // ...marked own for "You recommended" copy
-		expect(first[5].event.actorClientId).toBe('bob22222'); // a recipient's recommend message
-		expect(first[5].own).toBe(false);
+		// EVERY text Note and Reply surfaces — own ones (n1, r2) included, typed
+		// 'note' and own-flagged for the "You ..." copy — while the addressed set
+		// keeps its emphasized types: r1 'reply', n2/r3 'mention', r4
+		// (reply-to-mine AND mention) exactly once as a reply. The Reaction (n4)
+		// never appears. Recommend events all surface — my own (e3) included —
+		// in timestamp order.
+		expect(first.map((item) => item.type)).toEqual([
+			'note',
+			'mention',
+			'note',
+			'reply',
+			'note',
+			'mention',
+			'reply',
+			'note',
+			'system',
+			'system',
+		]);
+		expect(first.map((item) => item.at)).toEqual([
+			base,
+			base + 1000,
+			base + 1500,
+			base + 2000,
+			base + 3000,
+			base + 4000,
+			base + 5000,
+			base + 6000,
+			base + 6500,
+			base + 7000,
+		]);
+		expect(first.some((item) => item.note && item.note.id === 'n4')).toBe(false); // no Reaction row
+		expect(first[0].note.id).toBe('n1'); // my own Note...
+		expect(first[0].own).toBe(true); // ...own-flagged, plain 'note' type
+		expect(first[0].reply).toBeUndefined();
+		expect(first[2].note.id).toBe('n3'); // a Buddy's unaddressed Note surfaces too
+		expect(first[2].own).toBe(false);
+		expect(first[3].note.id).toBe('n1'); // a reply item carries its parent Note
+		expect(first[4].reply.id).toBe('r2'); // my own Reply: plain 'note' row...
+		expect(first[4].own).toBe(true);
+		expect(first[4].note.id).toBe('n1'); // ...still carrying its parent
+		expect(first[7].reply.id).toBe('r5'); // a Buddy's not-for-me Reply surfaces unemphasized
+		expect(first[7].own).toBe(false);
+		expect(first[8].event.actorClientId).toBe(me); // my own recommend line...
+		expect(first[8].own).toBe(true); // ...marked own for "You recommended" copy
+		expect(first[9].event.actorClientId).toBe('bob22222'); // a recipient's recommend message
+		expect(first[9].own).toBe(false);
 		expect(groups[1].items.map((item) => item.type)).toEqual(['system']);
 		expect(groups[0].dayKey).not.toBe(groups[1].dayKey);
 
@@ -1840,22 +1887,18 @@ describe('Unseen Mentions & Replies (ADR-0010)', () => {
 		expect(window.YTB.unseenNoteIds(records, me, seen).sort()).toEqual(['n-mention', 'n-plain', 'n-spoiler']);
 	});
 
-	it('never drifts from the Room Feed: pulsing dots are exactly the dots the Feed anchors items to', () => {
-		// Restricted to well-formed records: the Feed also surfaces a Reply whose
-		// parent is gone (nothing on the timeline can anchor it) and would list a
-		// malformed Reaction Mention; neither exists in real data.
-		const wellFormed = {
-			notes: notes.filter((note) => note.id !== 'n-reaction'),
-			replies: replies.filter((reply) => reply.id !== 'r-on-reaction' && reply.id !== 'r-orphan'),
-		};
+	it('never drifts from the Room Feed: pulsing dots are exactly the dots the Feed emphasizes', () => {
+		// The FULL fixture, malformed rows included: buildFeed excludes Reactions
+		// and replies-under-Reactions structurally (as unseenNoteIds does), plain
+		// 'note' rows never pulse, and an orphan Reply's row anchors no dot.
 		const anchors = new Set<string>();
-		for (const group of buildFeed(wellFormed, me)) {
+		for (const group of buildFeed(records, me)) {
 			for (const item of group.items) {
 				if (item.type !== 'reply' && item.type !== 'mention') continue;
 				if (item.note) anchors.add(item.note.id);
 			}
 		}
-		expect(new Set(window.YTB.unseenNoteIds(wellFormed, me, []))).toEqual(anchors);
+		expect(new Set(window.YTB.unseenNoteIds(records, me, []))).toEqual(anchors);
 	});
 
 	it('stores Acknowledged ids per Room in chrome.storage.local, idempotently, without any backend call', async () => {

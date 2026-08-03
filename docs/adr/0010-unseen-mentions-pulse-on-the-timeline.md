@@ -47,7 +47,7 @@ We chose **(b)**, and we replaced the seek-and-open arrival with a **pulse**.
   with a neighbour at `spreadFractions`' 11px minimum gap. Under `prefers-reduced-motion` it
   degrades to a static apricot ring.
 
-- **Unseen is anchored to a Note Dot**, and is exactly the set the Room Feed surfaces:
+- **Unseen is anchored to a Note Dot**, and is exactly the set the Room Feed emphasizes:
   - a Note that Mentions you is Unseen while its id is not in the seen set;
   - a Reply is Unseen while its id is not in the seen set and it is not yours and either its
     parent Note is yours or it Mentions you;
