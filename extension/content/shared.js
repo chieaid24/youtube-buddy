@@ -129,16 +129,6 @@ const YTB = {
 		await YTB._storageSet(next);
 	},
 
-	// Room Home Section visibility: per install, absent means visible.
-	async getHomeSectionHidden() {
-		const { homeSectionHidden } = await YTB._storageGet('homeSectionHidden');
-		return homeSectionHidden === true;
-	},
-
-	async setHomeSectionHidden(hidden) {
-		return await YTB._storageSet({ homeSectionHidden: hidden === true });
-	},
-
 	// Room Feed row click -> notes.js handoff (ADR-0010): stored (not an in-memory
 	// event) so it survives SPA navigation and full reloads; the TTL expires a
 	// stale click.
@@ -189,8 +179,7 @@ const YTB = {
 	// Notification Position's four edges (Playback Notifications, notes.js).
 	NOTIFICATION_EDGES: ['top', 'bottom', 'left', 'right'],
 
-	// Read every Settings key, coercing unset/junk values to defaults; Room Home
-	// Section has its own getHomeSectionHidden seam.
+	// Read every Settings key, coercing unset/junk values to defaults.
 	async getSettings() {
 		const stored = await YTB._storageGet(['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden']);
 		return {

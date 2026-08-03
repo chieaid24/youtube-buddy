@@ -3,7 +3,7 @@
 // while the title links, card titles, thumbs, and Dismiss fall back to the
 // UA default outline and two rings render 2px.
 import { expect, test } from '@playwright/test';
-import { launchExtension, makeData, nudgeUntil, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
+import { launchExtension, makeData, nudgeUntil, openHomePanel, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
 
 const CONTROLS = [
 	'.ytb-hs-close',
@@ -27,7 +27,13 @@ test('UA-014: home-section controls share the 3px apricot focus ring', async () 
 		await seedPaired(context);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 		await nudgeUntil(page, () => document.querySelectorAll('#ytb-home-section .ytb-hs-card').length >= 2);
+
+		// Opening the panel used a pointer click, which flips Chromium's :focus-visible
+		// heuristic to "pointer"; a keystroke resets it to "keyboard" so the programmatic
+		// el.focus() below shows the ring (as it does for a real keyboard user).
+		await page.keyboard.press('Tab');
 
 		const results = await page.evaluate((selectors) => {
 			const ringProbe = document.createElement('div');

@@ -161,6 +161,14 @@ async function nudgeUntil(page: Page, assertion: () => Promise<void>) {
 	}).toPass({ timeout: 15_000 });
 }
 
+/** Open the ephemeral Room Home Panel via the guide toggle; waits for the panel to mount (ADR-0005). */
+async function openHomePanel(page: Page) {
+	const toggle = page.locator('#ytb-home-toggle');
+	await nudgeUntil(page, () => expect(toggle).toHaveCount(1, { timeout: 700 }));
+	if ((await page.locator('#ytb-home-section').count()) === 0) await toggle.click();
+	await expect(page.locator('#ytb-home-section')).toHaveCount(1);
+}
+
 test('loads the unpacked extension and runs every content script', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -1054,7 +1062,7 @@ const homeFixture = `<!doctype html>
   </body>
 </html>`;
 
-test('Room Home Toggle and the header close control both hide the Room Home Section, persisting across reload and SPA nav', async () => {
+test('Room Home Toggle opens the ephemeral panel; close control, scrim, and Esc all close it (ADR-0005)', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -1069,72 +1077,69 @@ test('Room Home Toggle and the header close control both hide the Room Home Sect
 		// needs nudging for URL-change detection and injection retries.
 		const nudge = () => page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
 
-		// Default: toggle on (checked) inside the guide, section rendered. The
-		// row is a native-looking guide entry — icon + label, no switch cluster
-		// — whose buddies icon is the only ON/OFF signal: apricot while the
-		// section is shown.
+		// Default: the guide row is present but OFF, and nothing floats. The row
+		// is a native-looking guide entry whose buddies icon is the only ON/OFF
+		// signal: native guide color while the panel is closed (light fixture).
 		const toggle = page.locator('#ytb-home-toggle');
 		const icon = toggle.locator('.ytb-ht-icon');
+		const overlay = page.locator('#ytb-home-overlay');
 		const section = page.locator('#ytb-home-section');
-		await expect(toggle).toBeVisible();
-		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await nudgeUntil(page, () => expect(toggle).toBeVisible());
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
 		await expect(page.locator('ytd-guide-renderer #items #ytb-home-toggle')).toHaveCount(1);
-		await expect(toggle.locator('.ytb-ht-track')).toHaveCount(0);
-		await expect(icon).toHaveCSS('color', 'rgb(199, 113, 47)');
-		await expect(section).toHaveCount(1);
-
-		// Off: the section is removed completely, and mutation churn must not
-		// re-inject it; the toggle row itself stays available in the guide,
-		// its icon back at the native guide color (light-theme fixture).
-		await toggle.click();
+		await expect(icon).toHaveCSS('color', 'rgb(15, 15, 15)');
+		await expect(overlay).toHaveCount(0);
 		await expect(section).toHaveCount(0);
+
+		// Toggle ON: the floating panel + scrim mount, the icon goes apricot, and
+		// aria-checked mirrors the open state.
+		await toggle.click();
+		await expect(section).toHaveCount(1);
+		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(icon).toHaveCSS('color', 'rgb(199, 113, 47)');
+
+		// The header close control closes the panel (a close, never a leave); the
+		// row follows live and stays available, and mutation churn cannot re-open it.
+		await section.locator('.ytb-hs-close').click();
+		await expect(overlay).toHaveCount(0);
 		await expect(toggle).toHaveAttribute('aria-checked', 'false');
 		await expect(icon).toHaveCSS('color', 'rgb(15, 15, 15)');
 		await nudge();
-		await page.waitForTimeout(600);
-		await expect(section).toHaveCount(0);
-		await expect(toggle).toBeVisible();
+		await page.waitForTimeout(400);
+		await expect(overlay).toHaveCount(0);
 
-		// The choice persists across a full reload.
-		await page.reload();
-		await expect(toggle).toBeVisible();
+		// A scrim click (outside the panel) closes it too.
+		await toggle.click();
+		await expect(section).toHaveCount(1);
+		await overlay.click({ position: { x: 5, y: 5 } });
+		await expect(overlay).toHaveCount(0);
 		await expect(toggle).toHaveAttribute('aria-checked', 'false');
-		await page.waitForTimeout(600);
-		await expect(section).toHaveCount(0);
 
-		// ...and across SPA navigations: away from home the row disappears (the
-		// section is off-route anyway); back on home both gates still hold.
+		// Esc closes it.
+		await toggle.click();
+		await expect(section).toHaveCount(1);
+		await page.keyboard.press('Escape');
+		await expect(overlay).toHaveCount(0);
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+		// Ephemeral: a full reload starts CLOSED (no persisted visibility).
+		await toggle.click();
+		await expect(section).toHaveCount(1);
+		await page.reload();
+		await nudgeUntil(page, () => expect(toggle).toBeVisible());
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(overlay).toHaveCount(0);
+
+		// SPA navigation: away from home the row disappears; back on home it
+		// returns, still closed, and re-opens on demand.
 		await page.evaluate(() => history.pushState({}, '', '/watch?v=fixture-video'));
 		await nudge();
 		await expect(toggle).toHaveCount(0);
 		await page.evaluate(() => history.pushState({}, '', '/'));
 		await nudge();
-		await expect(toggle).toBeVisible();
+		await nudgeUntil(page, () => expect(toggle).toBeVisible());
 		await expect(toggle).toHaveAttribute('aria-checked', 'false');
-		await expect(section).toHaveCount(0);
-
-		// Back on: the section re-injects right away.
-		await toggle.click();
-		await expect(toggle).toHaveAttribute('aria-checked', 'true');
-		await expect(section).toHaveCount(1);
-
-		// The section header's own close control writes the SAME preference: the
-		// section goes away completely, the guide row follows live (over
-		// storage.onChanged) and stays available as the way back, and mutation
-		// churn must not re-inject the section.
-		await section.locator('.ytb-hs-close').click();
-		await expect(section).toHaveCount(0);
-		await expect(toggle).toHaveAttribute('aria-checked', 'false');
-		await expect(icon).toHaveCSS('color', 'rgb(15, 15, 15)');
-		await nudge();
-		await page.waitForTimeout(600);
-		await expect(section).toHaveCount(0);
-
-		// It persists like any other flip, and the guide row restores it.
-		await page.reload();
-		await expect(toggle).toHaveAttribute('aria-checked', 'false');
-		await page.waitForTimeout(600);
-		await expect(section).toHaveCount(0);
+		await expect(overlay).toHaveCount(0);
 		await toggle.click();
 		await expect(section).toHaveCount(1);
 		await expect(section.locator('.ytb-hs-close')).toBeVisible();
@@ -1169,7 +1174,7 @@ test('Control Panel Launcher opens the real action popup through a home-only Rel
 		const toggle = page.locator('#ytb-home-toggle');
 		const launcher = toggle.locator('.ytb-ht-launcher');
 		const relay = page.locator('#ytb-control-panel-relay');
-		await expect(toggle).toHaveAttribute('aria-checked', 'true');
+		await expect(toggle).toHaveAttribute('aria-checked', 'false'); // panel closed by default; the Launcher is independent
 		await expect(launcher).toBeVisible();
 		await expect(relay).toHaveAttribute('src', `chrome-extension://${extensionId}/pages/control-panel-relay.html`);
 		expect(
@@ -1181,8 +1186,9 @@ test('Control Panel Launcher opens the real action popup through a home-only Rel
 
 		await launcher.click();
 		await expect.poll(popupContextCount, { timeout: 10_000 }).toBe(1);
-		await expect(toggle).toHaveAttribute('aria-checked', 'true');
-		await expect(page.locator('#ytb-panel-overlay, .ytb-panel-card, .ytb-panel-close')).toHaveCount(0);
+		// The Launcher opens the real Chrome popup, not the in-page panel: the toggle stays off and no overlay mounts.
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(page.locator('#ytb-panel-overlay, .ytb-panel-card, .ytb-panel-close, #ytb-home-overlay')).toHaveCount(0);
 
 		// The row and Relay Frame are one home-route surface and leave together.
 		await page.evaluate(() => history.pushState({}, '', '/watch?v=fixture-video'));
@@ -1222,8 +1228,8 @@ test('Control Panel Launcher uses the shared toolbar toast when openPopup fails'
 
 		await launcher.click();
 		await expect(page.locator('.ytb-toast')).toHaveText('Open YouTube Buddy from the toolbar icon');
-		await expect(toggle).toHaveAttribute('aria-checked', 'true');
-		await expect(page.locator('#ytb-panel-overlay')).toHaveCount(0);
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(page.locator('#ytb-panel-overlay, #ytb-home-overlay')).toHaveCount(0);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -1469,6 +1475,7 @@ test('Room Home Section keeps its Feed and Recommendations through Connection Lo
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 
 		const section = page.locator('#ytb-home-section');
 		const feedRow = section.locator('.ytb-hs-system');
@@ -3262,6 +3269,7 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 
 		// The renamed section renders only the Buddies' Recommendations: the
 		// viewer's own pick never appears in their own grid.
@@ -3283,8 +3291,9 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 			.poll(async () => popup.evaluate(() => chrome.storage.local.get('dismissedRecommendations')))
 			.toEqual({ dismissedRecommendations: { roome2e: ['rec-dismiss'] } });
 
-		// ...so the video stays hidden across a full reload.
+		// ...so the video stays hidden across a full reload (re-open the ephemeral panel).
 		await page.reload();
+		await openHomePanel(page);
 		await nudgeUntil(page, () => expect(cards).toHaveCount(1, { timeout: 700 }));
 		await expect(section).toContainText('Buddy Keeper');
 		await expect(section).not.toContainText('Buddy Dismissed');
@@ -3337,6 +3346,7 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 
 		// Five System Messages + one Watch Notice, all on the quiet system row.
 		const rows = page.locator('#ytb-home-section .ytb-hs-system');
@@ -3429,6 +3439,7 @@ test('Room Feed windows the newest 20 behind Show more; reveals and rebuilds kee
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 
 		// Only the newest 20 of 45 render — under both day dividers (yesterday
 		// partly revealed) — with Show more sitting above the topmost divider and
@@ -3518,6 +3529,7 @@ test('a Room Feed reply row lands you at your own place, paused, with the Unseen
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 
 		// Only the quoted body is the link (CONTEXT.md Room Feed link rule): the
 		// row itself is not an anchor, and the author/action text is plain.
@@ -3624,6 +3636,7 @@ test('re-assigning a Buddy Color repaints the Note Dot, the open Expanded Note, 
 		// Tab 1: the home route's Room Feed, with Sam's colored author name.
 		const home = await context.newPage();
 		await home.goto('https://www.youtube.com/');
+		await openHomePanel(home);
 		const author = home.locator('#ytb-home-section .ytb-hs-author', { hasText: 'Sam' }).first();
 		await nudgeUntil(home, () => expect(author).toBeVisible({ timeout: 700 }));
 
@@ -3739,6 +3752,7 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 		// Reading: the reply row names the video the conversation is on, as plain
 		// deemphasized text that is NOT a link of its own.
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 		const replyRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'replied to your note' });
 		await nudgeUntil(page, () => expect(replyRow).toHaveCount(1, { timeout: 700 }));
 		await expect(replyRow.locator('.ytb-hs-context')).toHaveText('on "Rick Astley - Never Gonna Give You Up"');
@@ -3893,10 +3907,12 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
 
-		// The paired Room renders the home section first — proof the Room config
-		// and Room read both landed before any kebab interaction.
-		const section = page.locator('#ytb-home-section');
-		await nudgeUntil(page, () => expect(section.locator('.ytb-hs-card')).toHaveCount(1, { timeout: 700 }));
+		// A completed Room read for the seeded code proves both the Room config and
+		// the read landed before any kebab interaction. The ephemeral Room Home Panel
+		// is deliberately NOT opened here, so its scrim never blocks the menu below.
+		await nudgeUntil(page, async () => {
+			expect(calls.some((call) => call.startsWith('GET ') && call.includes('code=roome2e'))).toBe(true);
+		});
 
 		const row = page.locator('.ytb-kebab-add');
 
@@ -3967,8 +3983,13 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 		errors.length = 0;
 		await nudgeUntil(page, () => expect(row).toHaveCount(0, { timeout: 700 }));
 
-		// A click inside the Room Home Section's own cards never arms the
-		// capture: a menu opening right after stays row-free.
+		// A click inside the Room Home Panel's own cards never arms the capture: a
+		// menu opening right after stays row-free. Open the ephemeral panel (via its
+		// own event, so no scrim click is needed), click a Dismiss inside it, then
+		// close it before the real tile click below.
+		const section = page.locator('#ytb-home-section');
+		await page.evaluate(() => document.dispatchEvent(new CustomEvent('ytb:home-panel-request-toggle')));
+		await expect(section.locator('.ytb-hs-remove').first()).toBeAttached();
 		await section.locator('.ytb-hs-remove').first().click();
 		await page.evaluate(() => (window as unknown as KebabFixtureWindow).openLockupMenu());
 		await page.waitForTimeout(900);
@@ -3976,6 +3997,8 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 		await page.waitForTimeout(600);
 		await expect(row).toHaveCount(0);
 		await page.evaluate(() => (window as unknown as KebabFixtureWindow).closeMenu());
+		await page.evaluate(() => document.dispatchEvent(new CustomEvent('ytb:home-panel-request-toggle')));
+		await expect(page.locator('#ytb-home-overlay')).toHaveCount(0);
 
 		// A stale capture (tile button clicked, but no menu opened) expires: a
 		// menu opening after the 3s window stays row-free.
@@ -4114,20 +4137,31 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
 		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
 
-		// Room Home Section visibility: the popup control and the guide toggle
-		// drive the same key and stay in sync live, both directions.
+		// Room Home Panel (ADR-0005): the guide toggle opens/closes the ephemeral floating panel;
+		// a scrim click and Esc also close it. There is no popup control.
 		const home = await context.newPage();
 		await home.goto('https://www.youtube.com/');
 		const guideToggle = home.locator('#ytb-home-toggle');
-		const homeSection = home.locator('#ytb-home-section');
+		const homePanel = home.locator('#ytb-home-section');
+		const homeOverlay = home.locator('#ytb-home-overlay');
 		await expect(guideToggle).toBeVisible();
-		await expect(homeSection).toHaveCount(1);
-		await popup.locator('#set-home').click();
-		await expect(homeSection).toHaveCount(0);
+		// Closed by default: nothing floats, toggle reads off.
+		await expect(homeOverlay).toHaveCount(0);
 		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
+		// Toggle opens the panel; aria-checked mirrors open.
 		await guideToggle.click();
-		await expect(homeSection).toHaveCount(1);
-		await expect(popup.locator('#set-home')).toHaveAttribute('aria-checked', 'true');
+		await expect(homePanel).toHaveCount(1);
+		await expect(guideToggle).toHaveAttribute('aria-checked', 'true');
+		// A scrim click (outside the panel) closes it; the toggle flips back off.
+		await homeOverlay.click({ position: { x: 5, y: 5 } });
+		await expect(homeOverlay).toHaveCount(0);
+		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
+		// Re-open, then Esc closes.
+		await guideToggle.click();
+		await expect(homePanel).toHaveCount(1);
+		await home.keyboard.press('Escape');
+		await expect(homeOverlay).toHaveCount(0);
+		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
 
 		// Back returns to the room view Settings was opened from.
 		await popup.locator('#settings-back').click();

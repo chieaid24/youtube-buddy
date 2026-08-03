@@ -43,7 +43,6 @@ const el = {
 	setNotes: document.getElementById('set-notes'),
 	setProgress: document.getElementById('set-progress'),
 	setSpoiler: document.getElementById('set-spoiler'),
-	setHome: document.getElementById('set-home'),
 	settingsRoom: document.getElementById('settings-room'),
 	settingsSharing: document.getElementById('settings-sharing'),
 	// Confirm dialog.
@@ -62,7 +61,7 @@ let pendingConfirm = null;
 
 let currentSharing = true;
 
-// Settings snapshot (YTB.getSettings keys + homeSectionHidden); null until init reads storage.
+// Settings snapshot (YTB.getSettings keys); null until init reads storage.
 let currentSettings = null;
 
 // Room view to restore when Settings closes.
@@ -101,10 +100,7 @@ async function init() {
 	setFieldLocked(el.nameField, !!config.name);
 
 	// theme.js already stamped data-theme; just reflect stored prefs into controls.
-	currentSettings = {
-		...(await YTB.getSettings()),
-		homeSectionHidden: await YTB.getHomeSectionHidden(),
-	};
+	currentSettings = await YTB.getSettings();
 	buildEdgePicker();
 	renderSettingsControls();
 
@@ -219,7 +215,6 @@ function wireHandlers() {
 	el.setNotes.addEventListener('click', () => saveSettings({ notesHidden: !currentSettings.notesHidden }));
 	el.setProgress.addEventListener('click', () => saveSettings({ buddyProgressHidden: !currentSettings.buddyProgressHidden }));
 	el.setSpoiler.addEventListener('click', () => saveSettings({ spoilerDefault: !currentSettings.spoilerDefault }));
-	el.setHome.addEventListener('click', () => saveSettings({ homeSectionHidden: !currentSettings.homeSectionHidden }));
 
 	el.settingsSharing.addEventListener('click', () => {
 		if (currentSharing) {
@@ -235,15 +230,12 @@ function wireHandlers() {
 		}
 	});
 
-	// Re-sync when a preference changes elsewhere (e.g. the Room Home Toggle in the guide).
+	// Re-sync when a preference changes elsewhere.
 	chrome.storage.onChanged.addListener(async (changes, area) => {
 		if (area !== 'local' || !currentSettings) return;
-		const keys = ['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden', 'homeSectionHidden'];
+		const keys = ['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden'];
 		if (!keys.some((key) => key in changes)) return;
-		currentSettings = {
-			...(await YTB.getSettings()),
-			homeSectionHidden: await YTB.getHomeSectionHidden(),
-		};
+		currentSettings = await YTB.getSettings();
 		renderSettingsControls();
 	});
 }
@@ -444,8 +436,7 @@ async function closeSettings() {
 	}
 }
 
-// homeSectionHidden has its own storage seam; a theme change also stamps
-// data-theme here, mirroring theme.js's cross-tab onChanged listener.
+// A theme change also stamps data-theme here, mirroring theme.js's cross-tab onChanged listener.
 function saveSettings(partial) {
 	if (!currentSettings) return;
 	currentSettings = { ...currentSettings, ...partial };
@@ -454,9 +445,7 @@ function saveSettings(partial) {
 		if (partial.theme === 'light' || partial.theme === 'dark') document.documentElement.setAttribute('data-theme', partial.theme);
 		else document.documentElement.removeAttribute('data-theme');
 	}
-	const { homeSectionHidden, ...rest } = partial;
-	if (homeSectionHidden !== undefined) YTB.setHomeSectionHidden(homeSectionHidden);
-	if (Object.keys(rest).length > 0) YTB.setSettings(rest);
+	YTB.setSettings(partial);
 }
 
 // Reading order so tab order matches the plus layout the CSS paints.
@@ -494,7 +483,6 @@ function renderSettingsControls() {
 	setSwitch(el.setNotes, !currentSettings.notesHidden);
 	setSwitch(el.setProgress, !currentSettings.buddyProgressHidden);
 	setSwitch(el.setSpoiler, currentSettings.spoilerDefault);
-	setSwitch(el.setHome, !currentSettings.homeSectionHidden);
 	updateSettingsRoomControls();
 }
 

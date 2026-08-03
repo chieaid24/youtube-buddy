@@ -61,7 +61,7 @@ We chose **(b)**, with a client-local dismiss layer.
 ## Consequences
 
 - This **supersedes the "Shared Playlist" framing of ADR-0005**: the Room Home Section's
-  right column becomes "Recommended for you". Backend KV infixes (`playlist:`, `event:`)
+  playlist surface becomes "Recommended for you". Backend KV infixes (`playlist:`, `event:`)
   and the `YTB` API names are **retained** (no data migration); only the domain terms and
   semantics change.
 - A recommender manages and removes their own recommendations **only from the watch page**

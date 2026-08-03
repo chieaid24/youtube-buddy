@@ -3,7 +3,7 @@
 // secondary borders on --ytb-line where DESIGN.md's role set names
 // line-strong for input borders, with the input well on surface-sunk.
 import { expect, test } from '@playwright/test';
-import { launchExtension, nudgeUntil, homeFixture, routeBackend, seedPaired } from './harness';
+import { launchExtension, nudgeUntil, openHomePanel, homeFixture, routeBackend, seedPaired } from './harness';
 
 test('UA-009: unpaired row controls share a height and the documented tokens', async () => {
 	const context = await launchExtension();
@@ -16,6 +16,7 @@ test('UA-009: unpaired row controls share a height and the documented tokens', a
 		await popup.evaluate(() => chrome.storage.local.remove(['code']));
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
 		await nudgeUntil(page, () => document.querySelectorAll('#ytb-home-section .ytb-hs-pair-actions > *').length >= 3);
 
 		const m = await page.evaluate(() => {

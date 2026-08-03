@@ -1481,27 +1481,6 @@ describe('room home section helpers', () => {
 		// Pure: the input groups and their item arrays were never mutated.
 		expect(groups.map((g) => g.items.map((i) => i.at))).toEqual([[1, 2, 3], [4, 5], [6]]);
 	});
-
-	it('defaults the Room Home Toggle to visible and round-trips a hide per install', async () => {
-		storage = {};
-		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
-
-		await window.YTB.setHomeSectionHidden(true);
-		expect(storage.homeSectionHidden).toBe(true);
-		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(true);
-
-		await window.YTB.setHomeSectionHidden(false);
-		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
-	});
-
-	it('stores the Room Home Toggle as a strict boolean, ignoring junk values', async () => {
-		storage = {};
-		await window.YTB.setHomeSectionHidden('yes' as unknown as boolean);
-		expect(storage.homeSectionHidden).toBe(false);
-
-		storage = { homeSectionHidden: 'truthy junk' };
-		await expect(window.YTB.getHomeSectionHidden()).resolves.toBe(false);
-	});
 });
 
 describe('settings (per install)', () => {
@@ -2187,8 +2166,6 @@ declare global {
 			dayLabel(dayKey: string, nowMs?: number): string;
 			tailFeed<Group extends { dayKey: string; items: unknown[] }>(groups: Group[], limit: number): { groups: Group[]; hidden: number };
 			getRecords(code: string): Promise<{ notes: object[]; replies: object[]; playlist?: object[]; events?: object[]; ok: boolean }>;
-			getHomeSectionHidden(): Promise<boolean>;
-			setHomeSectionHidden(hidden: boolean): Promise<boolean>;
 			PENDING_ARRIVAL_TTL_MS: number;
 			PANEL_LOAD_GRACE_MS: number;
 			startArrivalGrace(now?: number): number;

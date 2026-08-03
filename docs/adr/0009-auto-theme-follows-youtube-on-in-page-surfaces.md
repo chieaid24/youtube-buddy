@@ -4,7 +4,7 @@ Amends ADR-0008.
 
 ADR-0008 made the stored Theme Preference (`light` | `dark` | `system`) drive both the popup and the on-video Note surfaces, with `system` falling through to `prefers-color-scheme` — deliberately independent of YouTube's own theme toggle. The Room Home Section (ADR-0005) never joined that contract: it shipped with its own hardcoded hex palette keyed off YouTube's `html[dark]` attribute, so it followed the page while every other extension surface followed the preference/OS. A viewer with Theme Preference Dark (or a dark OS) on a light YouTube page saw a dark popup and dark Notes next to a light Buddy Room card.
 
-Two ways to close the gap: (a) pull the home card into the ADR-0008 contract as-is (consume the `--ytb-*` tokens, `system` = OS) — but then a YouTube-dark / OS-light viewer gets a glaring light card inside a dark feed, the exact mismatch the card's `html[dark]` palette was avoiding; or (b) redefine what `system` means for surfaces that live inside YouTube's page.
+Two ways to close the gap: (a) pull the home card into the ADR-0008 contract as-is (consume the `--ytb-*` tokens, `system` = OS) — but then a YouTube-dark / OS-light viewer gets a glaring light card over a dark page, the exact mismatch the card's `html[dark]` palette was avoiding; or (b) redefine what `system` means for surfaces that live inside YouTube's page.
 
 ## Decision
 
