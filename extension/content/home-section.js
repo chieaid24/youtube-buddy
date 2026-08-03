@@ -221,7 +221,7 @@
 		if (total === 0) {
 			const empty = document.createElement('p');
 			empty.className = 'ytb-hs-empty';
-			empty.textContent = 'Nothing yet. Replies to your notes and @mentions of you land here.';
+			empty.textContent = 'Nothing yet. Notes and replies from your Room land here.';
 			scroll.append(empty);
 			return column;
 		}
@@ -277,25 +277,41 @@
 		// Parent Note for a Reply, the Note itself for a Mention; absent leaves the body non-clickable.
 		const target = item.note;
 		const canOpen = Boolean(target && target.videoId);
+		// Addressed-to-me rows ('reply'/'mention') are the emphasized ones.
+		const emphasized = item.type === 'reply' || item.type === 'mention';
 
 		const row = document.createElement('div');
-		row.className = 'ytb-hs-item';
+		row.className = emphasized ? 'ytb-hs-item ytb-hs-emph' : 'ytb-hs-item';
 
 		const author = document.createElement('span');
 		author.className = 'ytb-hs-author';
-		author.textContent = YTB.buddyName(record.clientId, record.name, roster);
-		author.style.color = YTB.buddyTextColor(record.clientId);
-		author.dataset.ytbColorCid = record.clientId; // live repaint hook (#115)
+		if (item.own) {
+			author.textContent = 'You'; // own rows carry no Buddy Color (none is allocated)
+		} else {
+			author.textContent = YTB.buddyName(record.clientId, record.name, roster);
+			author.style.color = YTB.buddyTextColor(record.clientId);
+			author.dataset.ytbColorCid = record.clientId; // live repaint hook (#115)
+		}
 
 		const action = document.createElement('span');
 		action.className = 'ytb-hs-action';
-		action.textContent = item.type === 'reply' ? ' replied to your note ' : ' mentioned you ';
+		action.textContent =
+			item.type === 'reply'
+				? ' replied to your note '
+				: item.type === 'mention'
+					? ' mentioned you '
+					: item.reply
+						? ' replied '
+						: ' left a note ';
+
+		// A Spoiler Note's body never renders in the Feed (Replies carry no flag).
+		const spoiler = !item.reply && Boolean(record.spoiler);
 
 		// Only the quoted body links (CONTEXT.md Feed link rule): no &t= seek (ADR-0010),
 		// plus an arrival handshake so notes.js pauses on an Unseen dot there.
 		const body = document.createElement(canOpen ? 'a' : 'span');
-		body.className = canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text';
-		body.textContent = '"' + record.body + '"';
+		body.className = (canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text') + (spoiler ? ' ytb-hs-spoiler' : '');
+		body.textContent = spoiler ? 'Spoiler' : '"' + record.body + '"';
 		if (canOpen) {
 			body.href = '/watch?v=' + encodeURIComponent(target.videoId);
 			// Tooltip names the destination video (the row doesn't otherwise show it).
@@ -727,6 +743,15 @@
       #${SECTION_ID} .ytb-hs-more:hover { background: var(--ytb-accent-100); }
       #${SECTION_ID} .ytb-hs-more:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-item { margin: 4px 0; overflow-wrap: anywhere; }
+      /* Addressed-to-you rows (replies to your Notes, @mentions of you) read louder than the plain comment stream. */
+      #${SECTION_ID} .ytb-hs-item.ytb-hs-emph {
+        padding: 4px 8px;
+        border-left: 3px solid var(--ytb-accent-500);
+        border-radius: var(--ytb-r-sm);
+        background: var(--ytb-accent-050);
+      }
+      #${SECTION_ID} .ytb-hs-emph .ytb-hs-action { color: var(--ytb-accent-800); font-weight: 600; }
+      #${SECTION_ID} .ytb-hs-spoiler { font-style: italic; color: var(--ytb-ink-muted); }
       #${SECTION_ID} a.ytb-hs-text-link {
         color: inherit;
         text-decoration: none;

@@ -226,7 +226,7 @@
 
 		// Unseen set (ADR-0010): the Note ids whose dots pulse - each anchors an
 		// Unseen Mention or Unseen Reply not yet seen, exactly what the Room Feed
-		// surfaces. A Reaction never pulses; a Reply with no parent is ignored.
+		// emphasizes. A Reaction never pulses; a Reply with no parent is ignored.
 		unseenNoteIds(records, myClientId, seenIds) {
 			const seen = new Set(seenIds || []);
 			const notes = (records && records.notes) || [];
@@ -319,11 +319,15 @@
 			return Array.isArray(reply.mentions) && reply.mentions.includes(myClientId);
 		},
 
-		// The viewer's personalized Room Feed from one Room read (ADR-0007):
-		// Buddy Replies to their Notes, Mentions of them, recommend System
-		// Messages (with `removed` when superseded or un-recommended), and Watch
-		// Notices (recommender-only, one per Buddy+video). Sorted oldest ->
-		// newest, grouped under day dividers; no read/unread state.
+		// The Room Feed from one Room read (ADR-0007): EVERY text Note and Reply
+		// in the Room (own included, `own`-flagged for "You" copy), with the
+		// addressed-to-me items typed 'reply'/'mention' for emphasis (the shared
+		// noteAddressesMe/replyAddressesMe rule, so Feed and Timeline never
+		// drift) and the rest typed 'note'; Reactions never appear. Plus
+		// recommend System Messages (with `removed` when superseded or
+		// un-recommended) and Watch Notices (recommender-only, one per
+		// Buddy+video). Sorted oldest -> newest, grouped under day dividers; no
+		// read/unread state.
 		buildFeed(records, myClientId) {
 			const notes = (records && records.notes) || [];
 			const replies = (records && records.replies) || [];
@@ -336,19 +340,20 @@
 			for (const reply of replies) {
 				if (!reply) continue;
 				const parent = noteById.get(reply.noteId) || null;
-				// Shared replyAddressesMe rule (own writes are never news).
-				if (!YTB.replyAddressesMe(reply, parent, myClientId)) continue;
-				const toMyNote = Boolean(parent) && parent.clientId === myClientId;
-				items.push({
-					type: toMyNote ? 'reply' : 'mention',
-					at: Number(reply.createdAt) || 0,
-					reply,
-					note: parent,
-				});
+				if (parent && parent.kind === 'emoji') continue;
+				const at = Number(reply.createdAt) || 0;
+				if (YTB.replyAddressesMe(reply, parent, myClientId)) {
+					const toMyNote = Boolean(parent) && parent.clientId === myClientId;
+					items.push({ type: toMyNote ? 'reply' : 'mention', at, reply, note: parent });
+				} else {
+					items.push({ type: 'note', at, reply, note: parent, own: reply.clientId === myClientId });
+				}
 			}
 			for (const note of notes) {
-				if (!YTB.noteAddressesMe(note, myClientId)) continue;
-				items.push({ type: 'mention', at: Number(note.createdAt) || 0, note });
+				if (!note || note.kind === 'emoji') continue;
+				const at = Number(note.createdAt) || 0;
+				if (YTB.noteAddressesMe(note, myClientId)) items.push({ type: 'mention', at, note });
+				else items.push({ type: 'note', at, note, own: note.clientId === myClientId });
 			}
 			// Only `added` events count (un-recommends emit none). `removed`
 			// (ADR-0007) is per-event: a newer `added` for the same videoId
