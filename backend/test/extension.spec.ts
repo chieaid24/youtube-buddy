@@ -964,6 +964,52 @@ describe('titleLinkTooltip', () => {
 	});
 });
 
+// The Video Hover Card that replaces the Feed link's native tooltip: what to draw
+// (thumbnail + label) and where to put it relative to the cursor.
+describe('videoHoverCard', () => {
+	it('pairs the video thumbnail with the title', () => {
+		expect(window.YTB.videoHoverCard('dQw4w9WgXcQ', '  Blade Runner  ')).toEqual({
+			thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
+			label: 'Blade Runner',
+		});
+	});
+
+	it('keeps the preview without a captured title', () => {
+		expect(window.YTB.videoHoverCard('abc', null)?.label).toBe('a video');
+		expect(window.YTB.videoHoverCard('abc', '   ')?.label).toBe('a video');
+	});
+
+	it('escapes the id into the thumbnail URL', () => {
+		expect(window.YTB.videoHoverCard('a/b?c', 'T')?.thumbnail).toBe('https://i.ytimg.com/vi/a%2Fb%3Fc/mqdefault.jpg');
+	});
+
+	it('has nothing to show without a videoId', () => {
+		expect(window.YTB.videoHoverCard('', 'T')).toBe(null);
+		expect(window.YTB.videoHoverCard('   ', 'T')).toBe(null);
+		expect(window.YTB.videoHoverCard(null, 'T')).toBe(null);
+	});
+});
+
+describe('hoverCardPlacement', () => {
+	const box = { cardW: 200, cardH: 140, viewportW: 1000, viewportH: 800 };
+
+	it('sits below-right of the cursor with room to spare', () => {
+		expect(window.YTB.hoverCardPlacement({ ...box, x: 300, y: 400 })).toEqual({ left: 314, top: 414 });
+	});
+
+	it('flips to the other side near the right/bottom edges', () => {
+		expect(window.YTB.hoverCardPlacement({ ...box, x: 950, y: 780 })).toEqual({ left: 736, top: 626 });
+	});
+
+	it('clamps to the viewport margin when neither side fits', () => {
+		expect(window.YTB.hoverCardPlacement({ ...box, x: 4, y: 4, viewportW: 210, viewportH: 150 })).toEqual({ left: 8, top: 8 });
+	});
+
+	it('honors custom gap and margin', () => {
+		expect(window.YTB.hoverCardPlacement({ ...box, x: 300, y: 400, gap: 0, margin: 0 })).toEqual({ left: 300, top: 400 });
+	});
+});
+
 describe('room home section helpers', () => {
 	const me = 'me111111';
 	const roomRead = {
@@ -2146,6 +2192,17 @@ declare global {
 			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
 			videoContext(note: { videoTitle?: string } | null): string;
 			titleLinkTooltip(title: string | null): string;
+			videoHoverCard(videoId: string | null, title: string | null): { thumbnail: string; label: string } | null;
+			hoverCardPlacement(input: {
+				x: number;
+				y: number;
+				cardW: number;
+				cardH: number;
+				viewportW: number;
+				viewportH: number;
+				gap?: number;
+				margin?: number;
+			}): { left: number; top: number };
 			watchedByLabel(
 				progress: object[],
 				videoId: string,

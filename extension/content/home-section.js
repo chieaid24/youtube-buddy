@@ -77,6 +77,8 @@
 				if (event.target === root) setOpen(false); // scrim click closes; panel clicks don't
 			});
 			root.addEventListener('keydown', onOverlayKeydown);
+			// Feed scroll moves rows out from under the cursor; the card must not linger.
+			root.addEventListener('scroll', () => hideHoverCard(), true);
 
 			panel = document.createElement('section');
 			panel.id = SECTION_ID;
@@ -85,7 +87,7 @@
 			panel.setAttribute('aria-label', 'YouTube Buddy Room');
 			root.appendChild(panel);
 			(document.body || document.documentElement).appendChild(root);
-			window.addEventListener('resize', dockOverlay);
+			window.addEventListener('resize', onOverlayResize);
 		}
 		dockOverlay();
 		render(panel);
@@ -93,8 +95,15 @@
 	}
 
 	function teardownOverlay() {
-		window.removeEventListener('resize', dockOverlay);
+		hideHoverCard();
+		window.removeEventListener('resize', onOverlayResize);
 		document.getElementById(OVERLAY_ID)?.remove();
+	}
+
+	// A resize re-docks the panel and drops the hover card, whose anchor point is stale.
+	function onOverlayResize() {
+		dockOverlay();
+		hideHoverCard();
 	}
 
 	/** Park the panel's left edge just past the guide's right edge, so it reads as popping out of
@@ -144,6 +153,7 @@
 	function render(section) {
 		section = section || document.getElementById(SECTION_ID);
 		if (!section || !section.isConnected) return;
+		hideHoverCard(); // a rebuild detaches the hovered link, so no pointerleave would ever fire
 
 		const detail = lastDetail;
 		const roomCode = detail && detail.roomCode;
@@ -283,6 +293,105 @@
 		}
 	}
 
+	// --- Video Hover Card: cursor-following thumbnail + title for a Feed link ---
+	// Replaces the native title= tooltip on every Feed link, so hovering a Buddy's
+	// note previews where it leads. Lives on the overlay root (teardown removes it)
+	// and is pointer-events: none, so it never steals the hover that spawned it.
+
+	const HOVER_DELAY_MS = 120; // a cursor crossing rows on its way elsewhere shouldn't flash cards
+	let hoverTimer = null;
+	let hoverOwner = null; // the link the visible card belongs to
+	let hoverPoint = { x: 0, y: 0 };
+
+	function attachVideoHover(el, videoId, title) {
+		const plan = YTB.videoHoverCard(videoId, title);
+		if (!plan) return el;
+		el.addEventListener('pointerenter', (event) => {
+			if (event.pointerType === 'touch') return;
+			hoverPoint = { x: event.clientX, y: event.clientY };
+			clearTimeout(hoverTimer);
+			hoverTimer = setTimeout(() => showHoverCard(el, plan), HOVER_DELAY_MS);
+		});
+		el.addEventListener('pointermove', (event) => {
+			hoverPoint = { x: event.clientX, y: event.clientY };
+			if (hoverOwner === el) positionHoverCard();
+		});
+		el.addEventListener('pointerleave', () => hideHoverCard(el));
+		el.addEventListener('pointerdown', () => hideHoverCard(el));
+		// Keyboard focus gets the same card, anchored under the link instead of a cursor.
+		el.addEventListener('focus', () => {
+			if (!el.matches(':focus-visible')) return;
+			const rect = el.getBoundingClientRect();
+			hoverPoint = { x: rect.left, y: rect.bottom };
+			showHoverCard(el, plan);
+		});
+		el.addEventListener('blur', () => hideHoverCard(el));
+		return el;
+	}
+
+	function ensureHoverCard() {
+		const root = document.getElementById(OVERLAY_ID);
+		if (!root) return null;
+		let card = root.querySelector('.ytb-hs-hovercard');
+		if (card) return card;
+		card = document.createElement('div');
+		card.className = 'ytb-hs-hovercard';
+		card.setAttribute('aria-hidden', 'true'); // decorative: the link carries the name AT reads
+		const img = document.createElement('img');
+		img.className = 'ytb-hs-hovercard-thumb';
+		img.alt = '';
+		img.referrerPolicy = 'no-referrer';
+		img.addEventListener('error', () => {
+			img.style.display = 'none'; // a missing thumbnail leaves the title, not a broken box
+		});
+		const label = document.createElement('div');
+		label.className = 'ytb-hs-hovercard-label';
+		card.append(img, label);
+		root.appendChild(card);
+		return card;
+	}
+
+	function showHoverCard(owner, plan) {
+		hoverTimer = null;
+		if (!owner.isConnected) return;
+		const card = ensureHoverCard();
+		if (!card) return;
+		const img = card.querySelector('.ytb-hs-hovercard-thumb');
+		if (img.getAttribute('src') !== plan.thumbnail) {
+			img.style.display = '';
+			img.src = plan.thumbnail;
+		}
+		card.querySelector('.ytb-hs-hovercard-label').textContent = plan.label;
+		hoverOwner = owner;
+		positionHoverCard();
+		card.classList.add('ytb-hs-hovercard-on');
+	}
+
+	function positionHoverCard() {
+		const card = document.getElementById(OVERLAY_ID)?.querySelector('.ytb-hs-hovercard');
+		if (!card) return;
+		const at = YTB.hoverCardPlacement({
+			x: hoverPoint.x,
+			y: hoverPoint.y,
+			cardW: card.offsetWidth,
+			cardH: card.offsetHeight,
+			viewportW: window.innerWidth,
+			viewportH: window.innerHeight,
+		});
+		card.style.left = `${at.left}px`;
+		card.style.top = `${at.top}px`;
+	}
+
+	// `owner` scopes the hide to one link, so leaving a link the card no longer
+	// belongs to can't close a newer one; no owner hides unconditionally.
+	function hideHoverCard(owner) {
+		if (owner && hoverOwner && hoverOwner !== owner) return;
+		clearTimeout(hoverTimer);
+		hoverTimer = null;
+		hoverOwner = null;
+		document.getElementById(OVERLAY_ID)?.querySelector('.ytb-hs-hovercard')?.classList.remove('ytb-hs-hovercard-on');
+	}
+
 	function buildFeedRow(item, roster) {
 		const record = item.reply || item.note;
 		// Parent Note for a Reply, the Note itself for a Mention; absent leaves the body non-clickable.
@@ -325,8 +434,13 @@
 		body.textContent = spoiler ? 'Spoiler' : '"' + record.body + '"';
 		if (canOpen) {
 			body.href = '/watch?v=' + encodeURIComponent(target.videoId);
-			// Tooltip names the destination video (the row doesn't otherwise show it).
-			body.title = YTB.titleLinkTooltip(target.videoTitle);
+			// The destination video: a Video Hover Card for pointers, sr-only text for AT
+			// (no title= - that is the native tooltip the card replaces).
+			const dest = document.createElement('span');
+			dest.className = 'ytb-hs-sr';
+			dest.textContent = ' ' + YTB.titleLinkTooltip(target.videoTitle);
+			body.append(dest);
+			attachVideoHover(body, target.videoId, target.videoTitle);
 			body.addEventListener('click', () => {
 				YTB.setPendingArrival(target.videoId);
 			});
@@ -357,8 +471,9 @@
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-title-link';
 		link.href = '/watch?v=' + encodeURIComponent(videoId);
-		link.title = YTB.titleLinkTooltip(title);
 		link.textContent = label;
+		// The link already reads as the title, so the hover preview is the whole tooltip.
+		attachVideoHover(link, videoId, title);
 		return link;
 	}
 
@@ -883,8 +998,42 @@
       #${SECTION_ID} .ytb-hs-input:focus { outline: none; border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 11px; color: var(--ytb-danger-text); }
+      /* Video Hover Card: follows the cursor, so pointer-events must stay off it. */
+      #${OVERLAY_ID} .ytb-hs-hovercard {
+        position: fixed;
+        left: 0; top: 0;
+        box-sizing: border-box;
+        width: 200px;
+        padding: 6px;
+        border: 1px solid var(--ytb-line);
+        border-radius: var(--ytb-r-lg);
+        background: var(--ytb-surface);
+        color: var(--ytb-ink);
+        font-family: var(--ytb-font);
+        font-size: 11px;
+        line-height: 1.3;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+        pointer-events: none;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${OVERLAY_ID} .ytb-hs-hovercard-on { opacity: 1; visibility: visible; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-thumb {
+        display: block;
+        width: 186px; height: 105px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: var(--ytb-surface-sunk);
+      }
+      #${OVERLAY_ID} .ytb-hs-hovercard-label {
+        margin-top: 5px;
+        font-weight: 600;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      }
       @media (prefers-reduced-motion: reduce) {
         #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-more { transition: none; }
+        #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);

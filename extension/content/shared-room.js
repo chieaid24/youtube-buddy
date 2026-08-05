@@ -91,6 +91,37 @@
 			return trimmed === '' ? 'Watch this video' : 'Watch "' + trimmed + '"';
 		},
 
+		// Video Hover Card plan for a Feed link: null without a videoId (nothing to
+		// preview). mqdefault exists for every video, unlike maxresdefault.
+		videoHoverCard(videoId, title) {
+			const id = typeof videoId === 'string' ? videoId.trim() : '';
+			if (id === '') return null;
+			const trimmed = typeof title === 'string' ? title.trim() : '';
+			return {
+				thumbnail: 'https://i.ytimg.com/vi/' + encodeURIComponent(id) + '/mqdefault.jpg',
+				label: trimmed === '' ? 'a video' : trimmed,
+			};
+		},
+
+		// Where the cursor-following Video Hover Card sits: below-right of the point,
+		// flipped to the other side when it would overflow, then clamped to `margin`
+		// so a card wider than the space left still stays fully on screen.
+		hoverCardPlacement(input) {
+			const it = input || {};
+			const gap = typeof it.gap === 'number' ? it.gap : 14;
+			const margin = typeof it.margin === 'number' ? it.margin : 8;
+			const axis = (point, size, extent) => {
+				let start = point + gap;
+				if (start + size > extent - margin) start = point - gap - size;
+				const max = Math.max(margin, extent - margin - size);
+				return Math.round(Math.min(Math.max(start, margin), max));
+			};
+			return {
+				left: axis(it.x || 0, it.cardW || 0, it.viewportW || 0),
+				top: axis(it.y || 0, it.cardH || 0, it.viewportH || 0),
+			};
+		},
+
 		// Render plan for one recommend System Message row; home-section.js
 		// executes it. A struck line (`removed`) has NO link - the sole exception
 		// to the Feed's link rule - and carries a tooltip + visually-hidden

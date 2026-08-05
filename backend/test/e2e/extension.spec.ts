@@ -3359,7 +3359,8 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(recipient.locator('a')).toHaveCount(1);
 		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveText('Buddy Pick');
 		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-live');
-		await expect(recipient.locator('a.ytb-hs-title-link')).toHaveAttribute('title', 'Watch "Buddy Pick"');
+		// The Video Hover Card replaced the native tooltip, so no title= is left behind.
+		await expect(recipient.locator('a.ytb-hs-title-link')).not.toHaveAttribute('title', /./);
 
 		// The recommender now sees their own line, title-linked the same way.
 		const own = rows.filter({ hasText: 'You recommended My Pick to the Room' });
@@ -3401,7 +3402,19 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		const watch = rows.filter({ hasText: 'Sam started watching My Pick' });
 		await expect(watch).toHaveCount(1);
 		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
-		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('title', 'Watch "My Pick"');
+
+		// Hovering any Feed link shows the Video Hover Card near the cursor instead
+		// of a native tooltip: the video's thumbnail plus its title.
+		const card = page.locator('#ytb-home-overlay .ytb-hs-hovercard');
+		await watch.locator('a.ytb-hs-title-link').hover();
+		await expect(card).toBeVisible();
+		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
+		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
+		// The card follows the cursor, so it must never eat the hover under it.
+		await expect(card).toHaveCSS('pointer-events', 'none');
+		// Leaving the link hides it again.
+		await page.locator('#ytb-home-section .ytb-hs-title').hover();
+		await expect(card).toBeHidden();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -3537,11 +3550,14 @@ test('a Room Feed reply row lands you at your own place, paused, with the Unseen
 		await nudgeUntil(page, () => expect(row).toHaveCount(1, { timeout: 700 }));
 		await expect(row.locator('a')).toHaveCount(1); // exactly one link — the body
 		const link = row.locator('a.ytb-hs-text-link');
-		await expect(link).toHaveText('"love this"'); // the quoted reply body only
+		await expect(link.locator('span:not(.ytb-hs-sr)')).toHaveCount(0);
+		await expect(link).toContainText('"love this"'); // the quoted reply body only
 		// The anchor hands you the VIDEO, not the moment: no `&t=` seek (ADR-0010).
 		await expect(link).toHaveAttribute('href', '/watch?v=parent-video');
-		// This Note captured no title, so the tooltip falls back to the video label.
-		await expect(link).toHaveAttribute('title', 'Watch this video');
+		// No native tooltip: pointers get the Video Hover Card, AT the sr-only
+		// destination, which falls back to the label with no captured title.
+		await expect(link).not.toHaveAttribute('title', /./);
+		await expect(link.locator('.ytb-hs-sr')).toHaveText('Watch this video');
 
 		// Clicking the body records the arrival handshake, then navigates to the
 		// video (a full reload here; an SPA nav on real YouTube — it survives both).
@@ -3757,15 +3773,20 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 		await nudgeUntil(page, () => expect(replyRow).toHaveCount(1, { timeout: 700 }));
 		await expect(replyRow.locator('.ytb-hs-context')).toHaveText('on "Rick Astley - Never Gonna Give You Up"');
 		await expect(replyRow.locator('.ytb-hs-context a')).toHaveCount(0);
-		// The body link navigates to the video (no seek, ADR-0010); its tooltip
-		// names that same video.
-		await expect(replyRow.locator('a.ytb-hs-text-link')).toHaveAttribute('title', 'Watch "Rick Astley - Never Gonna Give You Up"');
+		// The body link navigates to the video (no seek, ADR-0010); its Video Hover
+		// Card and sr-only destination name that same video.
+		const bodyLink = replyRow.locator('a.ytb-hs-text-link');
+		await expect(bodyLink.locator('.ytb-hs-sr')).toHaveText('Watch "Rick Astley - Never Gonna Give You Up"');
+		const hoverCard = page.locator('#ytb-home-overlay .ytb-hs-hovercard');
+		await bodyLink.hover();
+		await expect(hoverCard.locator('.ytb-hs-hovercard-label')).toHaveText('Rick Astley - Never Gonna Give You Up');
+		await expect(hoverCard).toBeVisible();
 
 		// A Note with no captured title names no video — never a placeholder.
 		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'mentioned you' });
 		await expect(mentionRow).toHaveCount(1);
 		await expect(mentionRow.locator('.ytb-hs-context')).toHaveCount(0);
-		await expect(mentionRow.locator('a.ytb-hs-text-link')).toHaveAttribute('title', 'Watch this video');
+		await expect(mentionRow.locator('a.ytb-hs-text-link .ytb-hs-sr')).toHaveText('Watch this video');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
