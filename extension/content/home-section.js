@@ -143,14 +143,7 @@
 		const title = document.createElement('h2');
 		title.className = 'ytb-hs-title';
 		title.textContent = 'YouTube Buddy Room';
-		head.append(dot, title);
-		if (roomCode) {
-			const code = document.createElement('span');
-			code.className = 'ytb-hs-code';
-			code.textContent = window.YTBRoomCode ? YTBRoomCode.pretty(roomCode) : roomCode;
-			head.append(code);
-		}
-		head.append(buildCloseButton());
+		head.append(dot, title, buildCloseButton());
 
 		// Connection Lost (PRD #137): quiet status line; never shown while Unpaired.
 		let conn = null;
@@ -674,9 +667,8 @@
         border-radius: 50%;
         background: var(--ytb-accent-500);
       }
-      /* Title takes the slack so the Room Code and close control sit at the right edge either way. */
+      /* Title takes the slack so the close control sits at the right edge. */
       #${SECTION_ID} .ytb-hs-title { flex: 1 1 auto; margin: 0; font-size: 15px; font-weight: 800; color: var(--ytb-ink); }
-      #${SECTION_ID} .ytb-hs-code { font-size: 13px; font-weight: 800; color: var(--ytb-accent-800); }
       #${SECTION_ID} .ytb-hs-close {
         flex: none;
         align-self: center;
