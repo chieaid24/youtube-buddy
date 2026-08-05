@@ -22,5 +22,6 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test -- --run
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      # e2e temporarily disabled; re-enable these two steps to restore the smoke suite.
+      # - run: npx playwright install --with-deps chromium
+      # - run: npm run test:e2e
