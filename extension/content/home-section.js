@@ -12,6 +12,7 @@
 	const SECTION_ID = 'ytb-home-section'; // the panel
 	const OVERLAY_ID = 'ytb-home-overlay'; // the scrim/root that hosts it
 	const STYLE_ID = 'ytb-home-section-style';
+	const GUIDE_FALLBACK_PX = 240; // YouTube's own --ytd-guide-width, used until a guide is measurable
 
 	let lastDetail = null; // last renderable ytb:room-data; a same-Room failed read keeps it (PRD #137)
 	let connectionLost = false; // true at >= 2 consecutive failed Room reads
@@ -84,13 +85,30 @@
 			panel.setAttribute('aria-label', 'YouTube Buddy Room');
 			root.appendChild(panel);
 			(document.body || document.documentElement).appendChild(root);
+			window.addEventListener('resize', dockOverlay);
 		}
+		dockOverlay();
 		render(panel);
 		return panel;
 	}
 
 	function teardownOverlay() {
+		window.removeEventListener('resize', dockOverlay);
 		document.getElementById(OVERLAY_ID)?.remove();
+	}
+
+	/** Park the panel's left edge just past the guide's right edge, so it reads as popping out of
+	 * the sidebar rather than floating over it. Whichever guide is showing (full or mini) wins;
+	 * a hidden or absent one measures 0 and falls back to YouTube's full-guide width. */
+	function dockOverlay() {
+		const root = document.getElementById(OVERLAY_ID);
+		if (!root) return;
+		let x = 0;
+		for (const el of document.querySelectorAll('ytd-guide-renderer, ytd-mini-guide-renderer')) {
+			const rect = el.getBoundingClientRect();
+			if (rect.width > 0 && rect.height > 0) x = Math.max(x, rect.right);
+		}
+		root.style.setProperty('--ytb-hs-dock', `${Math.round(x) || GUIDE_FALLBACK_PX}px`);
 	}
 
 	// Esc closes; Tab is trapped inside the modal panel.
@@ -631,7 +649,8 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
-      /* Scrim/root: covers the page, dims it slightly, catches outside clicks; docks the panel top-left below the masthead. */
+      /* Scrim/root: covers the page, dims it slightly, catches outside clicks; docks the panel below
+         the masthead, just past the guide's right edge (--ytb-hs-dock, measured by dockOverlay). */
       #${OVERLAY_ID} {
         position: fixed;
         inset: 0;
@@ -639,7 +658,7 @@
         display: flex;
         align-items: flex-start;
         justify-content: flex-start;
-        padding: 72px 16px 16px;
+        padding: 64px 16px 20px calc(var(--ytb-hs-dock, ${GUIDE_FALLBACK_PX}px) + 8px);
         background: rgba(0, 0, 0, 0.18);
       }
       /* The floating panel: portrait, roomy, with its own internal scroll. */
@@ -647,9 +666,10 @@
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        width: 440px;
-        max-width: calc(100vw - 32px);
-        max-height: calc(100vh - 96px);
+        width: 480px;
+        max-width: calc(100vw - var(--ytb-hs-dock, ${GUIDE_FALLBACK_PX}px) - 24px);
+        min-height: min(600px, calc(100vh - 84px));
+        max-height: calc(100vh - 84px);
         padding: 12px 16px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
@@ -658,7 +678,7 @@
         font-family: var(--ytb-font);
         font-size: 13px;
         line-height: 1.45;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+        box-shadow: 10px 12px 40px rgba(0, 0, 0, 0.26);
       }
       #${SECTION_ID} .ytb-hs-head { flex: none; display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
       #${SECTION_ID} .ytb-hs-dot {
@@ -702,7 +722,7 @@
       }
       #${SECTION_ID} .ytb-hs-count { font-weight: 500; }
       #${SECTION_ID} .ytb-hs-feed-scroll {
-        max-height: 240px;
+        max-height: 380px;
         overflow-y: auto;
         padding: 8px;
         border-radius: 12px;
