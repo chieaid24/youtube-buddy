@@ -1,27 +1,29 @@
-# Room Home is a floating overlay panel, not embedded in the home grid
+# Room Home is the complete in-page hub
 
-The Shared Playlist and Room Feed need a home surface. The action popup was rejected early (it is transient, Chrome-positioned, and small, while the Feed and Recommendations are ambient browsing surfaces); the surface lives on YouTube's home route instead, as the **Room Home Panel**.
+The Room Feed and Recommendations need space that Chrome's transient Extension Popup cannot provide. Identity, Room membership, Buddy Colors, and Settings also need one durable management surface. Keeping those controls in the Extension Popup would split the product between two places and require the viewer to leave YouTube's page context to manage an in-page experience.
 
-It first shipped **embedded**: a `<section>` inserted directly above the recommendations grid (`ytd-rich-grid-renderer`), which YouTube's own layout then pushed down. That embedding was the mistake this ADR corrects. It made the panel a hostage of YouTube's layout DOM twice over — the grid insertion point plus the guide-row toggle in `ytd-guide-renderer` — so it shifted the grid, had to re-inject after every SPA navigation, and broke whenever YouTube reshaped its home markup. It also forced a wide, horizontal Feed-left / Recommended-right layout to avoid pushing the grid too far down.
+The Room Home Panel already supplies the correct shell. It is a fixed, left-docked portrait overlay on YouTube Home, outside YouTube's layout flow, with its own scroll and a blocking scrim. The Room Home Toggle is the panel's only YouTube DOM dependency.
 
 ## Decision
 
-Room Home renders as a **floating overlay panel**, not part of YouTube's layout flow. The panel is a `position: fixed` element appended to `<body>` over a slightly-dim scrim; it reads **no** YouTube layout DOM. The only remaining YouTube-DOM touch is the opener — the Room Home Toggle row still injected into the left guide — which is deliberately isolated to one module.
+The Room Home Panel is the complete product hub. It has two mutually exclusive views:
 
-Concretely:
+- The normal view stacks the Room Feed above Recommendations.
+- The Settings view replaces the normal content and shows four visible sections in one scroll: Profile, Room, On-video, and Appearance. A gear opens Settings and Back restores the normal view.
 
-- **Left-docked and portrait.** The panel pins to the left edge, beside the guide, roomy (about 440px) rather than thin, `max-height` about 80vh with its own internal scroll. Feed stacks **above** Recommended — the floating panel is free to be vertical, so it no longer forces the horizontal split the embedded band needed.
-- **Ephemeral, opened on demand.** The Room Home Toggle **opens** the panel; the panel's close control, a scrim click, Esc, or an SPA navigation all close it. There is no persisted visibility preference — the old `homeSectionHidden` is retired and its popup Settings toggle removed. The toggle reflects the live open state.
-- **The scrim blocks, and that is accepted.** A slightly-dim scrim covers the page while the panel is open, catching outside clicks to close. Because the panel is opened deliberately and dismisses on navigation, the page is never left blocked by accident.
+Profile owns Nickname. Room owns Room state, Room Code, Create or Join, the Buddy roster, Buddy Color Swatches, and Leave Room. On-video owns Share video progress, Notes Visibility, Buddy Progress Visibility, Spoiler Default, and Notification Position. Appearance owns Theme Preference. Stop sharing and Leave Room retain confirmation dialogs, and Escape dismisses a confirmation before it can close the panel.
 
-This is consistent with **ADR-0001**: the content script owns all on-page rendering, there is no background service worker, and `content.js` remains the sole navigation/DOM observer. The panel is one more pure consumer of `ytb:navigate` / `ytb:room-data`, and the toggle and panel coordinate open/close purely through in-page CustomEvents — no storage round-trip, since both are content-script modules in the same page.
+Waiting and In room viewers open into the normal view. Unpaired and Room full viewers open directly into Settings because neither can use the Feed. Room full receives no forced focus, scroll, or highlight. Closing and reopening the panel resets it to the state-appropriate initial view; Settings visibility is never persisted.
 
-Longer term, this panel is the shell that will absorb the identity / Room / Settings controls currently in the action popup, consolidating the extension into a single in-page Control Panel hub. Building it as a floating shell now is what makes that consolidation possible without another layout fight.
+The panel remains ephemeral. The Room Home Toggle opens or closes it. The header close control, a scrim click, Escape, or a single-page navigation closes it. Closing hides the surface and never changes Room membership, Sharing, or Recommendations.
+
+The panel stays outside YouTube's layout flow. It appends to the page body, reads no home-grid layout DOM, and coordinates with the toggle through in-page events. ADR-0001 still applies: the content script owns the in-page experience, and the extension adds no background service worker.
 
 ## Consequences
 
-- The panel's own rendering no longer depends on YouTube's home DOM at all — the biggest fragility of the embedded version is gone. Only the guide-row opener still targets YouTube markup, and that is contained to one module and retried on `ytb:mutation`.
-- Visibility is no longer persisted. The three former writers of `homeSectionHidden` (guide row, section header close, popup Settings) collapse to two ephemeral controls (guide row opens, panel close/scrim/Esc/navigation closes) coordinating by CustomEvent; the popup loses its Room Home toggle and its `homeSectionHidden` storage seam.
-- The panel blocks the page while open. This is a real behavior change from the embedded band (which was non-blocking) and is the deliberate price of a focused, floating surface opened on demand.
-- Unpaired users still get a compact Create / Join prompt inside the panel — a second entry point to Room setup beyond the popup; both must stay behaviorally consistent (reuse the same `YTB` / `YTBRoomCode` calls).
-- The Feed is still derived entirely on the client from the existing Room read plus Playlist Events, so this surface adds **no** new read fan-out or per-recipient storage.
+- The Room Home Panel becomes the only surface that changes identity, Room membership, Buddy Colors, or Settings.
+- The Extension Popup can shrink to read-only status and navigation without duplicating management behavior.
+- The old sidebar Control Panel Launcher and its hidden relay frame are removed. The Room Home Toggle row performs one job again.
+- The panel keeps its current portrait geometry and blocking scrim. The Settings view scrolls inside that shell instead of adding accordions or nested pages.
+- All moved controls must preserve live storage propagation and the existing Room, Sharing, and Connection Lost semantics.
+- Every Settings flow now renders on live YouTube and must pass the repository's live UI verification gate.
