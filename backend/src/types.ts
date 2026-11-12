@@ -21,6 +21,7 @@ export interface NoteBody {
 	name: string;
 	videoId: string;
 	videoTitle?: string;
+	videoChannel?: string;
 	timestamp: number;
 	kind: 'text' | 'emoji';
 	body: string;

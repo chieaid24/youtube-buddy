@@ -132,13 +132,14 @@
 
 		// Video Hover Card plan for a Feed link: null without a videoId (nothing to
 		// preview). mqdefault exists for every video, unlike maxresdefault.
-		videoHoverCard(videoId, title) {
+		videoHoverCard(videoId, title, channel) {
 			const id = typeof videoId === 'string' ? videoId.trim() : '';
 			if (id === '') return null;
 			const trimmed = typeof title === 'string' ? title.trim() : '';
 			return {
 				thumbnail: 'https://i.ytimg.com/vi/' + encodeURIComponent(id) + '/mqdefault.jpg',
 				label: trimmed === '' ? 'a video' : trimmed,
+				detail: typeof channel === 'string' ? channel.trim() : '',
 			};
 		},
 

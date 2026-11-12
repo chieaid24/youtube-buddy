@@ -1062,16 +1062,21 @@ describe('Mentions', () => {
 describe('Note videoTitle', () => {
 	it('round-trips a trimmed videoTitle through POST /notes, GET /, and GET /conversation', async () => {
 		const code = 'title-roundtrip';
-		const res = await postNote(code, noteBody({ videoTitle: '  Never Gonna Give You Up  ' }));
+		const res = await postNote(code, noteBody({ videoTitle: '  Never Gonna Give You Up  ', videoChannel: '  Rick Astley  ' }));
 		expect(res.status).toBe(200);
-		const { note } = (await res.json()) as { note: { id: string; videoTitle: string } };
+		const { note } = (await res.json()) as { note: { id: string; videoTitle: string; videoChannel: string } };
 		expect(note.videoTitle).toBe('Never Gonna Give You Up');
+		expect(note.videoChannel).toBe('Rick Astley');
 
-		const room = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as { notes: { videoTitle?: string }[] };
+		const room = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
+			notes: { videoTitle?: string; videoChannel?: string }[];
+		};
 		expect(room.notes[0].videoTitle).toBe('Never Gonna Give You Up');
+		expect(room.notes[0].videoChannel).toBe('Rick Astley');
 
-		const conversation = (await (await getConversation(code, note.id)).json()) as { note: { videoTitle?: string } };
+		const conversation = (await (await getConversation(code, note.id)).json()) as { note: { videoTitle?: string; videoChannel?: string } };
 		expect(conversation.note.videoTitle).toBe('Never Gonna Give You Up');
+		expect(conversation.note.videoChannel).toBe('Rick Astley');
 	});
 
 	it('accepts a title of exactly 200 characters', async () => {
@@ -1104,7 +1109,8 @@ describe('Note videoTitle', () => {
 	it('captures the title at post time, so a later Note on the same video may differ', async () => {
 		const code = 'title-frozen';
 		const titleOf = async (videoTitle: string) =>
-			((await (await postNote(code, noteBody({ videoTitle }))).json()) as { note: { videoTitle?: string } }).note.videoTitle;
+			((await (await postNote(code, noteBody({ videoTitle }))).json()) as { note: { videoTitle?: string; videoChannel?: string } }).note
+				.videoTitle;
 		expect(await titleOf('Original Title')).toBe('Original Title');
 		expect(await titleOf('Renamed Title')).toBe('Renamed Title');
 	});

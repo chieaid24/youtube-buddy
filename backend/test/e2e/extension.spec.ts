@@ -3513,7 +3513,7 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 			progress: [{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-own', timestamp: 30, duration: 100, updatedAt: 4000 }],
 			playlist: [
 				{ videoId: 'vid-live', title: 'Buddy Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 1000 },
-				{ videoId: 'vid-own', title: 'My Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
+				{ videoId: 'vid-own', title: 'My Pick', channel: 'My Channel', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
 				{ videoId: 'vid-re', title: 'Re Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 5000 },
 			],
 			events: [
@@ -3598,6 +3598,8 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await watch.locator('a.ytb-hs-title-link').hover();
 		await expect(card).toBeVisible();
 		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
+		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('My Channel');
+		await expect(card).toHaveCSS('width', '170px');
 		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
 		// The card follows the cursor, so it must never eat the hover under it.
 		await expect(card).toHaveCSS('pointer-events', 'none');
@@ -3981,6 +3983,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 						name: 'Viewer',
 						videoId: 'parent-video',
 						videoTitle: 'Rick Astley - Never Gonna Give You Up',
+						videoChannel: 'Rick Astley',
 						timestamp: 4,
 						kind: 'text',
 						body: 'my moment',
@@ -4043,6 +4046,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 		await bodyLink.hover();
 		await expect(hoverCard.locator('.ytb-hs-hovercard-label')).toHaveText('Rick Astley - Never Gonna Give You Up');
 		await expect(hoverCard).toBeVisible();
+		await expect(hoverCard.locator('.ytb-hs-hovercard-detail')).toHaveText('Rick Astley');
 
 		// A Mention without a title keeps its emphasis and fallback video link.
 		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'hey @Viewer' });

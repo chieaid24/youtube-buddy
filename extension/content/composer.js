@@ -325,6 +325,7 @@
 				videoId: currentVideoId,
 				// Frozen at post time so a Buddy's Room Feed can name the video (best-effort).
 				videoTitle: YTB.watchTitle(document),
+				videoChannel: YTB.watchChannel(document),
 				timestamp,
 				kind,
 				body,
