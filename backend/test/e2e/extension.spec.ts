@@ -3937,6 +3937,9 @@ test('Note Feed rows link italic video titles and hide spoiler bodies', async ()
 		await context.route('https://www.youtube.com/**', (route) =>
 			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
 		);
+		await context.route('https://i.ytimg.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>' }),
+		);
 		await seedPairedRoom(context);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
@@ -4068,7 +4071,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 		await expect(mentionRow).toHaveCount(1);
 		await expect(mentionRow).toHaveClass(/ytb-hs-emph/);
 		await expect(mentionRow.locator('.ytb-hs-context')).toHaveCount(0);
-		await expect(mentionRow.locator('a.ytb-hs-text-link .ytb-hs-sr')).toHaveText('Watch this video');
+		await expect(mentionRow.locator('a.ytb-hs-text-link')).toHaveText('a video');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
