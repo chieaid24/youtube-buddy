@@ -21,7 +21,7 @@
 	let currentVideoId = null;
 	// videoId -> addedBy clientId, from ok ytb:room-data reads; a failed read never rewrites it -- emptiness is not truth.
 	let recommenderByVideoId = new Map();
-	// videoId -> { intent: 'mine'|'absent', title }: not-yet-confirmed Recommend Intents, overlaid on every Room read so a racing read can't flip the pill back.
+	// videoId -> { intent: 'mine'|'absent', title, channel }: not-yet-confirmed Recommend Intents, overlaid on every Room read so a racing read can't flip the pill back.
 	const recommendIntents = new Map();
 	// videoId -> epoch ms of the last accepted pill click (the cooldown gate).
 	let lastPillClickAt = new Map();
@@ -31,7 +31,7 @@
 	let myClientId = null;
 	let hasRoomCode = false;
 	let feedbackTimer = null;
-	let pendingKebab = null; // { videoId, title, at } of the last-clicked kebab, consumed when its menu popup opens
+	let pendingKebab = null; // { videoId, title, channel, at } of the last-clicked kebab, consumed when its menu popup opens
 	let celebration = null; // { videoId, timer, confetti } of the live Recommend Celebration, or null
 
 	injectStyle();
@@ -43,12 +43,12 @@
 		return "Couldn't add";
 	}
 
-	async function addToPlaylist(videoId, title) {
+	async function addToPlaylist(videoId, title, channel) {
 		const clientId = await YTB.ensureClientId();
 		const { name } = await YTB.getConfig();
 		if (!YTB.isContextActive()) return { ok: false, category: 'unexpected' };
 		myClientId = myClientId || clientId;
-		const result = await YTB.postPlaylistAdd({ clientId, name, videoId, title });
+		const result = await YTB.postPlaylistAdd({ clientId, name, videoId, title, channel });
 		// Re-recommending a Buddy's item is a no-op returning THEIR item; the pill must not claim it as ours.
 		if (result.ok) recommenderByVideoId.set(videoId, (result.item && result.item.addedBy) || clientId);
 		return result;
@@ -80,7 +80,11 @@
 				if (now - (lastPillClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent - no visual lockout
 				lastPillClickAt.set(videoId, now);
 				// Optimistic: flip the pill NOW, write goes out underneath (ADR-0007 un-recommend is the author-only point delete).
-				recommendIntents.set(videoId, { intent: state === 'idle' ? 'mine' : 'absent', title: YTB.watchTitle(document) });
+				recommendIntents.set(videoId, {
+					intent: state === 'idle' ? 'mine' : 'absent',
+					title: YTB.watchTitle(document),
+					channel: YTB.watchChannel(document),
+				});
 				if (state === 'idle') startCelebration(button, videoId); // only idle -> recommend celebrates (CONTEXT.md "Recommend Celebration")
 				syncWatchButton(button);
 				pumpWrites(videoId);
@@ -218,7 +222,7 @@
 		writesInFlight.add(videoId);
 		let result;
 		if (held.intent === 'mine') {
-			result = await addToPlaylist(videoId, held.title);
+			result = await addToPlaylist(videoId, held.title, held.channel);
 		} else {
 			const clientId = await YTB.ensureClientId();
 			result = YTB.isContextActive() ? await YTB.deletePlaylistItem({ clientId, videoId }) : { ok: false, category: 'unexpected' };
@@ -316,7 +320,7 @@
 				tile.querySelector('#video-title, .ytLockupMetadataViewModelTitle, .yt-lockup-metadata-view-model-wiz__title') ||
 				tile.querySelector('a[title]');
 			const title = (titleEl && (titleEl.getAttribute('title') || titleEl.textContent)) || '';
-			pendingKebab = { videoId, title: title.trim() || 'Untitled video', at: Date.now() };
+			pendingKebab = { videoId, title: title.trim() || 'Untitled video', channel: YTB.tileChannel(tile, document), at: Date.now() };
 		},
 		true,
 	);
@@ -349,7 +353,7 @@
 		const listbox = openMenuList();
 		if (!listbox) return; // menu not open (yet) - keep the capture until it expires
 
-		const { videoId, title } = pendingKebab;
+		const { videoId, title, channel } = pendingKebab;
 		pendingKebab = null;
 		// A fresh capture wins over any row left from a previously shown menu.
 		listbox.querySelector('.' + KEBAB_ITEM_CLASS)?.remove();
@@ -367,7 +371,7 @@
 
 		const activate = async () => {
 			label.textContent = 'Recommending...';
-			const result = await addToPlaylist(videoId, title);
+			const result = await addToPlaylist(videoId, title, channel);
 			label.textContent = result.ok ? 'Recommended' : errorLabel(result.category);
 			item.classList.toggle('is-network-error', !result.ok && result.category === 'network');
 			fitOpenMenu(item);

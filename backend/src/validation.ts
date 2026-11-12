@@ -75,14 +75,13 @@ export function isValidClientId(value: unknown): value is string {
 	return isValidKeySegment(value) && !RESERVED_KEY_KINDS.has(value);
 }
 
-// videoTitle is optional context, never a reason to lose a Note: a bad title is dropped (not rejected) before
-// validateNote sees it, so the Feed just shows no context fragment. A Playlist Item's title, by contrast, IS
-// the item, so validatePlaylist rejects a bad one.
-export function sanitizeVideoTitle(value: unknown): string | undefined {
+// Optional video context (a Note's videoTitle, a Playlist Item's channel) is never a reason to lose a record:
+// a bad value is dropped, not rejected. A Playlist Item's title, by contrast, IS the item, so validatePlaylist rejects a bad one.
+export function sanitizeVideoContext(value: unknown): string | undefined {
 	if (typeof value !== 'string') return undefined;
-	const title = value.trim();
-	if (title === '' || title.length > TITLE_MAX_CHARS) return undefined;
-	return title;
+	const text = value.trim();
+	if (text === '' || text.length > TITLE_MAX_CHARS) return undefined;
+	return text;
 }
 
 export function validatePlaylist(body: Partial<PlaylistBody>): string | null {

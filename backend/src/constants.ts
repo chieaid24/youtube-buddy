@@ -27,6 +27,6 @@ export const MAX_EVENTS = 50;
 export const KEY_SEGMENT_MAX_CHARS = 128;
 export const RESERVED_KEY_KINDS = new Set(['presence', 'note', 'reply', 'playlist', 'event']);
 
-// Video title captured at write time (Playlist Item at add, Note at post); YouTube titles top out ~100 chars,
-// so this only rejects abuse.
+// Video title or channel captured at write time (Playlist Item at add, Note at post); YouTube titles top out
+// ~100 chars, so this only rejects abuse.
 export const TITLE_MAX_CHARS = 200;
