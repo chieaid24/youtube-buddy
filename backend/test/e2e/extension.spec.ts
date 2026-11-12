@@ -3914,6 +3914,8 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 			const body = new URL(route.request().url()).pathname === '/watch' ? playbackFixture(mediaSrc) : homeFixture;
 			return route.fulfill({ status: 200, contentType: 'text/html', body });
 		});
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
 		const popup = await seedPairedRoom(context);
 		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
 
