@@ -4,16 +4,13 @@
 		<meta charset="utf-8" />
 		<title>YouTube Buddy</title>
 		<script src="../content/shared.js"></script>
-		<script src="../content/shared-api.js"></script>
-		<script src="../content/shared-room.js"></script>
-		<script src="../content/shared-buddies.js"></script>
 		<script src="../content/theme.js"></script>
 		<style>
 			* {
 				box-sizing: border-box;
 			}
 			body {
-				width: 320px;
+				width: 280px;
 				margin: 0;
 				padding: 16px;
 				background: var(--ytb-surface);
@@ -34,32 +31,6 @@
 				margin: 0;
 				font-size: 15px;
 				font-weight: 800;
-			}
-			.status {
-				margin: 0 0 14px;
-				padding: 12px;
-				border: 1px solid var(--ytb-line);
-				border-radius: var(--ytb-r-lg);
-				background: var(--ytb-surface-tint);
-			}
-			.row {
-				display: flex;
-				justify-content: space-between;
-				gap: 16px;
-				padding: 3px 0;
-			}
-			dt {
-				color: var(--ytb-ink-muted);
-			}
-			dd {
-				margin: 0;
-				font-weight: 700;
-				text-align: right;
-			}
-			.connection {
-				margin: 8px 0 0;
-				color: var(--ytb-ink-muted);
-				font-size: 11px;
 			}
 			#your-room {
 				width: 100%;
@@ -82,8 +53,10 @@
 				opacity: 0.6;
 				cursor: default;
 			}
+			.feedback:empty {
+				display: none;
+			}
 			.feedback {
-				min-height: 16px;
 				margin: 6px 0 0;
 				color: var(--ytb-danger-text);
 				font-size: 11px;
@@ -93,30 +66,10 @@
 	<body>
 		<header class="brand">
 			<img class="brand-mark" src="../icons/youtube-buddy.svg" alt="" />
-			<h1>YouTube Buddy</h1>
+			<h1>Youtube Buddy</h1>
 		</header>
-		<dl class="status" aria-label="Room status">
-			<div class="row">
-				<dt>Room</dt>
-				<dd id="room-state">Loading...</dd>
-			</div>
-			<div class="row">
-				<dt>Room Code</dt>
-				<dd id="room-code">Loading...</dd>
-			</div>
-			<div class="row">
-				<dt>Buddies</dt>
-				<dd id="buddy-count">0</dd>
-			</div>
-			<div class="row">
-				<dt>Sharing</dt>
-				<dd id="sharing-state">On</dd>
-			</div>
-			<p id="connection-state" class="connection" role="status" hidden>Can't reach the backend - retrying...</p>
-		</dl>
-		<button id="your-room" type="button">Your Room</button>
+		<button id="your-room" type="button">Check out your room!</button>
 		<p id="launch-feedback" class="feedback" role="status"></p>
-		<script src="../content/room-code.js"></script>
 		<script src="popup.js"></script>
 	</body>
 </html>

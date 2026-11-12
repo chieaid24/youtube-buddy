@@ -101,7 +101,7 @@
 		// Post a text Note or curated-emoji Reaction. Requires a Room Code;
 		// Sharing does NOT gate Note writes (CONTEXT.md). videoTitle is captured
 		// at post time (watchTitle) and never required.
-		async postNote({ clientId, name, videoId, videoTitle, timestamp, kind, body, spoiler, mentions }) {
+		async postNote({ clientId, name, videoId, videoTitle, videoChannel, timestamp, kind, body, spoiler, mentions }) {
 			const { code } = await YTB.getConfig();
 			if (!code) return { ok: false, category: 'unpaired' };
 			return YTB._postJson('/notes?code=' + encodeURIComponent(code), {
@@ -113,6 +113,7 @@
 				body,
 				spoiler,
 				...(typeof videoTitle === 'string' && videoTitle !== '' ? { videoTitle } : {}),
+				...(typeof videoChannel === 'string' && videoChannel !== '' ? { videoChannel } : {}),
 				// Mentions are roster Client IDs (ADR-0006); omitted entirely when empty.
 				...(Array.isArray(mentions) && mentions.length > 0 ? { mentions } : {}),
 			});
@@ -134,7 +135,7 @@
 
 		// Recommend a video to the Room (ADR-0007; API keeps the playlist name).
 		// NOT gated by Sharing; re-adding is a server no-op returning the item.
-		async postPlaylistAdd({ clientId, name, videoId, title }) {
+		async postPlaylistAdd({ clientId, name, videoId, title, channel }) {
 			const { code } = await YTB.getConfig();
 			if (!code) return { ok: false, category: 'unpaired' };
 			return YTB._postJson('/playlist?code=' + encodeURIComponent(code), {
@@ -142,6 +143,7 @@
 				name,
 				videoId,
 				title,
+				...(channel ? { channel } : {}),
 			});
 		},
 
@@ -186,7 +188,7 @@
 
 		// Announce "I'm here" under `code`, independent of watching/Sharing;
 		// idempotent upsert doubling as a keep-alive.
-		async assertPresence(code) {
+		async assertPresence(code, joining = false) {
 			if (!code) return false; // Unpaired - nobody to appear to.
 			const { name } = await YTB.getConfig();
 			const clientId = await YTB.ensureClientId();
@@ -195,7 +197,7 @@
 				const res = await fetch(YTB.BACKEND_URL + '/presence?code=' + encodeURIComponent(code), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ clientId, name }),
+					body: JSON.stringify({ clientId, name, joining }),
 				});
 				return res.ok ? { ok: true } : false;
 			} catch {

@@ -1,11 +1,19 @@
 import { MAX_PLAYLIST_ITEMS, MAX_REPLIES, TTL_SECONDS } from './constants';
 import { corsHeaders, fail, json } from './http';
-import { deleteKeysWithPrefix, deleteMember, findNoteKey, listReplies, recordPlaylistEvent, roomHasCapacityFor } from './storage';
+import {
+	deleteKeysWithPrefix,
+	deleteMember,
+	findNoteKey,
+	listReplies,
+	recordPlaylistEvent,
+	recordRoomEvent,
+	roomHasCapacityFor,
+} from './storage';
 import type { Env, LogContext, NoteBody, PlaylistBody, PresenceBody, ProgressBody, ReplyBody } from './types';
 import {
 	isValidClientId,
 	isValidKeySegment,
-	sanitizeVideoTitle,
+	sanitizeVideoContext,
 	validate,
 	validateNote,
 	validatePlaylist,
@@ -70,6 +78,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			updatedAt: Date.now(),
 		};
 		await env.PROGRESS.put(`${prefix}presence:${body.clientId}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
+		if (body.joining === true) {
+			await recordRoomEvent(env, prefix, { type: 'joined', actorClientId: record.clientId, actorName: record.name });
+		}
 		return json({ ok: true });
 	}
 
@@ -113,13 +124,14 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		}
 
 		// Server-minted id names one recommendation instance (ADR-0007): stable while live, freshly minted after
-		// an un-recommend + re-add, so a Dismiss resurfaces on re-recommend. addedAt is server-authoritative; name optional (-> "").
+		// an un-recommend + re-add, so a Dismiss resurfaces on re-recommend. addedAt is server-authoritative; name and channel optional (-> "").
 		const item = {
 			id: crypto.randomUUID(),
 			videoId: body.videoId,
 			title: body.title,
 			addedBy: body.clientId,
 			addedByName: typeof body.name === 'string' ? body.name : '',
+			channel: sanitizeVideoContext(body.channel) ?? '',
 			addedAt: Date.now(),
 		};
 		await env.PROGRESS.put(key, JSON.stringify(item), { expirationTtl: TTL_SECONDS });
@@ -160,7 +172,8 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		}
 
 		const id = crypto.randomUUID();
-		const videoTitle = sanitizeVideoTitle(body.videoTitle);
+		const videoTitle = sanitizeVideoContext(body.videoTitle);
+		const videoChannel = sanitizeVideoContext(body.videoChannel);
 		const record = {
 			id,
 			clientId: body.clientId,
@@ -168,6 +181,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			videoId: body.videoId,
 			// Frozen at post time (like a Playlist Event's, see recordPlaylistEvent); absent means no title given.
 			...(videoTitle !== undefined ? { videoTitle } : {}),
+			...(videoChannel !== undefined ? { videoChannel } : {}),
 			timestamp: body.timestamp,
 			kind: body.kind,
 			body: body.body,

@@ -13,6 +13,7 @@ export interface ProgressBody {
 export interface PresenceBody {
 	clientId: string;
 	name: string;
+	joining?: boolean;
 }
 
 export interface NoteBody {
@@ -20,6 +21,7 @@ export interface NoteBody {
 	name: string;
 	videoId: string;
 	videoTitle?: string;
+	videoChannel?: string;
 	timestamp: number;
 	kind: 'text' | 'emoji';
 	body: string;
@@ -40,6 +42,7 @@ export interface PlaylistBody {
 	name: string;
 	videoId: string;
 	title: string;
+	channel?: string;
 }
 
 // Stable machine-readable error categories; the extension branches on these, never on error's prose.

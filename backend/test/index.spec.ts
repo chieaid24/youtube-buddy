@@ -201,6 +201,20 @@ describe('Room cap (POST)', () => {
 });
 
 describe('POST /presence?code=', () => {
+	it('records joins once per membership and frees slots despite join history', async () => {
+		const code = 'join-history';
+		await postPresence(code, { clientId: 'sigma', name: 'Sigma' });
+		expect(await listEvents(code)).toEqual([]);
+		await postPresence(code, { clientId: 'sigma', name: 'Sigma', joining: true });
+		await postPresence(code, { clientId: 'sigma', name: 'New name' });
+		expect(await listEvents(code)).toMatchObject([{ type: 'joined', actorClientId: 'sigma', actorName: 'Sigma' }]);
+		await deleteMember(code, 'sigma');
+		for (const clientId of ['a', 'b', 'c', 'd', 'e']) expect((await postPresence(code, { clientId })).status).toBe(200);
+		await deleteMember(code, 'e');
+		expect((await postPresence(code, { clientId: 'sigma', name: 'Sigma', joining: true })).status).toBe(200);
+		expect((await listEvents(code)).filter((event) => event.actorClientId === 'sigma')).toHaveLength(2);
+	});
+
 	it('stores a Presence Record with a server-set updatedAt', async () => {
 		const code = 'presence-stores';
 		const before = Date.now();
@@ -809,6 +823,18 @@ describe('POST /playlist?code=', () => {
 		expect(events[0]).toMatchObject({ type: 'added', videoId: 'abc123', title: 'A Great Video', actorClientId: 'a1b2c3d4' });
 	});
 
+	it('stores the channel trimmed, and drops a missing or invalid one to "" rather than rejecting', async () => {
+		const stored = async (code: string, channel: unknown) => {
+			expect((await postPlaylist(code, playlistBody({ channel }))).status).toBe(200);
+			return JSON.parse((await env.PROGRESS.get(`${code}:playlist:abc123`))!).channel;
+		};
+		expect(await stored('playlist-channel', '  Lofi Girl  ')).toBe('Lofi Girl');
+		expect(await stored('playlist-channel-missing', undefined)).toBe('');
+		expect(await stored('playlist-channel-blank', '   ')).toBe('');
+		expect(await stored('playlist-channel-type', 42)).toBe('');
+		expect(await stored('playlist-channel-long', 'x'.repeat(201))).toBe('');
+	});
+
 	it('re-adding an existing videoId is a no-op: no duplicate, no new Event, same id', async () => {
 		const code = 'playlist-dedup';
 		const first = ((await (await postPlaylist(code, playlistBody())).json()) as { item: { id: string } }).item;
@@ -1036,16 +1062,21 @@ describe('Mentions', () => {
 describe('Note videoTitle', () => {
 	it('round-trips a trimmed videoTitle through POST /notes, GET /, and GET /conversation', async () => {
 		const code = 'title-roundtrip';
-		const res = await postNote(code, noteBody({ videoTitle: '  Never Gonna Give You Up  ' }));
+		const res = await postNote(code, noteBody({ videoTitle: '  Never Gonna Give You Up  ', videoChannel: '  Rick Astley  ' }));
 		expect(res.status).toBe(200);
-		const { note } = (await res.json()) as { note: { id: string; videoTitle: string } };
+		const { note } = (await res.json()) as { note: { id: string; videoTitle: string; videoChannel: string } };
 		expect(note.videoTitle).toBe('Never Gonna Give You Up');
+		expect(note.videoChannel).toBe('Rick Astley');
 
-		const room = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as { notes: { videoTitle?: string }[] };
+		const room = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
+			notes: { videoTitle?: string; videoChannel?: string }[];
+		};
 		expect(room.notes[0].videoTitle).toBe('Never Gonna Give You Up');
+		expect(room.notes[0].videoChannel).toBe('Rick Astley');
 
-		const conversation = (await (await getConversation(code, note.id)).json()) as { note: { videoTitle?: string } };
+		const conversation = (await (await getConversation(code, note.id)).json()) as { note: { videoTitle?: string; videoChannel?: string } };
 		expect(conversation.note.videoTitle).toBe('Never Gonna Give You Up');
+		expect(conversation.note.videoChannel).toBe('Rick Astley');
 	});
 
 	it('accepts a title of exactly 200 characters', async () => {
@@ -1078,7 +1109,8 @@ describe('Note videoTitle', () => {
 	it('captures the title at post time, so a later Note on the same video may differ', async () => {
 		const code = 'title-frozen';
 		const titleOf = async (videoTitle: string) =>
-			((await (await postNote(code, noteBody({ videoTitle }))).json()) as { note: { videoTitle?: string } }).note.videoTitle;
+			((await (await postNote(code, noteBody({ videoTitle }))).json()) as { note: { videoTitle?: string; videoChannel?: string } }).note
+				.videoTitle;
 		expect(await titleOf('Original Title')).toBe('Original Title');
 		expect(await titleOf('Renamed Title')).toBe('Renamed Title');
 	});

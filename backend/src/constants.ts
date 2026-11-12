@@ -18,8 +18,7 @@ export const MAX_REPLIES = 10;
 // (best-effort, no KV transactions).
 export const MAX_PLAYLIST_ITEMS = 30;
 
-// Playlist Events (the log behind System Messages) keep only the newest ~50, pruned best-effort on each write;
-// they share TTL_SECONDS.
+// Room events share TTL_SECONDS and retain the newest 50, pruned on each write.
 export const MAX_EVENTS = 50;
 
 // Every caller-controlled value in a colon-delimited KV key must be one bounded segment; Client IDs also can't
@@ -27,6 +26,6 @@ export const MAX_EVENTS = 50;
 export const KEY_SEGMENT_MAX_CHARS = 128;
 export const RESERVED_KEY_KINDS = new Set(['presence', 'note', 'reply', 'playlist', 'event']);
 
-// Video title captured at write time (Playlist Item at add, Note at post); YouTube titles top out ~100 chars,
-// so this only rejects abuse.
+// Video title or channel captured at write time (Playlist Item at add, Note at post); YouTube titles top out
+// ~100 chars, so this only rejects abuse.
 export const TITLE_MAX_CHARS = 200;

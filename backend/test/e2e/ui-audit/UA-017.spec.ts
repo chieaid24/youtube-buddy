@@ -1,14 +1,15 @@
 // UA-017: the Room Home Section's spacing, radii, and type sit on the token
-// scales (4/8/12/16/20/24, radii 8/12/16/999, type 11/13/15/16). Red while
-// the injected stylesheet hardcodes 10, 6, 5, 3, 1px spacing, 10px radii,
-// and 10px/12px type. The Connection Lost line's negative positioning shim
-// is placement, not rhythm, and is not asserted.
+// scales (4/8/12/16/20/24, radii 8/12/16/999, type 11/13/15/16, Feed
+// timestamps 10). The Connection Lost line's negative positioning shim is
+// placement, not rhythm, and is not asserted.
 import { expect, test } from '@playwright/test';
 import { launchExtension, makeData, nudgeUntil, openHomePanel, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
 
 const SCALE = new Set([0, 4, 8, 12, 16, 20, 24]);
 const RADII = new Set([8, 12, 16, 999]);
 const SIZES = new Set([11, 13, 15, 16]);
+// Feed clock times use DESIGN.md's --t-stamp (10px).
+const STAMP_SIZES = new Set([10]);
 
 const SPACING: [string, string[]][] = [
 	['#ytb-home-section', ['padding-top', 'padding-right', 'padding-bottom', 'padding-left']],
@@ -61,7 +62,7 @@ test('UA-017: home-section values sit on the token scales', async () => {
 		);
 		expect(rows.length).toBeGreaterThanOrEqual(18);
 		for (const { key, value, kind } of rows) {
-			const set = kind === 'space' ? SCALE : kind === 'radius' ? RADII : SIZES;
+			const set = kind === 'space' ? SCALE : kind === 'radius' ? RADII : key.startsWith('.ytb-hs-when') ? STAMP_SIZES : SIZES;
 			expect.soft(set.has(Math.round(value)), `${key}: ${value}px`).toBe(true);
 		}
 	} finally {

@@ -53,7 +53,9 @@
 			for (const n of (records && records.notes) || []) consider(n.clientId, n.name, n.createdAt);
 			for (const reply of (records && records.replies) || []) consider(reply.clientId, reply.name, reply.createdAt);
 			for (const item of (records && records.playlist) || []) consider(item.addedBy, item.addedByName, item.addedAt);
-			for (const event of (records && records.events) || []) consider(event.actorClientId, undefined, event.at);
+			for (const event of (records && records.events) || []) {
+				if (event.type !== 'joined') consider(event.actorClientId, undefined, event.at);
+			}
 			return [...byId.values()].sort((a, b) => b.at - a.at).map(({ clientId, name }) => ({ clientId, name }));
 		},
 
@@ -98,6 +100,23 @@
 			return text || doc.title.replace(/ - YouTube$/, '').trim();
 		},
 
+		// The watch page's channel name, or '' when YouTube hasn't rendered it.
+		watchChannel(doc) {
+			const link = doc.querySelector('ytd-watch-metadata ytd-channel-name a');
+			return link && link.textContent ? link.textContent.trim() : '';
+		},
+
+		// A feed tile's channel name, or ''. Lockup tiles list the channel as the first of two or more
+		// metadata rows; on a channel page they show only one row (views), so the page header names it.
+		tileChannel(tile, doc) {
+			const classic = tile.querySelector('ytd-channel-name a');
+			if (classic && classic.textContent.trim()) return classic.textContent.trim();
+			const rows = tile.querySelectorAll('.ytContentMetadataViewModelMetadataRow, .yt-content-metadata-view-model__metadata-row');
+			if (rows.length >= 2) return rows[0].textContent.trim();
+			const header = /^\/(@|channel\/|c\/|user\/)/.test(doc.location.pathname) && doc.querySelector('yt-page-header-renderer h1');
+			return header && header.textContent ? header.textContent.trim() : '';
+		},
+
 		// Plain video context for a Reply; omitted without a captured title.
 		videoContext(note) {
 			const title = note && typeof note.videoTitle === 'string' ? note.videoTitle.trim() : '';
@@ -113,14 +132,23 @@
 
 		// Video Hover Card plan for a Feed link: null without a videoId (nothing to
 		// preview). mqdefault exists for every video, unlike maxresdefault.
-		videoHoverCard(videoId, title) {
+		videoHoverCard(videoId, title, channel) {
 			const id = typeof videoId === 'string' ? videoId.trim() : '';
 			if (id === '') return null;
 			const trimmed = typeof title === 'string' ? title.trim() : '';
 			return {
 				thumbnail: 'https://i.ytimg.com/vi/' + encodeURIComponent(id) + '/mqdefault.jpg',
 				label: trimmed === '' ? 'a video' : trimmed,
+				detail: typeof channel === 'string' ? channel.trim() : '',
 			};
+		},
+
+		// Text-only Video Hover Card plan for a Recommended for you card: the card already shows the
+		// thumbnail, so the hover adds the untruncated title and the channel (omitted when not captured).
+		recommendationHoverCard(item) {
+			const title = item && typeof item.title === 'string' ? item.title.trim() : '';
+			const channel = item && typeof item.channel === 'string' ? item.channel.trim() : '';
+			return { thumbnail: null, label: title === '' ? 'a video' : title, detail: channel };
 		},
 
 		// Where the cursor-following Video Hover Card sits: below-right of the point,
@@ -142,12 +170,24 @@
 			};
 		},
 
-		// Render plan for one recommend System Message row; home-section.js
+		// Render plan for one System Message row; home-section.js
 		// executes it. A struck line (`removed`) has NO link - the sole exception
 		// to the Feed's link rule - and carries a tooltip + visually-hidden
 		// suffix, since a line-through alone conveys nothing to a screen reader.
 		systemLine(item, roster) {
 			const event = (item && item.event) || {};
+			if (event.type === 'joined') {
+				return {
+					struck: false,
+					prefix: YTB.buddyName(event.actorClientId, event.actorName) + ' joined the room',
+					label: '',
+					suffix: '',
+					linkVideoId: null,
+					linkTooltip: null,
+					rowTooltip: null,
+					srSuffix: null,
+				};
+			}
 			const struck = Boolean(item && item.removed);
 			const linked = !struck && Boolean(event.videoId);
 			return {
@@ -406,7 +446,7 @@
 				if (YTB.noteAddressesMe(note, myClientId)) items.push({ type: 'mention', at, note });
 				else items.push({ type: 'note', at, note, own: note.clientId === myClientId });
 			}
-			// Only `added` events count (un-recommends emit none). `removed`
+			// Recommendation removal is per event; un-recommends emit none. `removed`
 			// (ADR-0007) is per-event: a newer `added` for the same videoId
 			// supersedes it, and a dead videoId strikes it - so a re-recommend
 			// revives only its own fresh line.
@@ -421,7 +461,18 @@
 				if (at > (newestAddedAt.get(event.videoId) ?? -Infinity)) newestAddedAt.set(event.videoId, at);
 			}
 			for (const event of events) {
-				if (!event || event.type !== 'added') continue;
+				if (!event) continue;
+				if (event.type === 'joined') {
+					items.push({
+						type: 'system',
+						at: Number(event.at) || 0,
+						event,
+						own: event.actorClientId === myClientId,
+						removed: false,
+					});
+					continue;
+				}
+				if (event.type !== 'added') continue;
 				const at = Number(event.at) || 0;
 				items.push({
 					type: 'system',

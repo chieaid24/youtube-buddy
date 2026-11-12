@@ -143,9 +143,6 @@ async function seedPairedRoom(context: BrowserContext) {
 	const extensionId = await (await extensionItem(extensions)).getAttribute('id');
 	const popup = await context.newPage();
 	await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-	// popup.js mints a clientId on open (read-then-write); wait for that write
-	// to land or it would clobber the seeded clientId in a losing race.
-	await popup.waitForFunction(async () => (await chrome.storage.local.get('clientId')).clientId);
 	await popup.evaluate(() => chrome.storage.local.set({ code: 'roome2e', clientId: 'viewer-e2e', name: 'Viewer', sharing: false }));
 	return popup;
 }
@@ -1220,14 +1217,6 @@ test('opens the extension popup without runtime errors', async () => {
 
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-		await expect(popup.locator('h1')).toContainText('YouTube Buddy');
-		await expect(popup.locator('.brand-mark')).toBeVisible();
-		expect(
-			await popup.locator('.brand-mark').evaluate((image: HTMLImageElement) => ({
-				width: image.naturalWidth,
-				height: image.naturalHeight,
-			})),
-		).toEqual({ width: 128, height: 128 });
 		expect(
 			await popup.evaluate(() => {
 				const manifest = chrome.runtime.getManifest();
@@ -1247,12 +1236,10 @@ test('opens the extension popup without runtime errors', async () => {
 				128: 'icons/icon-128.png',
 			},
 		});
-		await expect(popup.locator('#room-state')).toHaveText('Unpaired');
-		await expect(popup.locator('#room-code')).toHaveText('Not paired');
-		await expect(popup.locator('#buddy-count')).toHaveText('0');
-		await expect(popup.locator('#sharing-state')).toHaveText('On');
+		await expect(popup.getByRole('heading', { name: 'Youtube Buddy' })).toBeVisible();
+		await expect(popup.locator('.brand-mark')).toBeVisible();
 		await expect(popup.locator('button')).toHaveCount(1);
-		await expect(popup.locator('#your-room')).toHaveText('Your Room');
+		await expect(popup.locator('#your-room')).toHaveText('Check out your room!');
 		await expect(popup.locator('input, [role="switch"], [data-theme-choice], #leave-room')).toHaveCount(0);
 		await popup.waitForTimeout(250);
 		await extensions.reload();
@@ -1285,12 +1272,30 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+		const observeClose = () =>
+			popup.evaluate(() => {
+				(window as any).closedByLauncher = false;
+				window.close = () => {
+					(window as any).closedByLauncher = true;
+				};
+			});
+		const expectDismissed = async () => {
+			await expect.poll(() => popup.evaluate(() => (window as any).closedByLauncher)).toBe(true);
+		};
+		await observeClose();
 
 		const home = await context.newPage();
 		await home.goto('https://www.youtube.com/');
 		await home.bringToFront();
 		const pagesBeforeReuse = context.pages().length;
 		await popup.evaluate(() => (window as any).openYourRoom());
+		await expectDismissed();
+		await expect(home.locator('#ytb-home-section')).toHaveCount(1);
+		expect(context.pages()).toHaveLength(pagesBeforeReuse);
+		await popup.reload();
+		await observeClose();
+		await popup.evaluate(() => (window as any).openYourRoom());
+		await expectDismissed();
 		await expect(home.locator('#ytb-home-section')).toHaveCount(1);
 		expect(context.pages()).toHaveLength(pagesBeforeReuse);
 		await home.locator('.ytb-hs-close').click();
@@ -1299,14 +1304,19 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 		await preserved.goto('https://www.youtube.com/watch?v=keep-playing');
 		await preserved.bringToFront();
 		await popup.reload();
+		await observeClose();
 		delayNextHome = true;
 		const beforeNew = new Set(context.pages());
 		await popup.evaluate(() => (window as any).openYourRoom());
+		await expectDismissed();
 		await expect.poll(() => context.pages().filter((page) => !beforeNew.has(page)).length).toBe(1);
 		const launched = context.pages().find((page) => !beforeNew.has(page));
 		expect(launched).toBeDefined();
 		await expect(launched!.locator('#ytb-home-section')).toHaveCount(1);
 		await expect.poll(() => launched!.url()).toBe('https://www.youtube.com/');
+		expect(await popup.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].url)).toBe(
+			'https://www.youtube.com/',
+		);
 		expect(preserved.url()).toBe('https://www.youtube.com/watch?v=keep-playing');
 
 		await launched!.locator('.ytb-hs-close').click();
@@ -1317,11 +1327,13 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 
 		for (const target of ['https://www.youtube.com/results?search_query=buddy', 'https://example.com/']) {
 			await popup.reload();
+			await observeClose();
 			const active = await context.newPage();
 			await active.goto(target);
 			await active.bringToFront();
 			const prior = new Set(context.pages());
 			await popup.evaluate(() => (window as any).openYourRoom());
+			await expectDismissed();
 			await expect.poll(() => context.pages().filter((page) => !prior.has(page)).length).toBe(1);
 			const next = context.pages().find((page) => !prior.has(page));
 			await expect(next!.locator('#ytb-home-section')).toHaveCount(1);
@@ -1490,58 +1502,6 @@ test('Room full opens Settings without moving focus or scrolling', async () => {
 		expect(await panel.locator('.ytb-hs-settings').evaluate((element) => element.scrollTop)).toBe(0);
 		await expect(panel.locator('[autofocus], .is-highlighted')).toHaveCount(0);
 		await runtime.close();
-		expect(errors, errors.join('\n')).toEqual([]);
-	} finally {
-		await context.close();
-	}
-});
-
-test('popup retains its status through Connection Lost and recovers on the next successful read', async () => {
-	const context = await launchExtension();
-	const errors = collectErrors(context);
-	let backendUp = true;
-
-	try {
-		await context.route('http://localhost:8787/**', (route) => {
-			if (route.request().method() !== 'GET') {
-				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
-			}
-			if (!backendUp) return route.abort('connectionrefused');
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					progress: [],
-					presence: [{ clientId: 'buddy-1', name: 'Bob', updatedAt: Date.now() }],
-					notes: [],
-					replies: [],
-					playlist: [],
-					events: [],
-				}),
-			});
-		});
-
-		const popup = await seedPairedRoom(context);
-		await popup.reload();
-		await expect(popup.locator('#room-state')).toHaveText('In room');
-		await expect(popup.locator('#buddy-count')).toHaveText('1');
-
-		backendUp = false;
-		await popup.evaluate(() => (window as any).refreshStatus());
-		await expect(popup.locator('#connection-state')).toBeHidden();
-		await expect(popup.locator('#room-state')).toHaveText('In room');
-		await popup.evaluate(() => (window as any).refreshStatus());
-		await expect(popup.locator('#connection-state')).toBeVisible();
-		await expect(popup.locator('#connection-state')).toHaveText("Can't reach the backend - retrying...");
-		await expect(popup.locator('#buddy-count')).toHaveText('1');
-		expect(errors).toHaveLength(2);
-		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
-		errors.length = 0;
-
-		backendUp = true;
-		await popup.evaluate(() => (window as any).refreshStatus());
-		await expect(popup.locator('#room-state')).toHaveText('In room');
-		await expect(popup.locator('#connection-state')).toBeHidden();
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
@@ -3464,7 +3424,15 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 			{
 				playlist: [
 					{ id: 'rec-own', videoId: 'vid-own', title: 'My Own Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 1000 },
-					{ id: 'rec-keep', videoId: 'vid-keep', title: 'Buddy Keeper', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 2000 },
+					{
+						id: 'rec-keep',
+						videoId: 'vid-keep',
+						title: 'Buddy Keeper',
+						channel: 'Keeper Channel',
+						addedBy: 'buddy-1',
+						addedByName: 'Buddy',
+						addedAt: 2000,
+					},
 					{ id: 'rec-dismiss', videoId: 'vid-dismiss', title: 'Buddy Dismissed', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 3000 },
 				],
 			},
@@ -3491,6 +3459,21 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		await expect(section).toContainText('Recommended for you');
 		await expect(section).not.toContainText('Shared Playlist');
 		await expect(section).not.toContainText('My Own Pick');
+
+		// Hovering a card shows the text-only Video Hover Card: full title + channel, no second thumbnail.
+		const hover = page.locator('#ytb-home-overlay .ytb-hs-hovercard');
+		await cards.filter({ hasText: 'Buddy Keeper' }).locator('.ytb-hs-thumb').hover();
+		await expect(hover).toBeVisible();
+		await expect(hover.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Keeper');
+		await expect(hover.locator('.ytb-hs-hovercard-detail')).toHaveText('Keeper Channel');
+		await expect(hover.locator('.ytb-hs-hovercard-thumb')).toBeHidden();
+		await expect(cards.filter({ hasText: 'Buddy Keeper' }).locator('.ytb-hs-thumb')).not.toHaveAttribute('title');
+		// No captured channel: the title stands alone.
+		await cards.filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-card-title').hover();
+		await expect(hover.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Dismissed');
+		await expect(hover.locator('.ytb-hs-hovercard-detail')).toBeHidden();
+		await section.locator('.ytb-hs-col-head').first().hover();
+		await expect(hover).toBeHidden();
 
 		// Dismiss hides the card for this viewer immediately...
 		await section.locator('.ytb-hs-card').filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-remove').click();
@@ -3536,7 +3519,7 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 			progress: [{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-own', timestamp: 30, duration: 100, updatedAt: 4000 }],
 			playlist: [
 				{ videoId: 'vid-live', title: 'Buddy Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 1000 },
-				{ videoId: 'vid-own', title: 'My Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
+				{ videoId: 'vid-own', title: 'My Pick', channel: 'My Channel', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
 				{ videoId: 'vid-re', title: 'Re Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 5000 },
 			],
 			events: [
@@ -3621,6 +3604,8 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await watch.locator('a.ytb-hs-title-link').hover();
 		await expect(card).toBeVisible();
 		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
+		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('My Channel');
+		await expect(card).toHaveCSS('width', '170px');
 		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
 		// The card follows the cursor, so it must never eat the hover under it.
 		await expect(card).toHaveCSS('pointer-events', 'none');
@@ -4004,6 +3989,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 						name: 'Viewer',
 						videoId: 'parent-video',
 						videoTitle: 'Rick Astley - Never Gonna Give You Up',
+						videoChannel: 'Rick Astley',
 						timestamp: 4,
 						kind: 'text',
 						body: 'my moment',
@@ -4066,6 +4052,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 		await bodyLink.hover();
 		await expect(hoverCard.locator('.ytb-hs-hovercard-label')).toHaveText('Rick Astley - Never Gonna Give You Up');
 		await expect(hoverCard).toBeVisible();
+		await expect(hoverCard.locator('.ytb-hs-hovercard-detail')).toHaveText('Rick Astley');
 
 		// A Mention without a title keeps its emphasis and fallback video link.
 		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'hey @Viewer' });
@@ -4343,7 +4330,8 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		});
 		const popup = await seedPairedRoom(context);
 		await popup.reload();
-		await expect(popup.locator('#sharing-state')).toHaveText('Off');
+		await expect(popup.getByRole('heading', { name: 'Youtube Buddy' })).toBeVisible();
+		await expect(popup.locator('.brand-mark')).toBeVisible();
 		await expect(popup.locator('input, [role="switch"]')).toHaveCount(0);
 
 		const home = await context.newPage();
@@ -4477,6 +4465,74 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 	}
 });
 
+test('join messages use system rows without toasts or links', async () => {
+	const context = await launchExtension();
+	try {
+		await stubRoomBackend(context, {
+			events: [{ id: 'join-sigma', type: 'joined', actorClientId: 'sigma', actorName: 'Sigma', at: Date.now() }],
+		});
+		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ contentType: 'text/html', body: homeFixture }));
+		await seedPairedRoom(context);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
+		const row = page.locator('.ytb-hs-system').filter({ hasText: 'Sigma joined the room' });
+		await expect(row).toBeVisible();
+		await expect(row.locator('a')).toHaveCount(0);
+		await expect(row.locator('time')).toBeVisible();
+		await expect(page.locator('.ytb-toast')).toHaveCount(0);
+		await page.reload();
+		await openHomePanel(page);
+		await expect(row).toHaveCount(1);
+	} finally {
+		await context.close();
+	}
+});
+
+test('@live shows a shared join message on real YouTube', async ({}, testInfo) => {
+	test.skip(!process.env.YTB_JOIN_BACKEND, 'Set YTB_JOIN_BACKEND to an isolated Worker URL.');
+	test.setTimeout(90_000);
+	const context = await launchExtension();
+	const backend = process.env.YTB_JOIN_BACKEND!;
+	let code = '';
+	try {
+		await context.route('http://localhost:8787/**', async (route) => {
+			const response = await route.fetch({ url: route.request().url().replace('http://localhost:8787', backend) });
+			await route.fulfill({ response });
+		});
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ code: '', sharing: true }));
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		await page.getByRole('button', { name: 'Create a room' }).click();
+		await expect(page.locator('.ytb-hs-code-row strong')).toBeVisible();
+		code = await popup.evaluate(async () => (await chrome.storage.local.get('code')).code as string);
+		await page.getByRole('button', { name: 'Back', exact: true }).click();
+		const response = await context.request.post(`${backend}/presence?code=${code}`, {
+			data: { clientId: 'sigma', name: 'Sigma', joining: true },
+		});
+		expect(response.ok()).toBe(true);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		const row = page.locator('.ytb-hs-system').filter({ hasText: 'Sigma joined the room' });
+		await expect(page.locator('.ytb-hs-system')).toHaveCount(2);
+		await expect(page.locator('.ytb-hs-system').filter({ hasText: 'Viewer joined the room' })).toHaveCount(1);
+		await expect(row).toHaveCount(1);
+		await expect(row).toBeVisible();
+		await expect(row.locator('a')).toHaveCount(0);
+		await expect(page.locator('.ytb-toast')).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath('live-join-message.png') });
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		await expect(row).toHaveCount(1);
+	} finally {
+		await context.request.delete(`${backend}/member?code=${code}&clientId=sigma`);
+		await context.request.delete(`${backend}/member?code=${code}&clientId=viewer-e2e`);
+		await context.close();
+	}
+});
+
 test('@live manages a Room on YouTube without content-script errors', async ({}, testInfo) => {
 	test.skip(!process.env.YTB_LIVE_YOUTUBE, 'Set YTB_LIVE_YOUTUBE=1 to run the live smoke test.');
 	test.setTimeout(90_000);
@@ -4524,7 +4580,7 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 		const extensionId = await extension.getAttribute('id');
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-		await expect(popup.locator('#room-state')).not.toHaveText('Loading...');
+		await expect(popup.locator('#your-room')).toBeVisible();
 		const popupShot = testInfo.outputPath('live-popup.png');
 		await popup.locator('body').screenshot({ path: popupShot });
 		await testInfo.attach('Extension Popup', { path: popupShot, contentType: 'image/png' });

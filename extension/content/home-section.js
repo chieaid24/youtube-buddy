@@ -372,9 +372,13 @@
 	let hoverOwner = null; // the link the visible card belongs to
 	let hoverPoint = { x: 0, y: 0 };
 
-	function attachVideoHover(el, videoId, title) {
-		const plan = YTB.videoHoverCard(videoId, title);
-		if (!plan) return el;
+	function attachVideoHover(el, videoId, title, channel) {
+		const recommendation = lastDetail?.playlist?.find((item) => item.videoId === videoId);
+		const plan = YTB.videoHoverCard(videoId, title, channel || recommendation?.channel);
+		return plan ? attachHoverCard(el, plan) : el;
+	}
+
+	function attachHoverCard(el, plan) {
 		el.addEventListener('pointerenter', (event) => {
 			if (event.pointerType === 'touch') return;
 			hoverPoint = { x: event.clientX, y: event.clientY };
@@ -415,7 +419,9 @@
 		});
 		const label = document.createElement('div');
 		label.className = 'ytb-hs-hovercard-label';
-		card.append(img, label);
+		const detail = document.createElement('div');
+		detail.className = 'ytb-hs-hovercard-detail';
+		card.append(img, label, detail);
 		root.appendChild(card);
 		return card;
 	}
@@ -426,11 +432,13 @@
 		const card = ensureHoverCard();
 		if (!card) return;
 		const img = card.querySelector('.ytb-hs-hovercard-thumb');
-		if (img.getAttribute('src') !== plan.thumbnail) {
+		card.classList.toggle('ytb-hs-hovercard-text', !plan.thumbnail);
+		if (plan.thumbnail && img.getAttribute('src') !== plan.thumbnail) {
 			img.style.display = '';
 			img.src = plan.thumbnail;
 		}
 		card.querySelector('.ytb-hs-hovercard-label').textContent = plan.label;
+		card.querySelector('.ytb-hs-hovercard-detail').textContent = plan.detail || '';
 		hoverOwner = owner;
 		positionHoverCard();
 		card.classList.add('ytb-hs-hovercard-on');
@@ -507,7 +515,7 @@
 				dest.textContent = ' ' + YTB.titleLinkTooltip(target.videoTitle);
 				body.append(dest);
 			}
-			attachVideoHover(body, target.videoId, target.videoTitle);
+			attachVideoHover(body, target.videoId, target.videoTitle, target.videoChannel);
 			body.addEventListener('click', () => {
 				YTB.setPendingArrival(target.videoId);
 			});
@@ -563,7 +571,8 @@
 		row.className = 'ytb-hs-item ytb-hs-system' + (line.struck ? ' ytb-hs-struck' : '');
 		if (line.rowTooltip) row.title = line.rowTooltip;
 		const text = document.createElement('span');
-		text.append(line.prefix, buildTitleLink(line.linkVideoId, line.label));
+		text.append(line.prefix);
+		if (line.label) text.append(buildTitleLink(line.linkVideoId, line.label));
 		if (line.suffix) text.append(line.suffix);
 		if (line.srSuffix) {
 			const sr = document.createElement('span');
@@ -610,11 +619,6 @@
 			return column;
 		}
 
-		const count = document.createElement('span');
-		count.className = 'ytb-hs-count';
-		count.textContent = String(items.length);
-		head.append(count);
-
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-pl-row';
 		for (const item of items) row.append(buildRecommendationCard(item, detail, roster));
@@ -629,7 +633,7 @@
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-thumb';
 		link.href = '/watch?v=' + encodeURIComponent(item.videoId);
-		// No native title= tooltip (alt keeps it accessible); hover shows the card wash instead.
+		// No native title= tooltip (alt keeps it accessible); hover shows the text-only Video Hover Card.
 		const img = document.createElement('img');
 		// A normal in-page image load on youtube.com - no extra host permission.
 		img.src = 'https://i.ytimg.com/vi/' + encodeURIComponent(item.videoId) + '/mqdefault.jpg';
@@ -662,6 +666,10 @@
 		watched.className = 'ytb-hs-watched';
 		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId, roster);
 		watched.textContent = label ? 'Watched by ' + label : 'New to the Room';
+
+		const hover = YTB.recommendationHoverCard(item);
+		attachHoverCard(link, hover);
+		attachHoverCard(title, hover);
 
 		card.append(link, dismiss, title, watched);
 		return card;
@@ -1166,7 +1174,7 @@
 		lastDetail = { roomCode: code, myClientId, ok: false, locked: false };
 		selectedBuddyId = '';
 		render();
-		await YTB.assertPresence(code);
+		await YTB.assertPresence(code, true);
 		if (oldCode && oldCode !== code) {
 			await YTB.clearRoomColors(oldCode);
 			await YTB.deleteMember(oldCode, myClientId);
@@ -1192,6 +1200,11 @@
 		onHome = isHomePath();
 		// A real navigation closes the panel; a same-URL poller nudge (commitCode) leaves it open.
 		if (navigated && open) setOpen(false);
+		if (onHome && location.hash === '#ytb-room') {
+			history.replaceState(history.state, '', location.pathname + location.search);
+			lastNavUrl = location.href;
+			setOpen(true);
+		}
 	});
 
 	// The Room Home Toggle requests an open/close; we own the state (ADR-0005).
@@ -1281,8 +1294,11 @@
 
 	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (!YTB.isContextActive() || message?.type !== 'ytb:open-room-home') return;
-		if (onHome) setOpen(true);
-		sendResponse({ opened: onHome });
+		if (onHome) {
+			setOpen(true);
+			if (!document.getElementById(SECTION_ID)) ensureOverlay();
+		}
+		sendResponse({ opened: onHome && Boolean(document.getElementById(SECTION_ID)) });
 	});
 
 	YTB.onContextInvalidated(() => {
@@ -1383,7 +1399,6 @@
         margin-bottom: 4px;
         font-size: 11px; font-weight: 600; color: var(--ytb-ink-muted);
       }
-      #${SECTION_ID} .ytb-hs-count { font-weight: 500; }
       #${SECTION_ID} .ytb-hs-feed-scroll {
         max-height: 380px;
         overflow-y: auto;
@@ -1465,7 +1480,7 @@
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
       #${SECTION_ID} .ytb-hs-action { color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-context { color: var(--ytb-ink-muted); }
-      #${SECTION_ID} .ytb-hs-when { margin-left: 8px; font-size: 11px; color: var(--ytb-ink-muted); white-space: nowrap; }
+      #${SECTION_ID} .ytb-hs-when { margin-left: 8px; font-size: 10px; color: var(--ytb-ink-muted); white-space: nowrap; }
       #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link {
         color: var(--ytb-accent-800);
@@ -1734,8 +1749,8 @@
         position: fixed;
         left: 0; top: 0;
         box-sizing: border-box;
-        width: 200px;
-        padding: 6px;
+        width: 170px;
+        padding: 5px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -1752,16 +1767,22 @@
       #${OVERLAY_ID} .ytb-hs-hovercard-on { opacity: 1; visibility: visible; transition-delay: 0s; }
       #${OVERLAY_ID} .ytb-hs-hovercard-thumb {
         display: block;
-        width: 186px; height: 105px;
+        width: 100%; aspect-ratio: 16 / 9;
         border-radius: 8px;
         object-fit: cover;
         background: var(--ytb-surface-sunk);
       }
       #${OVERLAY_ID} .ytb-hs-hovercard-label {
-        margin-top: 5px;
+        margin-top: 4px;
         font-weight: 600;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
+      #${OVERLAY_ID} .ytb-hs-hovercard-detail { margin-top: 2px; color: var(--ytb-ink-muted); overflow-wrap: anywhere; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-detail:empty { display: none; }
+      /* Text-only (Recommended for you): the card already shows the thumbnail, so this hover is the full title + channel. */
+      #${OVERLAY_ID} .ytb-hs-hovercard-text { width: auto; max-width: 260px; padding: 7px 10px; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-text .ytb-hs-hovercard-thumb { display: none; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-text .ytb-hs-hovercard-label { margin-top: 0; display: block; overflow: visible; }
       @media (prefers-reduced-motion: reduce) {
 		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more,
         #${SECTION_ID} .ytb-hs-copy, #${SECTION_ID} .ytb-hs-swatch::before, #${SECTION_ID} .ytb-hs-color::before { transition: none; }

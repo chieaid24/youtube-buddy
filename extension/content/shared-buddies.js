@@ -79,7 +79,7 @@
 
 		// Playful adjectives for unnamed Buddies (buddyName); same-adjective
 		// collisions within a Room are broken by disambiguateNames.
-		ADJECTIVES: ['Silly', 'Sleepy', 'Sweaty', 'Big', 'Little', 'Buddy', 'Good-looking', 'Sloppy', 'Zesty', 'Stinky'],
+		ADJECTIVES: ['Silly', 'Sleepy', 'Sweaty', 'Big', 'Little', 'Buddy', 'Good Looking', 'Zesty', 'Stinky'],
 
 		// Stable 32-bit hash of a Client ID, so everything keyed off a Buddy
 		// (color, fallback name) stays stable across surfaces and viewers.
