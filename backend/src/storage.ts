@@ -22,7 +22,8 @@ export async function roomHasCapacityFor(env: Env, prefix: string, clientId: str
 		valueReads.map(async (name) => {
 			const raw = await env.PROGRESS.get(name);
 			if (raw === null) return;
-			const record = JSON.parse(raw) as { addedBy?: unknown; actorClientId?: unknown };
+			const record = JSON.parse(raw) as { type?: string; addedBy?: unknown; actorClientId?: unknown };
+			if (record.type === 'joined') return;
 			const id = record.addedBy ?? record.actorClientId;
 			if (typeof id === 'string' && id !== '') members.add(id);
 		}),
@@ -30,18 +31,24 @@ export async function roomHasCapacityFor(env: Env, prefix: string, clientId: str
 	return members.has(clientId) || members.size < MAX_MEMBERS;
 }
 
-// One Playlist Event backs one Feed System Message; only recommends are recorded (un-recommending emits
-// nothing, ADR-0007), with title captured at recommend time so the Feed line survives later removal. The key's
-// zero-padded millisecond timestamp keeps KV's listing chronological (bumped past the last event to break
-// same-millisecond ties); the log keeps only the newest MAX_EVENTS, pruned best-effort on each write, sharing the TTL.
 export async function recordPlaylistEvent(env: Env, prefix: string, videoId: string, title: string, actorClientId: string): Promise<void> {
+	await recordRoomEvent(env, prefix, { type: 'added', videoId, title, actorClientId });
+}
+
+// Room events share chronological keys, retention, and the newest-50 cap.
+export async function recordRoomEvent(
+	env: Env,
+	prefix: string,
+	event:
+		{ type: 'added'; videoId: string; title: string; actorClientId: string } | { type: 'joined'; actorClientId: string; actorName: string },
+): Promise<void> {
 	const eventPrefix = `${prefix}event:`;
 	const listing = await env.PROGRESS.list({ prefix: eventPrefix });
 	const lastKey = listing.keys.length > 0 ? listing.keys[listing.keys.length - 1].name : null;
 	const lastAt = lastKey ? Number(lastKey.slice(eventPrefix.length).split(':')[0]) || 0 : 0;
 	const at = Math.max(Date.now(), lastAt + 1);
 	const id = crypto.randomUUID();
-	const record = { id, type: 'added', videoId, title, actorClientId, at };
+	const record = { ...event, id, at };
 	await env.PROGRESS.put(`${eventPrefix}${String(at).padStart(14, '0')}:${id}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
 	const excess = listing.keys.length + 1 - MAX_EVENTS;
 	if (excess > 0) {

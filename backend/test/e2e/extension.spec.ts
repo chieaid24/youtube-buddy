@@ -4455,6 +4455,74 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 	}
 });
 
+test('join messages use system rows without toasts or links', async () => {
+	const context = await launchExtension();
+	try {
+		await stubRoomBackend(context, {
+			events: [{ id: 'join-sigma', type: 'joined', actorClientId: 'sigma', actorName: 'Sigma', at: Date.now() }],
+		});
+		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ contentType: 'text/html', body: homeFixture }));
+		await seedPairedRoom(context);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
+		const row = page.locator('.ytb-hs-system').filter({ hasText: 'Sigma joined the room' });
+		await expect(row).toBeVisible();
+		await expect(row.locator('a')).toHaveCount(0);
+		await expect(row.locator('time')).toBeVisible();
+		await expect(page.locator('.ytb-toast')).toHaveCount(0);
+		await page.reload();
+		await openHomePanel(page);
+		await expect(row).toHaveCount(1);
+	} finally {
+		await context.close();
+	}
+});
+
+test('@live shows a shared join message on real YouTube', async ({}, testInfo) => {
+	test.skip(!process.env.YTB_JOIN_BACKEND, 'Set YTB_JOIN_BACKEND to an isolated Worker URL.');
+	test.setTimeout(90_000);
+	const context = await launchExtension();
+	const backend = process.env.YTB_JOIN_BACKEND!;
+	let code = '';
+	try {
+		await context.route('http://localhost:8787/**', async (route) => {
+			const response = await route.fetch({ url: route.request().url().replace('http://localhost:8787', backend) });
+			await route.fulfill({ response });
+		});
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ code: '', sharing: true }));
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		await page.getByRole('button', { name: 'Create a room' }).click();
+		await expect(page.locator('.ytb-hs-code-row strong')).toBeVisible();
+		code = await popup.evaluate(async () => (await chrome.storage.local.get('code')).code as string);
+		await page.getByRole('button', { name: 'Back', exact: true }).click();
+		const response = await context.request.post(`${backend}/presence?code=${code}`, {
+			data: { clientId: 'sigma', name: 'Sigma', joining: true },
+		});
+		expect(response.ok()).toBe(true);
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		const row = page.locator('.ytb-hs-system').filter({ hasText: 'Sigma joined the room' });
+		await expect(page.locator('.ytb-hs-system')).toHaveCount(2);
+		await expect(page.locator('.ytb-hs-system').filter({ hasText: 'Viewer joined the room' })).toHaveCount(1);
+		await expect(row).toHaveCount(1);
+		await expect(row).toBeVisible();
+		await expect(row.locator('a')).toHaveCount(0);
+		await expect(page.locator('.ytb-toast')).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath('live-join-message.png') });
+		await page.reload({ waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		await expect(row).toHaveCount(1);
+	} finally {
+		await context.request.delete(`${backend}/member?code=${code}&clientId=sigma`);
+		await context.request.delete(`${backend}/member?code=${code}&clientId=viewer-e2e`);
+		await context.close();
+	}
+});
+
 test('@live manages a Room on YouTube without content-script errors', async ({}, testInfo) => {
 	test.skip(!process.env.YTB_LIVE_YOUTUBE, 'Set YTB_LIVE_YOUTUBE=1 to run the live smoke test.');
 	test.setTimeout(90_000);

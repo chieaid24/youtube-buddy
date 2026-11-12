@@ -201,6 +201,20 @@ describe('Room cap (POST)', () => {
 });
 
 describe('POST /presence?code=', () => {
+	it('records joins once per membership and frees slots despite join history', async () => {
+		const code = 'join-history';
+		await postPresence(code, { clientId: 'sigma', name: 'Sigma' });
+		expect(await listEvents(code)).toEqual([]);
+		await postPresence(code, { clientId: 'sigma', name: 'Sigma', joining: true });
+		await postPresence(code, { clientId: 'sigma', name: 'New name' });
+		expect(await listEvents(code)).toMatchObject([{ type: 'joined', actorClientId: 'sigma', actorName: 'Sigma' }]);
+		await deleteMember(code, 'sigma');
+		for (const clientId of ['a', 'b', 'c', 'd', 'e']) expect((await postPresence(code, { clientId })).status).toBe(200);
+		await deleteMember(code, 'e');
+		expect((await postPresence(code, { clientId: 'sigma', name: 'Sigma', joining: true })).status).toBe(200);
+		expect((await listEvents(code)).filter((event) => event.actorClientId === 'sigma')).toHaveLength(2);
+	});
+
 	it('stores a Presence Record with a server-set updatedAt', async () => {
 		const code = 'presence-stores';
 		const before = Date.now();

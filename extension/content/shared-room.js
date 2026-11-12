@@ -53,7 +53,9 @@
 			for (const n of (records && records.notes) || []) consider(n.clientId, n.name, n.createdAt);
 			for (const reply of (records && records.replies) || []) consider(reply.clientId, reply.name, reply.createdAt);
 			for (const item of (records && records.playlist) || []) consider(item.addedBy, item.addedByName, item.addedAt);
-			for (const event of (records && records.events) || []) consider(event.actorClientId, undefined, event.at);
+			for (const event of (records && records.events) || []) {
+				if (event.type !== 'joined') consider(event.actorClientId, undefined, event.at);
+			}
 			return [...byId.values()].sort((a, b) => b.at - a.at).map(({ clientId, name }) => ({ clientId, name }));
 		},
 
@@ -167,12 +169,24 @@
 			};
 		},
 
-		// Render plan for one recommend System Message row; home-section.js
+		// Render plan for one System Message row; home-section.js
 		// executes it. A struck line (`removed`) has NO link - the sole exception
 		// to the Feed's link rule - and carries a tooltip + visually-hidden
 		// suffix, since a line-through alone conveys nothing to a screen reader.
 		systemLine(item, roster) {
 			const event = (item && item.event) || {};
+			if (event.type === 'joined') {
+				return {
+					struck: false,
+					prefix: YTB.buddyName(event.actorClientId, event.actorName) + ' joined the room',
+					label: '',
+					suffix: '',
+					linkVideoId: null,
+					linkTooltip: null,
+					rowTooltip: null,
+					srSuffix: null,
+				};
+			}
 			const struck = Boolean(item && item.removed);
 			const linked = !struck && Boolean(event.videoId);
 			return {
@@ -431,7 +445,7 @@
 				if (YTB.noteAddressesMe(note, myClientId)) items.push({ type: 'mention', at, note });
 				else items.push({ type: 'note', at, note, own: note.clientId === myClientId });
 			}
-			// Only `added` events count (un-recommends emit none). `removed`
+			// Recommendation removal is per event; un-recommends emit none. `removed`
 			// (ADR-0007) is per-event: a newer `added` for the same videoId
 			// supersedes it, and a dead videoId strikes it - so a re-recommend
 			// revives only its own fresh line.
@@ -446,7 +460,18 @@
 				if (at > (newestAddedAt.get(event.videoId) ?? -Infinity)) newestAddedAt.set(event.videoId, at);
 			}
 			for (const event of events) {
-				if (!event || event.type !== 'added') continue;
+				if (!event) continue;
+				if (event.type === 'joined') {
+					items.push({
+						type: 'system',
+						at: Number(event.at) || 0,
+						event,
+						own: event.actorClientId === myClientId,
+						removed: false,
+					});
+					continue;
+				}
+				if (event.type !== 'added') continue;
 				const at = Number(event.at) || 0;
 				items.push({
 					type: 'system',

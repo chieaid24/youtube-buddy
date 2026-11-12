@@ -31,8 +31,6 @@
 	let activeRoomCode = '';
 	let currentVideoId = null; // active /watch video, or null off a watch page
 	let refreshToken = 0; // guards against out-of-order async refreshes
-	let knownBuddyIds = new Set(); // foreign clientIds seen last refresh (toast diffing)
-	let baselineReady = false; // skip toasts on the very first read (no false "joined")
 	let pollTimer = null;
 	let readFailures = 0; // consecutive failed Room reads, folded via YTB.connectionState
 	let connectionLost = false; // failures >= 2 - rides every ytb:room-data broadcast
@@ -66,7 +64,6 @@
 			activeRoomCode = '';
 			readFailures = 0; // Unpaired: nothing is polled, so nothing can be "lost"
 			connectionLost = false;
-			resetPresenceBaseline();
 			broadcastRoomData(null, false);
 			return;
 		}
@@ -89,8 +86,6 @@
 			records.ok,
 		);
 		if (!YTB.isContextActive()) return;
-
-		notePresence(view.buddies);
 
 		// Locked out of a full Room.
 		if (view.locked) {
@@ -143,25 +138,6 @@
 				},
 			}),
 		);
-	}
-
-	// Unpaired reset, so rejoining doesn't replay every member as a fresh "joined".
-	function resetPresenceBaseline() {
-		knownBuddyIds = new Set();
-		baselineReady = false;
-	}
-
-	// Toast clientIds new since the last read; the first read only seeds the baseline.
-	function notePresence(buddies) {
-		const current = new Set();
-		for (const b of buddies) {
-			current.add(b.clientId);
-			if (baselineReady && !knownBuddyIds.has(b.clientId)) {
-				YTB.toast(YTB.buddyName(b.clientId, b.name, roster) + ' joined');
-			}
-		}
-		knownBuddyIds = current;
-		baselineReady = true;
 	}
 
 	// ---------------------------------------------------------------------------

@@ -18,8 +18,7 @@ export const MAX_REPLIES = 10;
 // (best-effort, no KV transactions).
 export const MAX_PLAYLIST_ITEMS = 30;
 
-// Playlist Events (the log behind System Messages) keep only the newest ~50, pruned best-effort on each write;
-// they share TTL_SECONDS.
+// Room events share TTL_SECONDS and retain the newest 50, pruned on each write.
 export const MAX_EVENTS = 50;
 
 // Every caller-controlled value in a colon-delimited KV key must be one bounded segment; Client IDs also can't

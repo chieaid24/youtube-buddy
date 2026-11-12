@@ -13,6 +13,7 @@ export interface ProgressBody {
 export interface PresenceBody {
 	clientId: string;
 	name: string;
+	joining?: boolean;
 }
 
 export interface NoteBody {

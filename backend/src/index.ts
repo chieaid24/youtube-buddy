@@ -1,6 +1,14 @@
 import { MAX_PLAYLIST_ITEMS, MAX_REPLIES, TTL_SECONDS } from './constants';
 import { corsHeaders, fail, json } from './http';
-import { deleteKeysWithPrefix, deleteMember, findNoteKey, listReplies, recordPlaylistEvent, roomHasCapacityFor } from './storage';
+import {
+	deleteKeysWithPrefix,
+	deleteMember,
+	findNoteKey,
+	listReplies,
+	recordPlaylistEvent,
+	recordRoomEvent,
+	roomHasCapacityFor,
+} from './storage';
 import type { Env, LogContext, NoteBody, PlaylistBody, PresenceBody, ProgressBody, ReplyBody } from './types';
 import {
 	isValidClientId,
@@ -70,6 +78,9 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			updatedAt: Date.now(),
 		};
 		await env.PROGRESS.put(`${prefix}presence:${body.clientId}`, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
+		if (body.joining === true) {
+			await recordRoomEvent(env, prefix, { type: 'joined', actorClientId: record.clientId, actorName: record.name });
+		}
 		return json({ ok: true });
 	}
 
