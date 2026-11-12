@@ -1440,7 +1440,7 @@
       #${SECTION_ID} .ytb-hs-author { font-weight: 700; }
       #${SECTION_ID} .ytb-hs-action { color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-context { color: var(--ytb-ink-muted); }
-      #${SECTION_ID} .ytb-hs-when { margin-left: 8px; font-size: 11px; color: var(--ytb-ink-muted); white-space: nowrap; }
+      #${SECTION_ID} .ytb-hs-when { margin-left: 8px; font-size: 10px; color: var(--ytb-ink-muted); white-space: nowrap; }
       #${SECTION_ID} .ytb-hs-system { font-size: 11px; color: var(--ytb-ink-muted); }
       #${SECTION_ID} .ytb-hs-system a.ytb-hs-title-link {
         color: var(--ytb-accent-800);
