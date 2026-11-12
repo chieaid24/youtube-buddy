@@ -184,7 +184,7 @@ const YTB = {
 		const stored = await YTB._storageGet(['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden']);
 		return {
 			theme: YTB.THEMES.includes(stored.theme) ? stored.theme : 'system',
-			spoilerDefault: stored.spoilerDefault !== false,
+			spoilerDefault: stored.spoilerDefault === true,
 			notificationPosition: YTB.NOTIFICATION_EDGES.includes(stored.notificationPosition) ? stored.notificationPosition : 'bottom',
 			notesHidden: stored.notesHidden === true,
 			buddyProgressHidden: stored.buddyProgressHidden === true,

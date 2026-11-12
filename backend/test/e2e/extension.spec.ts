@@ -2816,7 +2816,7 @@ test("a Post Echo fires the author's own Playback Notification on posting — pa
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing does not gate Note posting.
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -2978,7 +2978,7 @@ test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native,
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: false, spoilerDefault: true })); // Exercise an explicit Spoiler preference.
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -4035,7 +4035,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing off: it no longer gates Note posting (#194)
+		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing does not gate Note posting.
 
 		// Posting: the composer freezes the watch page's title into the Note. The
 		// fixture has no metadata heading, so this also exercises the tab-title
@@ -4048,6 +4048,7 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 		await expect(page.locator('#ytb-note-composer')).toHaveCount(0);
 		const notePost = calls.find((call) => call.startsWith('POST') && call.includes('/notes'));
 		expect(notePost).toContain('"videoTitle":"YouTube playback fixture"');
+		expect(notePost).toContain('"spoiler":false');
 
 		// Reading: the reply row names the video the conversation is on, as plain
 		// deemphasized text that is NOT a link of its own.
@@ -4418,12 +4419,16 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await homePanel.getByRole('switch', { name: 'Spoiler Default' }).click();
 		await expect
 			.poll(async () => popup.evaluate(() => chrome.storage.local.get(['notificationPosition', 'spoilerDefault'])))
-			.toEqual({ notificationPosition: 'left', spoilerDefault: false });
+			.toEqual({ notificationPosition: 'left', spoilerDefault: true });
 
 		// The composer seeds its Spoiler checkbox from the new default.
 		await page.locator('#ytb-note-button').click();
 		const spoilerBox = page.locator('#ytb-note-composer input[type="checkbox"]');
 		await expect(spoilerBox).toBeVisible();
+		await expect(spoilerBox).toBeChecked();
+		await homePanel.getByRole('switch', { name: 'Spoiler Default' }).click();
+		await page.keyboard.press('Escape');
+		await page.locator('#ytb-note-button').click();
 		await expect(spoilerBox).not.toBeChecked();
 		await page.keyboard.press('Escape');
 

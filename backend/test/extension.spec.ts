@@ -1542,7 +1542,7 @@ describe('settings (per install)', () => {
 		storage = {};
 		await expect(window.YTB.getSettings()).resolves.toEqual({
 			theme: 'system',
-			spoilerDefault: true,
+			spoilerDefault: false,
 			notificationPosition: 'bottom',
 			notesHidden: false,
 			buddyProgressHidden: false,
@@ -1557,7 +1557,7 @@ describe('settings (per install)', () => {
 		};
 		await expect(window.YTB.getSettings()).resolves.toEqual({
 			theme: 'system',
-			spoilerDefault: true,
+			spoilerDefault: false,
 			notificationPosition: 'bottom',
 			notesHidden: false,
 			buddyProgressHidden: false,
@@ -1571,6 +1571,11 @@ describe('settings (per install)', () => {
 			storage = { notificationPosition: stale };
 			await expect(window.YTB.getSettings()).resolves.toMatchObject({ notificationPosition: 'bottom' });
 		}
+	});
+
+	it('preserves an explicitly enabled Spoiler Default', async () => {
+		storage = { spoilerDefault: true };
+		await expect(window.YTB.getSettings()).resolves.toMatchObject({ spoilerDefault: true });
 	});
 
 	it('round-trips every Settings key and merge-writes partials', async () => {
