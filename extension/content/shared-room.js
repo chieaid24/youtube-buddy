@@ -11,13 +11,14 @@
 		'wrote',
 		'remarked',
 		'commented',
-		'added',
-		'observed',
+		'posted',
 		'shared',
-		'suggested',
-		'pointed out',
+		'declared',
+		'speculated',
 		'quipped',
-		'yapped',
+		'proclaimed',
+		'babbled',
+		'squeaked',
 	];
 	Object.assign(YTB, {
 		// A Note keeps the same varied verb across polls, viewers, and reloads.
