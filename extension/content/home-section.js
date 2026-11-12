@@ -368,8 +368,9 @@
 	let hoverOwner = null; // the link the visible card belongs to
 	let hoverPoint = { x: 0, y: 0 };
 
-	function attachVideoHover(el, videoId, title) {
-		const plan = YTB.videoHoverCard(videoId, title);
+	function attachVideoHover(el, videoId, title, channel) {
+		const recommendation = lastDetail?.playlist?.find((item) => item.videoId === videoId);
+		const plan = YTB.videoHoverCard(videoId, title, channel || recommendation?.channel);
 		return plan ? attachHoverCard(el, plan) : el;
 	}
 
@@ -510,7 +511,7 @@
 				dest.textContent = ' ' + YTB.titleLinkTooltip(target.videoTitle);
 				body.append(dest);
 			}
-			attachVideoHover(body, target.videoId, target.videoTitle);
+			attachVideoHover(body, target.videoId, target.videoTitle, target.videoChannel);
 			body.addEventListener('click', () => {
 				YTB.setPendingArrival(target.videoId);
 			});
@@ -1636,8 +1637,8 @@
         position: fixed;
         left: 0; top: 0;
         box-sizing: border-box;
-        width: 200px;
-        padding: 6px;
+        width: 170px;
+        padding: 5px;
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -1654,17 +1655,17 @@
       #${OVERLAY_ID} .ytb-hs-hovercard-on { opacity: 1; visibility: visible; transition-delay: 0s; }
       #${OVERLAY_ID} .ytb-hs-hovercard-thumb {
         display: block;
-        width: 186px; height: 105px;
+        width: 100%; aspect-ratio: 16 / 9;
         border-radius: 8px;
         object-fit: cover;
         background: var(--ytb-surface-sunk);
       }
       #${OVERLAY_ID} .ytb-hs-hovercard-label {
-        margin-top: 5px;
+        margin-top: 4px;
         font-weight: 600;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
-      #${OVERLAY_ID} .ytb-hs-hovercard-detail { margin-top: 2px; color: var(--ytb-ink-muted); }
+      #${OVERLAY_ID} .ytb-hs-hovercard-detail { margin-top: 2px; color: var(--ytb-ink-muted); overflow-wrap: anywhere; }
       #${OVERLAY_ID} .ytb-hs-hovercard-detail:empty { display: none; }
       /* Text-only (Recommended for you): the card already shows the thumbnail, so this hover is the full title + channel. */
       #${OVERLAY_ID} .ytb-hs-hovercard-text { width: auto; max-width: 260px; padding: 7px 10px; }

@@ -162,6 +162,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 
 		const id = crypto.randomUUID();
 		const videoTitle = sanitizeVideoContext(body.videoTitle);
+		const videoChannel = sanitizeVideoContext(body.videoChannel);
 		const record = {
 			id,
 			clientId: body.clientId,
@@ -169,6 +170,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			videoId: body.videoId,
 			// Frozen at post time (like a Playlist Event's, see recordPlaylistEvent); absent means no title given.
 			...(videoTitle !== undefined ? { videoTitle } : {}),
+			...(videoChannel !== undefined ? { videoChannel } : {}),
 			timestamp: body.timestamp,
 			kind: body.kind,
 			body: body.body,

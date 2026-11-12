@@ -101,7 +101,7 @@
 		// Post a text Note or curated-emoji Reaction. Requires a Room Code;
 		// Sharing does NOT gate Note writes (CONTEXT.md). videoTitle is captured
 		// at post time (watchTitle) and never required.
-		async postNote({ clientId, name, videoId, videoTitle, timestamp, kind, body, spoiler, mentions }) {
+		async postNote({ clientId, name, videoId, videoTitle, videoChannel, timestamp, kind, body, spoiler, mentions }) {
 			const { code } = await YTB.getConfig();
 			if (!code) return { ok: false, category: 'unpaired' };
 			return YTB._postJson('/notes?code=' + encodeURIComponent(code), {
@@ -113,6 +113,7 @@
 				body,
 				spoiler,
 				...(typeof videoTitle === 'string' && videoTitle !== '' ? { videoTitle } : {}),
+				...(typeof videoChannel === 'string' && videoChannel !== '' ? { videoChannel } : {}),
 				// Mentions are roster Client IDs (ADR-0006); omitted entirely when empty.
 				...(Array.isArray(mentions) && mentions.length > 0 ? { mentions } : {}),
 			});

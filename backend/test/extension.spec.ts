@@ -922,7 +922,8 @@ describe('shared playlist client API', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		const note = { clientId: 'a', videoId: 'v', timestamp: 1, kind: 'text', body: 'x' };
 
-		await window.YTB.postNote({ ...note, videoTitle: 'Never Gonna Give You Up' });
+		await window.YTB.postNote({ ...note, videoTitle: 'Never Gonna Give You Up', videoChannel: 'Rick Astley' });
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body).videoChannel).toBe('Rick Astley');
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body).videoTitle).toBe('Never Gonna Give You Up');
 
 		await window.YTB.postNote({ ...note, videoTitle: '' });
@@ -1061,9 +1062,10 @@ describe('recommendationHoverCard', () => {
 // (thumbnail + label) and where to put it relative to the cursor.
 describe('videoHoverCard', () => {
 	it('pairs the video thumbnail with the title', () => {
-		expect(window.YTB.videoHoverCard('dQw4w9WgXcQ', '  Blade Runner  ')).toEqual({
+		expect(window.YTB.videoHoverCard('dQw4w9WgXcQ', '  Blade Runner  ', '  Warner Bros.  ')).toEqual({
 			thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
 			label: 'Blade Runner',
+			detail: 'Warner Bros.',
 		});
 	});
 
@@ -2300,7 +2302,11 @@ declare global {
 			noteVerb(noteId: string): string;
 			videoContext(note: { videoTitle?: string } | null): string;
 			titleLinkTooltip(title: string | null): string;
-			videoHoverCard(videoId: string | null, title: string | null): { thumbnail: string; label: string } | null;
+			videoHoverCard(
+				videoId: string | null,
+				title: string | null,
+				channel?: string,
+			): { thumbnail: string; label: string; detail: string } | null;
 			hoverCardPlacement(input: {
 				x: number;
 				y: number;
