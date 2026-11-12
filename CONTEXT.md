@@ -21,7 +21,7 @@ A random stable identifier generated once per browser installation. It is what i
 _Avoid_: user id, username
 
 **Display Name**:
-The human-readable label a user types for themselves (e.g. "aidan"), shown beside their markers. Purely cosmetic — carries no identity. The popup's field label reads "Nickname" (friendlier UI copy); the term itself stays Display Name in code, config keys, and docs.
+The human-readable label a user types for themselves (e.g. "aidan"), shown beside their markers. Purely cosmetic - carries no identity. The Settings view field label reads "Nickname"; the term itself stays Display Name in code, config keys, and docs.
 _Avoid_: name (alone, in code), handle
 
 **Buddy** (pl. **Buddies**):
@@ -146,12 +146,12 @@ _Avoid_: click target, mousedown target
 The transient corner notification shown when a new Buddy first appears in the Room (a fresh Progress Record or presence row). Purely informational and player-native. Distinct from a Playback Notification, which fires when playback crosses a Note or Reaction.
 _Avoid_: Playback Notification, popup, alert
 
-**Room Home Panel** (formerly Room Home Section):
-The complete in-page hub the extension overlays on YouTube Home: a fixed, left-docked portrait panel over a slightly dim scrim. Its normal view stacks the Room Feed above Recommendations. A gear replaces that content with the Settings view, and Back restores the normal view. Unpaired and Room full viewers open directly into Settings because they cannot use the Feed. Waiting and In room viewers open into the normal view. The panel is ephemeral: its close control, a scrim click, Escape, or an SPA navigation closes it, and reopening resets it to the state-appropriate initial view. Closing hides the panel and never leaves the Room or changes Sharing. The panel reads no YouTube layout DOM and never shifts the recommendations grid (ADR-0005).
+**Room Home Panel**:
+The complete in-page hub the extension overlays on YouTube Home: a fixed, left-docked portrait panel over a slightly dim scrim. Its normal view stacks the Room Feed above Recommendations. A gear replaces that content with the Settings view, and Back restores the normal view. Unpaired and Room full viewers open directly into Settings because they cannot use the Feed. Waiting and In room viewers open into the normal view. The panel is ephemeral: its close control, a scrim click, Escape, or an SPA navigation closes it, and reopening resets it to the state-appropriate initial view. Closing hides the panel and never leaves the Room or changes Sharing. The panel reads only the guide toggle bounds for docking and never shifts the recommendations grid (ADR-0005).
 _Avoid_: home widget, dashboard, feed (alone)
 
 **Room Home Toggle**:
-An on/off control injected as a row into YouTube's own left guide on the home route, letting the viewer open or close the Room Home Panel. It is styled as a native guide entry with a buddies icon and "Buddy Room" label. The icon is apricot while the panel is open and native guide grey while closed. The row persists nothing: it dispatches an open or close request and mirrors the panel's live state through an in-page CustomEvent. Toggling affects only the panel; on-video markers, Notes, presence, and the watch-page Recommend Control keep running.
+An on/off control injected as a row into YouTube's full or compact left guide on the home route, letting the viewer open or close the Room Home Panel. It matches the active guide's native row geometry with a buddies icon and "Buddy Room" label. The icon is apricot while the panel is open and native guide grey while closed. The row persists nothing: it dispatches an open or close request and mirrors the panel's live state through an in-page CustomEvent. Toggling affects only the panel; on-video markers, Notes, presence, and the watch-page Recommend Control keep running.
 _Avoid_: sidebar widget, hide button, disable
 
 **Recommendation**:

@@ -1,10 +1,10 @@
 # DESIGN.md
 
-Design system for **YouTube Buddy's own surfaces**: the action popup
-(`extension/popup.html` markup + inline CSS, `extension/popup.js` wiring) AND the
-whole on-video Note UI — Video Timeline Note Previews, the Expanded Note, the Add
-Note composer, the @-mention popover, and Playback Notification cards — delivered
-via the namespaced injected tokens in `extension/theme.js` (see 1.5). The on-video
+Design system for **YouTube Buddy's own surfaces**: the read-only Extension Popup,
+the Room Home Panel and its Settings view, and the whole on-video Note UI - Video
+Timeline Note Previews, the Expanded Note, the Add Note composer, the @-mention
+popover, and Playback Notification cards - delivered via the namespaced injected
+tokens in `extension/theme.js` (see 1.5). The on-video
 progress-bar markers and feed thumbnail Watched-By Dots (`renderer.js`) remain
 **out of scope** and keep their player-native look (flat Buddy-colored dots, dark
 tooltip), as does the Add Note button sitting inside YouTube's own control bar.
@@ -31,47 +31,47 @@ lifting. No second saturated color competes.
 ```css
 :root {
 	/* --- Accent: soft apricot ramp (hue ~55) --- */
-	--c-accent-050: oklch(97.5% 0.018 62); /* #FFF3E9  cream tint / panel wash */
-	--c-accent-100: oklch(94% 0.045 60); /* #FCE4CE  hover wash, chips */
-	--c-accent-200: oklch(88% 0.075 58); /* #F8C79A  soft fill, focus halo */
-	--c-accent-400: oklch(80% 0.1 56); /* #F6B47D */
-	--c-accent-500: oklch(76% 0.115 55); /* #F6A96B  PRIMARY accent (fills) */
-	--c-accent-600: oklch(70% 0.13 52); /* #E88B45  hover on fills */
-	--c-accent-700: oklch(60% 0.14 50); /* #C7712F  DEEP: press, text-on-tint */
-	--c-accent-800: oklch(50% 0.13 48); /* #9E551F  strong text on cream */
+	--ytb-accent-050: oklch(97.5% 0.018 62); /* #FFF3E9  cream tint / panel wash */
+	--ytb-accent-100: oklch(94% 0.045 60); /* #FCE4CE  hover wash, chips */
+	--ytb-accent-200: oklch(88% 0.075 58); /* #F8C79A  soft fill, focus halo */
+	--ytb-accent-400: oklch(80% 0.1 56); /* #F6B47D */
+	--ytb-accent-500: oklch(76% 0.115 55); /* #F6A96B  PRIMARY accent (fills) */
+	--ytb-accent-600: oklch(70% 0.13 52); /* #E88B45  hover on fills */
+	--ytb-accent-700: oklch(60% 0.14 50); /* #C7712F  DEEP: press, text-on-tint */
+	--ytb-accent-800: oklch(50% 0.13 48); /* #9E551F  strong text on cream */
 
 	/* --- Warm neutrals (hue ~58, very low chroma) --- */
-	--c-surface: oklch(99.2% 0.006 62); /* #FFFDFB  popup background */
-	--c-surface-tint: oklch(97.5% 0.018 62); /* #FFF3E9  cream sub-panels */
-	--c-surface-sunk: oklch(95% 0.02 60); /* #F4E9DE  input wells */
-	--c-line: oklch(91% 0.018 60); /* #ECE1D6  borders / dividers */
-	--c-line-strong: oklch(85% 0.025 58); /* #DECEBE  input borders */
-	--c-ink: oklch(28% 0.022 50); /* #3A2E28  primary text (warm ink) */
-	--c-ink-muted: oklch(52% 0.028 52); /* #7A6656  secondary / meta text */
-	--c-ink-faint: oklch(64% 0.025 54); /* #A08A78  placeholders, disabled */
+	--ytb-surface: oklch(99.2% 0.006 62); /* #FFFDFB  popup background */
+	--ytb-surface-tint: oklch(97.5% 0.018 62); /* #FFF3E9  cream sub-panels */
+	--ytb-surface-sunk: oklch(95% 0.02 60); /* #F4E9DE  input wells */
+	--ytb-line: oklch(91% 0.018 60); /* #ECE1D6  borders / dividers */
+	--ytb-line-strong: oklch(85% 0.025 58); /* #DECEBE  input borders */
+	--ytb-ink: oklch(28% 0.022 50); /* #3A2E28  primary text (warm ink) */
+	--ytb-ink-muted: oklch(52% 0.028 52); /* #7A6656  secondary / meta text */
+	--ytb-ink-faint: oklch(64% 0.025 54); /* #A08A78  placeholders, disabled */
 
 	/* --- Semantic (all kept warm so nothing clashes with the orange) --- */
-	--c-success: oklch(68% 0.14 150); /* #3FA860  paired / "sharing on" */
-	--c-danger: oklch(55% 0.16 30); /* #C0392B  leave room, warm red */
-	--c-danger-hover: oklch(49% 0.155 30); /* #A5312A */
-	--c-neutral: oklch(40% 0.02 52); /* #5A4B40  "stop sharing" confirm */
-	--c-neutral-hover: oklch(34% 0.02 52); /* #473A31 */
+	--ytb-success: oklch(68% 0.14 150); /* #3FA860  paired / "sharing on" */
+	--ytb-danger: oklch(55% 0.16 30); /* #C0392B  leave room, warm red */
+	--ytb-danger-hover: oklch(49% 0.155 30); /* #A5312A */
+	--ytb-neutral: oklch(40% 0.02 52); /* #5A4B40  "stop sharing" confirm */
+	--ytb-neutral-hover: oklch(34% 0.02 52); /* #473A31 */
 
 	/* --- Focus + elevation (tinted, never gray) --- */
-	--c-ring: oklch(76% 0.115 55 / 0.55); /* apricot focus ring */
-	--e-pop: 0 6px 20px oklch(52% 0.06 52 / 0.2); /* color grid popover */
-	--e-dialog: 0 12px 34px oklch(45% 0.06 52 / 0.26); /* confirm modal */
+	--ytb-ring: oklch(76% 0.115 55 / 0.55); /* apricot focus ring */
+	--ytb-e-pop: 0 6px 20px oklch(52% 0.06 52 / 0.2); /* color grid popover */
+	--ytb-e-dialog: 0 12px 34px oklch(45% 0.06 52 / 0.26); /* confirm modal */
 }
 ```
 
 **Contrast contract (WCAG AA):**
 
-- `--c-ink` on `--c-surface` / `--c-surface-tint`: pass (>= 8:1).
-- `--c-ink-muted` on `--c-surface`: pass for text >= 11px (>= 4.5:1).
-- **Filled primary button = apricot `--c-accent-500` fill with `--c-ink` text.**
+- `--ytb-ink` on `--ytb-surface` / `--ytb-surface-tint`: pass (>= 8:1).
+- `--ytb-ink-muted` on `--ytb-surface`: pass for text >= 11px (>= 4.5:1).
+- **Filled primary button = apricot `--ytb-accent-500` fill with `--ytb-ink` text.**
   Pastel apricot is too light for white text; dark warm ink on apricot passes AA and
-  is the intended cozy look. White text only ever appears on `--c-danger` /
-  `--c-neutral` (the confirm buttons), never on the accent.
+  is the intended cozy look. White text only ever appears on `--ytb-danger` /
+  `--ytb-neutral` (the confirm buttons), never on the accent.
 - The paired-green and danger-red are used for small meaning cues (status, leave),
   never as large fields.
 
@@ -79,7 +79,7 @@ lifting. No second saturated color competes.
 
 **Face:** bundle **Nunito** (a rounded, high-legibility humanist sans, SIL OFL, safe
 to embed) as a subset variable `woff2`, base64 inlined via `@font-face` in
-`popup.html`. This is the one CSP-safe way to guarantee warm letterforms on every OS
+`theme.js`. Loading the same file in the popup and content scripts guarantees warm letterforms on every OS
 (Windows/Linux users do not have a rounded system font). Subset to Latin-basic plus
 the punctuation actually used; target < 40KB. Fall back to `ui-rounded, system-ui`.
 
@@ -91,19 +91,19 @@ the punctuation actually used; target < 40KB. Fall back to `ui-rounded, system-u
 	font-display: swap;
 }
 :root {
-	--font: 'YTB Rounded', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+	--ytb-font: 'YTB Rounded', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
 }
 ```
 
 **Type scale** (13px base; hierarchy via weight contrast >= 1.25 and size):
 
-| Token       | Size / line | Weight | Use                                                                                                                                     |
-| ----------- | ----------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `--t-code`  | 16px / 1.2  | 800    | The pretty Room Code ("The Silly Otters") — hero of Connected view. Color `--c-accent-800`.                                             |
-| `--t-title` | 15px / 1.2  | 800    | Popup title "YouTube Buddy".                                                                                                            |
-| `--t-body`  | 13px / 1.45 | 400    | Default body, inputs, buttons (buttons 600).                                                                                            |
-| `--t-label` | 11px / 1.3  | 600    | Section eyebrows. **Sentence case, no uppercase, minimal letter-spacing** (uppercase reads colder; softer here). Color `--c-ink-muted`. |
-| `--t-meta`  | 11px / 1.3  | 500    | Buddy last-seen, backend URL, footnotes. Color `--c-ink-muted`.                                                                         |
+| Token       | Size / line | Weight | Use                                                                                                                                       |
+| ----------- | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `--t-code`  | 16px / 1.2  | 800    | The pretty Room Code ("The Silly Otters") in Room Home. Color `--ytb-accent-800`.                                                         |
+| `--t-title` | 15px / 1.2  | 800    | Popup title "YouTube Buddy".                                                                                                              |
+| `--t-body`  | 13px / 1.45 | 400    | Default body, inputs, buttons (buttons 600).                                                                                              |
+| `--t-label` | 11px / 1.3  | 600    | Section eyebrows. **Sentence case, no uppercase, minimal letter-spacing** (uppercase reads colder; softer here). Color `--ytb-ink-muted`. |
+| `--t-meta`  | 11px / 1.3  | 500    | Buddy last-seen, backend URL, footnotes. Color `--ytb-ink-muted`.                                                                         |
 
 Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch here.
 
@@ -111,45 +111,43 @@ Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch her
 
 ```css
 :root {
-	--sp-1: 4px;
-	--sp-2: 8px;
-	--sp-3: 12px;
-	--sp-4: 16px;
-	--sp-5: 20px;
-	--sp-6: 24px;
-	--r-sm: 8px; /* inputs, small controls */
-	--r-md: 12px; /* buttons, chips, roster rows */
-	--r-lg: 16px; /* sub-panels, confirm dialog */
-	--r-pill: 999px; /* status indicator, sharing pill */
+	--ytb-sp-1: 4px;
+	--ytb-sp-2: 8px;
+	--ytb-sp-3: 12px;
+	--ytb-sp-4: 16px;
+	--ytb-sp-5: 20px;
+	--ytb-sp-6: 24px;
+	--ytb-r-sm: 8px; /* inputs, small controls */
+	--ytb-r-md: 12px; /* buttons, chips, roster rows */
+	--ytb-r-lg: 16px; /* sub-panels, confirm dialog */
+	--ytb-r-pill: 999px; /* status indicator, sharing pill */
 }
 ```
 
-- **Popup width: 320px** (up from 300 for breathing room), padding `--sp-4`.
+- **Popup width: 320px** (up from 300 for breathing room), padding `--ytb-sp-4`.
 - Use **rhythmic**, not uniform, spacing: tighter within a group (label -> control =
-  `--sp-1`), looser between groups (`--sp-4`/`--sp-5`). Same-padding-everywhere is a ban.
+  `--ytb-sp-1`), looser between groups (`--ytb-sp-4`/`--ytb-sp-5`). Same-padding-everywhere is a ban.
 - Generous radius everywhere is the friendliness lever, with **one exception**: the
   buddy **color swatches stay 2px-radius squares** because they are the legend for the
   square on-video markers drawn by `renderer.js`. Do not round them into circles.
-- Min hit target 24px; the pencil/copy icon buttons already sit at 30-34px, keep that.
+- Keep every pointer target at least 24px.
 
 ### 1.4 Elevation
 
-Two levels only, both warm-tinted (see `--e-pop`, `--e-dialog`). No glassmorphism, no
-blur. Cards are not the default: the popup is one warm surface with grouped content,
-not a stack of nested cards. Sub-panels (cream `--c-surface-tint`) are used sparingly
-to group the Connected-view status block, never nested.
+Two levels only, both warm-tinted (see `--ytb-e-pop`, `--ytb-e-dialog`). No glassmorphism and no
+blur. The Extension Popup uses one status card. Room Home uses one grouped card per Settings section.
 
-### 1.5 On-video delivery (namespaced injected tokens)
+### 1.5 Shared delivery (namespaced injected tokens)
 
-The on-video Note UI consumes this system through `extension/theme.js`, loaded right
-after `shared.js` in the content-script array. It injects ONE `:root` stylesheet
+Every extension surface consumes this system through `extension/theme.js`, loaded right
+after `shared.js`. It injects one `:root` stylesheet
 into the watch page exposing every token above under a **`--ytb-*` prefix**
 (`--ytb-accent-500`, `--ytb-ink`, `--ytb-r-lg`, `--ytb-ease-spring`, ...) so nothing
 can collide with YouTube's own custom properties, plus the `@font-face` for
 `'YTB Rounded'`. The Nunito base64 subset lives ONLY in theme.js; `popup.html`
 loads the same file as a plain `<script>` so both contexts share one blob.
 
-On-video specifics, on top of the popup values:
+Surface-specific rules:
 
 - **Opaque over video.** Panels and cards are fully opaque (`--ytb-surface`: cream
   in light, espresso in dark) with the elevation shadows, so text stays legible over
@@ -157,21 +155,21 @@ On-video specifics, on top of the popup values:
   emoji-over-video with a text shadow, since they are not cards.
 - **Theme Preference: forced Light/Dark, or Auto** (ADR-0008/0009). An explicit
   Light/Dark choice in Settings stamps `data-theme="light"|"dark"` on the
-  document root, and the `:root[data-theme=...]` token blocks (in `theme.js` and
-  `popup.html`) out-specify the media query, so a forced mode wins over the OS in
+  document root, and the `:root[data-theme=...]` token blocks in `theme.js`
+  out-specify the media query, so a forced mode wins over the OS in
   both directions. The third option is **Auto** (stored `'system'`): on YouTube
   pages the marker follows YouTube's own theme (`<html dark>` maps to
   `data-theme`, restamped live on the `ytb:yt-theme` flip content.js emits) so
   in-page surfaces match their surroundings; in the popup — which cannot see a
   page — Auto leaves the marker unset and falls back to `prefers-color-scheme`.
   The pure marker decision lives in `shared.js` (`YTB.themeMarker`).
-- **The Room Home Section** (ADR-0005) is a normal token surface too: it consumes
+- **The Room Home Panel** (ADR-0005) is a normal token surface: it consumes
   these `--ytb-*` tokens with no private palette, so it follows the Theme
   Preference — including Auto tracking YouTube's theme — exactly like the Note UI.
   Its thumbnail Dismiss keeps a fixed dark scrim + light glyph (a media overlay,
   the same exception as reaction previews), not a palette color.
 - The dark block also flips the light washes (`--ytb-accent-050/100/200`) dark and
-  lifts `--ytb-danger-text`, mirroring the popup's inline dark overrides, so
+  lifts `--ytb-danger-text`, so
   "hover = accent-050 wash" and "errors = danger-text" read correctly in both
   themes. `--ytb-on-accent` / `--ytb-on-fill` match the popup's fill-text contract.
 - theme.js also owns **keystroke isolation** for on-video YTB inputs (a
@@ -190,11 +188,11 @@ Never animate layout properties (width/height/top/left) for choreography — use
 
 ```css
 :root {
-	--dur-quick: 140ms;
-	--dur-base: 200ms;
-	--dur-slow: 300ms;
-	--ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quint, default */
-	--ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1); /* mild overshoot, "settle" */
+	--ytb-dur-quick: 140ms;
+	--ytb-dur-base: 200ms;
+	--ytb-dur-slow: 300ms;
+	--ytb-ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quint, default */
+	--ytb-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1); /* mild overshoot, "settle" */
 }
 @media (prefers-reduced-motion: reduce) {
 	/* springs -> ease-out, transforms -> none, keep short opacity fades */
@@ -203,22 +201,12 @@ Never animate layout properties (width/height/top/left) for choreography — use
 
 **Choreography (the "subtle spring" moments):**
 
-- **View switch** (chooser <-> join <-> connected): outgoing fades + slides up 6px
-  (`--dur-quick`, `--ease-out`); incoming fades in + slides from 6px below
-  (`--dur-base`). Cross-fade, no layout jump.
-- **Copy check:** the check icon pops in with `--ease-spring` (small overshoot,
-  scale 0.5 -> 1); "Copied!" fades in beside it. This is the signature delight beat.
-- **Buttons:** press = scale 0.97 (`--dur-quick`); release settles back with
-  `--ease-spring`. Hover = background/color glide only.
-- **New buddy row:** when the roster gains a row, it fades + slides in with a soft
-  `--ease-spring` settle (`--dur-slow`). Existing rows do not jump.
-- **Swatch color pick:** the chosen swatch does a quick one-shot wiggle (rotate +/-4deg,
-  ~180ms) then settles. Reduced-motion: instant.
-- **Sharing toggle:** the state pill glides color + the dot cross-fades; no bounce.
-- **Waiting state:** the peach status dot **breathes** (opacity/scale pulse, ~1.6s
-  loop, `--ease-out` in and out). Paused under reduced-motion.
+- **Buttons:** press = scale 0.97 (`--ytb-dur-quick`); release settles back with
+  `--ytb-ease-spring`. Hover = background/color glide only.
+- **View switch:** Settings replaces the normal Room Home content without resizing the shell.
+- **Switches:** the knob glides between states without bounce.
 - **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
-  (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ease-out`),
+  (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ytb-ease-out`),
   until the Mention or Reply is Acknowledged. The 6px dot itself never moves, resizes, or
   recolors — the timeline is dense and a neighbouring dot may sit only 11px away. Under
   reduced-motion the halo becomes a **static gap ring**, no animation: a 1px `#0f0f0f`
@@ -231,8 +219,7 @@ Never animate layout properties (width/height/top/left) for choreography — use
   reduced-motion viewer, who has no pulse to fall back on, keeps an Unseen cue they can
   actually see. Any future restyle of this ring must hold both edges at >= 3:1.
 
-These two are the **only** looping animations, and they deliberately share the ~1.6s
-breathing rhythm: both mean "something is waiting on you".
+The Unseen Note Dot is the only looping animation. It means something is waiting on you.
 
 Springs are **mild** (overshoot < ~6%). This intentionally relaxes impeccable's
 strict no-bounce guidance for personality; keep it restrained so it reads warm, not toy-like.
@@ -241,142 +228,73 @@ strict no-bounce guidance for personality; keep it restrained so it reads warm, 
 
 ## 3. Component playbook
 
-Mapped to the real popup elements. IDs reference current `popup.html`; the implementer
-may restructure DOM but must preserve every behavior and the `YTB` / `YTBRoomCode` call
-sequences in `popup.js`.
+### Extension Popup
 
-### Header (`.header`)
+Keep the Extension Popup at 320px wide. Render one compact status card with Room state, Room Code, Buddy count, Sharing state, and the quiet Connection Lost line. Render one full-width primary button labelled **Your Room** below the card.
 
-- Title "YouTube Buddy" (`--t-title`, `--c-ink`). Optional: a small apricot dot or
-  underscore accent, no logo art.
-- **Nickname** on the right. Two states on one field (`#name-field`):
-  - _Editable_ (`#name` input): warm well (`--c-surface-sunk`), `--r-sm`, right-aligned.
-    Placeholder in `--c-ink-faint`. Focus = `--c-line` -> `--c-accent-500` border +
-    `--c-ring` halo.
-  - _Locked chip_ (`.field-locked`): the value as a soft cream chip with the pencil
-    (`#name-edit`) as a bare icon at the right edge, muted, darkening on hover.
-- Fresh install (blank name) opens editable (onboarding). Commit on Enter/blur; persists
-  every keystroke; re-asserts presence on commit.
+Do not render inputs, switches, Create, Join, Leave Room, Buddy Color, quick toggles, or a Settings entry point. The popup answers status questions and routes the viewer to Room Home. It does not change product state.
 
-### Section eyebrow (`.lbl`)
+### Room Home Panel
 
-Sentence case, `--t-label`, muted. "Room code", "Nickname" (not ALL CAPS).
+Keep the fixed, left-docked 480px portrait shell over a dim scrim. The shell owns two mutually exclusive views:
 
-### Chooser (`#view-chooser`)
+- The normal view stacks Room Feed above Recommendations.
+- The Settings view replaces that content with Profile, Room, On-video, and Appearance sections in one scroll.
 
-- Two full-width actions, `--sp-2` gap. **"Create a room"** = primary (apricot fill,
-  ink text). **"Join a room"** = secondary (cream `--c-surface-tint`, `--c-line-strong`
-  border, ink text). Both `--r-md`, 600 weight.
-- `#create-feedback`: inline error line in `--c-danger` ("Couldn't reach the server").
-- `#chooser-cancel`: text-only accent link, only shown when a code already exists.
+Show a gear in the normal header. Show Back in the Settings header. Keep Close available in both views. Closing, scrim click, Escape, and single-page navigation remove the panel. Reopening chooses the initial view from the current Room state: Waiting and In room open the normal view; Unpaired and Room full open Settings.
 
-### Join (`#view-join`)
+Do not move focus, scroll, or highlight a control for Room full. Trap Tab inside the open panel. If a confirmation is open, Escape dismisses it before a later Escape can close Room Home.
 
-- `#join-input` warm well, `--r-sm`, placeholder "The Something Somethings".
-- `#join-submit`: disabled + neutral until input, then promotes to apricot primary.
-- `#join-feedback`: inline `--c-danger` ("This room doesn't exist yet").
-- `#join-back`: text-only accent link.
+The Buddy Room toggle matches whichever YouTube guide is active: a 40px row in the full guide or a 64x76px entry in the compact mini guide. Keep the buddies icon as the only open-state color change.
 
-### Connected (`#view-connected`)
+### Settings sections
 
-- **Code label** (`#code`): `--t-code`, `--c-accent-800`, ellipsis-truncates. This is
-  the visual hero of the view.
-- **Copy** (`#copy-code`): bare icon button, muted -> ink on hover; copy/check icons
-  crossfade with the spring pop (see Motion). `#copy-feedback` = "Copied!" in
-  `--c-success`, "Could not copy" in `--c-danger`.
-- **Status block** in a cream `--c-surface-tint` sub-panel (`--r-lg`, `--sp-3` pad):
-  - **Unpaired** (no code) — not shown here (routes to chooser).
-  - **Waiting** — breathing peach dot + "Waiting for buddies". Sharing toggle live.
-  - **In room** — the roster (see below). Sharing toggle live.
-  - **Room full** — muted lock cue + "This code already has N members." Toggle inert.
-- **Sharing control** (`#sharing-toggle`): render as a small **pill** with a state dot.
-  On = paired-green dot + "Sharing"; Off = muted dot + "Not sharing" (strike-through the
-  word on hover as the affordance to stop, matching current intent). **Start is instant;
-  stop routes through the confirm dialog.** Keep aria-pressed / aria-label.
-- **Roster** (`#roster`): one row per buddy = `[2px square swatch] name .......... 5m ago`.
-  Swatch color = `YTB.buddyColor`; clicking it opens the color grid. Name in 600, ink;
-  last-seen (`--t-meta`, muted, right-aligned) via the existing relative formatter
-  ("just now / 5m ago / 2h ago / 3d ago"). Row hover = faint `--c-accent-050` wash.
-- **Leave room** (`#leave-room`): danger-red fill, white text, `--r-md`. Always confirms.
+Profile contains one Nickname input. Persist edits to local storage and reassert presence on Enter or blur so Buddies receive the new Display Name.
 
-### Color grid popover (`#color-grid`)
+Room shows Room state and Room Code first. Unpaired and Room full show Create and Join. Waiting and In room show the Buddy roster, a Buddy Color Swatch for each Buddy, and Leave Room. Use the eight fixed Buddy Colors, disable colors assigned to another Buddy, and mark the selected color with the focus-ring token.
 
-- Floating popover, `--e-pop`, `--r-lg`, anchored to the clicked swatch (keep the
-  flip-above-when-no-room-below logic). 4-column grid of `YTB.BUDDY_COLORS` squares
-  (2px radius, matching markers). Used colors disabled at ~0.28 opacity. Selected =
-  `--c-ink` outline ring. Dismiss on outside-click or Escape.
+On-video contains four switches in this order: Share video progress, Notes Visibility, Buddy Progress Visibility, and Spoiler Default. Put the four-edge Notification Position picker below them. Keep Stop sharing behind a confirmation.
 
-### Confirm dialog (`#confirm-overlay`)
+Appearance contains the segmented Theme Preference control: Light, Dark, and Auto.
 
-- In-popup modal (never `window.confirm`). Backdrop = warm ink at ~0.32 alpha. Box:
-  `--c-surface`, `--r-lg`, `--e-dialog`, `--sp-4` pad. Enters with a soft `--ease-spring`
-  scale (0.96 -> 1) + fade. Two variants for the OK button: **danger** (red, "Leave") /
-  **neutral** (warm charcoal `--c-neutral`, "Stop sharing"). Cancel = secondary. Dismiss
-  via Cancel / backdrop / Escape. This is the one justified modal (destructive confirm).
+### Confirmation dialog
 
-### Footer (`footer`)
+Render confirmations inside Room Home, never with `window.confirm`. Use the surface token, large radius, and dialog shadow over a warm translucent backdrop. Focus Cancel when the dialog opens. Leave Room uses the danger fill; Stop sharing uses the neutral action style.
 
-- Divider `--c-line`, then "Backend: <url>" in `--t-meta`, muted. Understated.
+### Your Room launch
+
+Reuse the active tab only when its URL is the YouTube home route. Create a new inactive YouTube Home tab for a watch page, another YouTube route, another site, or no active tab. Retry the direct content-script message until Room Home acknowledges that it opened, then activate the tab. This ordering preserves the viewer's current page, covers delayed content-script startup, and leaves no persisted launch request for a later tab.
 
 ---
 
-## 4. Dark mode (warm, cozy)
+## 4. Dark mode
 
-The popup opens over YouTube in either theme, so support both. Dark is **warm espresso**,
-not blue-gray, not pure black. Same accent hue, slightly lifted chroma so apricot still
-glows on a dark ground.
+Use the shared `--ytb-*` token sets injected by `theme.js` on the Extension Popup and every in-page extension surface. Dark mode stays warm espresso rather than blue-gray or pure black. Keep apricot fills paired with dark warm ink.
 
-```css
-@media (prefers-color-scheme: dark) {
-	:root {
-		--c-surface: oklch(23% 0.014 52); /* warm espresso */
-		--c-surface-tint: oklch(27% 0.018 52);
-		--c-surface-sunk: oklch(20% 0.014 52);
-		--c-line: oklch(33% 0.018 52);
-		--c-line-strong: oklch(40% 0.02 52);
-		--c-ink: oklch(94% 0.015 68); /* warm cream text */
-		--c-ink-muted: oklch(74% 0.02 62);
-		--c-ink-faint: oklch(58% 0.018 58);
-		--c-accent-500: oklch(78% 0.13 58); /* apricot, a touch brighter */
-		--c-accent-700: oklch(68% 0.14 55);
-		--c-accent-800: oklch(82% 0.12 60); /* code label glows on dark */
-		--e-pop: 0 8px 24px oklch(0% 0 0 / 0.45);
-		--e-dialog: 0 14px 40px oklch(0% 0 0 / 0.55);
-	}
-}
-```
-
-Primary buttons in dark mode keep **apricot fill + dark-ink text** (the fill is light
-enough that ink still wins contrast). Verify AA in both themes before shipping.
+A forced Light or Dark Theme Preference stamps the same marker on the popup and every YouTube tab. Under Auto, in-page surfaces follow YouTube and the popup follows the operating system. Verify text and control contrast in both forced modes.
 
 ---
 
-## 5. Accessibility & constraints (non-negotiable)
+## 5. Accessibility and constraints
 
-- **CSP:** no external resources at all. Inline all CSS, all SVGs, and the base64 font.
-  No CDN, no network fetch for assets, no build step (files load directly; keep the
-  `shared.js -> room-code.js -> popup.js` load order).
-- **Contracts are read-only:** `window.YTB` (shared.js) and `window.YTBRoomCode`
-  (room-code.js) APIs must not change; the backend test suite depends on room-code.js.
-- Keyboard: everything operable; visible `--c-ring` focus-visible on all controls.
-  Preserve existing roles / aria-live regions / aria-pressed / aria-labels.
-- `prefers-reduced-motion`: springs -> ease-out, loops paused, transforms dropped.
-- Contrast: meet WCAG AA for text in **both** light and dark themes.
-- ASCII-only in source and copy. No em dashes in UI copy.
+- Keep every action keyboard operable with a visible `--ytb-ring` focus indicator.
+- Keep semantic button, switch, radio, dialog, and status roles.
+- Keep text contrast at WCAG AA in Light and Dark.
+- Keep minimum pointer targets at 24px.
+- Disable transforms and looping motion under `prefers-reduced-motion`.
+- Bundle all assets. Do not add a content security policy exception, CDN, or build step.
+- Keep UI copy and source comments in printable ASCII.
 
 ---
 
-## 6. Decisions locked (2026-07-04)
+## 6. Decisions locked (2026-09-05)
 
-| Decision            | Choice                                                                       |
-| ------------------- | ---------------------------------------------------------------------------- |
-| Accent              | Soft apricot / peach pastel (hue ~55), Restrained strategy                   |
-| Primary button text | Dark warm ink on apricot (pastel too light for white)                        |
-| Typeface            | Nunito, bundled base64 variable woff2, `ui-rounded` fallback                 |
-| Motion              | Gentle ease-out base + mild spring on confirms/arrivals; reduced-motion safe |
-| Personality         | Warm typographic, no mascots / emoji / illustration                          |
-| Theme               | Light primary + warm-espresso dark, both AA                                  |
-| Popup width         | 320px                                                                        |
-
-Open for implementation to tune: exact Nunito subset/weights, precise OKLCH nudges after
-on-screen contrast checks, whether the sharing control is a pill vs inline toggle.
+| Decision  | Choice                                                |
+| --------- | ----------------------------------------------------- |
+| Accent    | Soft apricot and warm neutrals                        |
+| Typeface  | Bundled Nunito with rounded system fallbacks          |
+| Popup     | 320px read-only status card and one Your Room button  |
+| Room Home | 480px portrait shell with normal and Settings views   |
+| Settings  | Four visible sections in one scroll                   |
+| Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens |
+| Motion    | Gentle ease-out with reduced-motion fallbacks         |

@@ -1,22 +1,15 @@
-// UA-007: the popup's text links (#join-back, #chooser-cancel) are interactive
-// and must offer a >= 24px-tall hit area (DESIGN.md 1.3). Red at ~19.6px.
+// UA-007: the popup's sole action must offer a >= 24px-tall hit area.
 import { expect, test } from '@playwright/test';
-import { launchExtension, routeBackend, seedPaired } from './harness';
+import { launchExtension, seedPaired } from './harness';
 
-test('UA-007: popup text links reach the 24px hit minimum', async () => {
+test('UA-007: popup action reaches the 24px hit minimum', async () => {
 	const context = await launchExtension();
 	try {
-		routeBackend(context, { down: false, read: () => ({}) });
 		const popup = await seedPaired(context);
 		await popup.reload();
-		await popup.click('#settings-open');
-		await popup.click('#leave-room');
-		await popup.click('#confirm-disconnect'); // leave the room -> chooser with Cancel? no code left, so no cancel
-		await popup.waitForSelector('#choose-join', { state: 'visible' });
-		await popup.click('#choose-join');
-		await popup.waitForSelector('#join-back', { state: 'visible' });
-		const height = await popup.evaluate(() => (document.getElementById('join-back') as HTMLElement).offsetHeight);
-		expect(height, `#join-back height ${height}`).toBeGreaterThanOrEqual(24);
+		const height = await popup.locator('#your-room').evaluate((button) => (button as HTMLElement).offsetHeight);
+		expect(height, `#your-room height ${height}`).toBeGreaterThanOrEqual(24);
+		expect(await popup.locator('a').count()).toBe(0);
 	} finally {
 		await context.close();
 	}

@@ -1,11 +1,9 @@
-// UA-019: popup type sits on the declared 11/13/15/16 scale (DESIGN.md 1.2).
-// Red while links/seg buttons/compact button/confirm body render 12px and
-// the settings/confirm titles 14px.
+// UA-019: popup type sits on the declared 11/13/15/16 scale.
 import { expect, test } from '@playwright/test';
 import { launchExtension, seedPaired } from './harness';
 
 const SIZES = new Set([11, 13, 15, 16]);
-const SELECTORS = ['#join-back', '.seg-btn', '#sharing-turn-on', '#confirm-body', '.settings-title', '#confirm-title'];
+const SELECTORS = ['h1', 'dt', 'dd', '#your-room', '.connection', '.feedback'];
 
 test('UA-019: popup type sits on the declared scale', async () => {
 	const context = await launchExtension();

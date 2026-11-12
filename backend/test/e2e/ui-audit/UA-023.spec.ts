@@ -1,16 +1,22 @@
 // UA-023: elevation is tinted, never gray (DESIGN.md 1.1). Red while the
 // light theme's switch knob casts a pure untinted black shadow.
 import { expect, test } from '@playwright/test';
-import { launchExtension, seedPaired } from './harness';
+import { homeFixture, launchExtension, openHomePanel, routeBackend, seedPaired } from './harness';
 
 test('UA-023: the switch knob shadow is warm-tinted in light theme', async () => {
 	const context = await launchExtension();
 	try {
-		const popup = await seedPaired(context, { theme: 'light' });
-		await popup.reload();
-		await popup.click('#settings-open');
-		await popup.waitForSelector('.switch-knob');
-		const shadow = await popup.evaluate(() => getComputedStyle(document.querySelector('.switch-knob')!).boxShadow);
+		routeBackend(context, { down: false, read: () => ({}) });
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		await seedPaired(context, { theme: 'light' });
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		await openHomePanel(home);
+		await home.locator('.ytb-hs-icon').click();
+		await home.waitForSelector('.ytb-hs-switch > span');
+		const shadow = await home.evaluate(() => getComputedStyle(document.querySelector('.ytb-hs-switch > span')!).boxShadow);
 		// Chromium serializes the color as rgb() or oklch() depending on gamut;
 		// achromatic means r=g=b, or an oklch chroma of 0.
 		const rgb = shadow.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
