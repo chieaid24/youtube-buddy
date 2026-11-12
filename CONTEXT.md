@@ -216,7 +216,7 @@ The backend event-log record behind System Messages: one row per recommend (`{ t
 _Avoid_: log entry, activity record
 
 **Settings view**:
-The one-scroll management view opened by the gear in the Room Home Panel header. It replaces the normal Room Feed and Recommendations content until Back is pressed. Its four visible sections are **Profile** (Nickname), **Room** (Room state, Room Code, Create or Join, Buddy roster, Buddy Color Swatches, and Leave Room), **On-video** (Share video progress, Notes Visibility, Buddy Progress Visibility, Spoiler Default, and Notification Position), and **Appearance** (Theme Preference). Stop sharing and Leave Room keep confirmation dialogs; Escape dismisses the confirmation before it can close the panel. Unpaired and Room full viewers open directly into this view.
+The one-scroll management view opened by the gear in the Room Home Panel header. It replaces the normal Room Feed and Recommendations content until Back is pressed. Its four visible sections are **Profile** (Nickname), **Room** (Room state, Room Code, Create or Join, Buddy roster, Buddy Color Swatches, and Leave Room), **On-video** (Share video progress, Show Notes, Show Buddy Progress, Spoiler Default, and Notification Position), and **Appearance** (Theme Preference). Stop sharing and Leave Room keep confirmation dialogs; Escape dismisses the confirmation before it can close the panel. Unpaired and Room full viewers open directly into this view.
 _Avoid_: Control Panel, options page, preferences page, config panel
 
 **Theme Preference**:
@@ -232,9 +232,9 @@ The player edge where Playback Notifications appear, chosen from four edges — 
 _Avoid_: popup location, toast position, alert corner, zone, corner
 
 **Notes Visibility** (aka "Notes off"):
-A per-install switch that hides the ENTIRE on-video Note layer at once — every Video Timeline dot, Note Preview, Expanded Note, Playback Notification, AND the Add Note (+) button — leaving the player with zero YTB Note UI. Default is on (Notes shown). Independent of Sharing and of Buddy Progress Visibility.
+A per-install switch that hides the ENTIRE on-video Note layer at once — every Video Timeline dot, Note Preview, Expanded Note, Playback Notification, AND the Add Note (+) button — leaving the player with zero YTB Note UI. Default is on (Notes shown). Independent of Sharing and of Buddy Progress Visibility. The Settings view switch label reads "Show Notes"; the term itself stays Notes Visibility in code and docs.
 _Avoid_: mute notes, hide comments, disable notes
 
 **Buddy Progress Visibility**:
-A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the Progress Markers on the Video Timeline and the Watched-By Dots on feed/home thumbnails (the fractional thumbnail Progress Bar it used to hide is retired). Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the popup roster or presence.
+A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the Progress Markers on the Video Timeline and the Watched-By Dots on feed/home thumbnails (the fractional thumbnail Progress Bar it used to hide is retired). Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the popup roster or presence. The Settings view switch label reads "Show Buddy Progress"; the term itself stays Buddy Progress Visibility in code and docs.
 _Avoid_: hide markers (alone), hide buddies, hide bars

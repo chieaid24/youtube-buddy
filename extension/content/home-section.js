@@ -28,6 +28,9 @@
 	let currentName = '';
 	let pendingConfirm = null;
 	let selectedBuddyId = '';
+	const SWITCH_GLIDE_MS = 200; // matches --ytb-dur-base
+	const switchShown = new Map(); // switch label -> last rendered state
+	const switchFlippedAt = new Map(); // switch label -> time of its last state change
 	let dismissedIds = new Set(); // this Room's local Dismissals (item ids)
 	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
 
@@ -201,6 +204,7 @@
 			conn.textContent = "Can't reach your Room. Retrying...";
 		}
 
+		if (activeView !== 'settings') switchShown.clear();
 		const body = activeView === 'settings' ? buildSettingsView() : document.createElement('div');
 		if (activeView === 'normal') {
 			body.className = 'ytb-hs-body';
@@ -692,8 +696,9 @@
 
 	function buildProfileSettings() {
 		const group = buildSettingsGroup('Profile');
+		const row = document.createElement('div');
+		row.className = 'ytb-hs-row';
 		const label = document.createElement('label');
-		label.className = 'ytb-hs-field-label';
 		label.textContent = 'Nickname';
 		label.htmlFor = 'ytb-hs-name';
 		const input = document.createElement('input');
@@ -716,16 +721,18 @@
 		input.addEventListener('keydown', (event) => {
 			if (event.key === 'Enter') input.blur();
 		});
-		group.append(label, input);
+		row.append(label, input);
+		group.append(row);
 		return group;
 	}
 
 	function roomState() {
-		if (!lastDetail || !lastDetail.roomCode) return { label: 'Unpaired', buddies: [], locked: false };
+		if (!lastDetail || !lastDetail.roomCode) return { label: 'Unpaired', tone: 'idle', buddies: [], locked: false };
 		const view = YTB.roomView(lastDetail, myClientId);
-		if (lastDetail.locked || view.locked) return { label: 'Room full', buddies: [], locked: true };
+		if (lastDetail.locked || view.locked) return { label: 'Room full', tone: 'full', buddies: [], locked: true };
 		return {
 			label: view.buddies.length ? 'In room' : 'Waiting',
+			tone: view.buddies.length ? 'live' : 'waiting',
 			buddies: view.buddies,
 			locked: false,
 		};
@@ -735,10 +742,11 @@
 		const group = buildSettingsGroup('Room');
 		const state = roomState();
 		const status = document.createElement('div');
-		status.className = 'ytb-hs-room-status';
+		status.className = 'ytb-hs-row ytb-hs-room-status';
 		status.innerHTML = '<span>Room state</span>';
 		const strong = document.createElement('strong');
 		strong.textContent = state.label;
+		strong.dataset.tone = state.tone;
 		status.append(strong);
 		group.append(status);
 
@@ -748,19 +756,22 @@
 			group.append(buildPairPrompt());
 		} else {
 			group.append(buildRoster(state.buddies));
+			const actions = document.createElement('div');
+			actions.className = 'ytb-hs-row';
 			const leave = document.createElement('button');
 			leave.type = 'button';
-			leave.className = 'ytb-hs-btn ytb-hs-danger';
+			leave.className = 'ytb-hs-btn ytb-hs-leave';
 			leave.textContent = 'Leave Room';
 			leave.addEventListener('click', confirmLeaveRoom);
-			group.append(leave);
+			actions.append(leave);
+			group.append(actions);
 		}
 		return group;
 	}
 
 	function buildRoomCode(code) {
 		const row = document.createElement('div');
-		row.className = 'ytb-hs-code-row';
+		row.className = 'ytb-hs-row ytb-hs-code-row';
 		const label = document.createElement('span');
 		label.textContent = 'Room Code';
 		const value = document.createElement('strong');
@@ -776,8 +787,17 @@
 		const feedback = document.createElement('span');
 		feedback.className = 'ytb-hs-copy-feedback';
 		feedback.setAttribute('role', 'status');
-		copy.addEventListener('click', () => YTBRoomCode.copy({ text: value.textContent, feedback, button: copy }));
-		row.append(label, value, copy, feedback);
+		copy.addEventListener('click', () => {
+			// Restart the float when clicked again mid-flight.
+			feedback.style.animation = 'none';
+			void feedback.offsetWidth;
+			feedback.style.animation = '';
+			YTBRoomCode.copy({ text: value.textContent, feedback, button: copy });
+		});
+		const anchor = document.createElement('span');
+		anchor.className = 'ytb-hs-copy-anchor';
+		anchor.append(copy, feedback);
+		row.append(label, value, anchor);
 		return row;
 	}
 
@@ -802,7 +822,7 @@
 			const swatch = document.createElement('button');
 			swatch.type = 'button';
 			swatch.className = 'ytb-hs-swatch';
-			swatch.style.background = YTB.buddyColor(buddy.clientId);
+			swatch.style.setProperty('--ytb-hs-fill', YTB.buddyColor(buddy.clientId));
 			swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(buddy.clientId, buddy.name, roster)}`);
 			swatch.addEventListener('click', () => {
 				selectedBuddyId = selectedBuddyId === buddy.clientId ? '' : buddy.clientId;
@@ -835,7 +855,7 @@
 			const choice = document.createElement('button');
 			choice.type = 'button';
 			choice.className = 'ytb-hs-color';
-			choice.style.background = color;
+			choice.style.setProperty('--ytb-hs-fill', color);
 			choice.disabled = used.has(color);
 			choice.setAttribute('aria-label', choice.disabled ? `${color}, already assigned` : `Choose ${color}`);
 			choice.setAttribute('aria-pressed', String(room[clientId] === color));
@@ -861,8 +881,8 @@
 				if (currentSharing) confirmStopSharing();
 				else setSharing(true);
 			}),
-			buildSwitch('Notes Visibility', !currentSettings.notesHidden, () => saveSettings({ notesHidden: !currentSettings.notesHidden })),
-			buildSwitch('Buddy Progress Visibility', !currentSettings.buddyProgressHidden, () =>
+			buildSwitch('Show Notes', !currentSettings.notesHidden, () => saveSettings({ notesHidden: !currentSettings.notesHidden })),
+			buildSwitch('Show Buddy Progress', !currentSettings.buddyProgressHidden, () =>
 				saveSettings({
 					buddyProgressHidden: !currentSettings.buddyProgressHidden,
 				}),
@@ -878,9 +898,18 @@
 	function buildSwitch(label, checked, onClick) {
 		const button = document.createElement('button');
 		button.type = 'button';
-		button.className = 'ytb-hs-switch-row';
+		button.className = 'ytb-hs-row ytb-hs-switch-row';
 		button.setAttribute('role', 'switch');
 		button.setAttribute('aria-checked', String(checked));
+		// A render replaces this node, so a changed state replays the glide as an animation.
+		const now = performance.now();
+		if (switchShown.has(label) && switchShown.get(label) !== checked) switchFlippedAt.set(label, now);
+		switchShown.set(label, checked);
+		const elapsed = now - (switchFlippedAt.has(label) ? switchFlippedAt.get(label) : -Infinity);
+		if (elapsed < SWITCH_GLIDE_MS) {
+			button.classList.add('ytb-hs-flip');
+			button.style.setProperty('--ytb-hs-flip-delay', `${-Math.round(elapsed)}ms`);
+		}
 		const text = document.createElement('span');
 		text.textContent = label;
 		const toggle = document.createElement('span');
@@ -894,7 +923,7 @@
 
 	function buildNotificationPicker() {
 		const wrap = document.createElement('div');
-		wrap.className = 'ytb-hs-notifications';
+		wrap.className = 'ytb-hs-row ytb-hs-notifications';
 		const label = document.createElement('span');
 		label.textContent = 'Notification Position';
 		const picker = document.createElement('div');
@@ -917,6 +946,8 @@
 
 	function buildAppearanceSettings() {
 		const group = buildSettingsGroup('Appearance');
+		const row = document.createElement('div');
+		row.className = 'ytb-hs-row';
 		const label = document.createElement('span');
 		label.textContent = 'Theme Preference';
 		const choices = document.createElement('div');
@@ -937,7 +968,8 @@
 			button.addEventListener('click', () => saveSettings({ theme: value }));
 			choices.append(button);
 		}
-		group.append(label, choices);
+		row.append(label, choices);
+		group.append(row);
 		return group;
 	}
 
@@ -1538,80 +1570,157 @@
         display: flex; flex-direction: column; gap: 12px;
       }
       #${SECTION_ID} .ytb-hs-set-group {
-        padding: 12px; border: 1px solid var(--ytb-line); border-radius: var(--ytb-r-lg);
+        padding: 12px 16px 4px; border: 1px solid var(--ytb-line); border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface-tint);
       }
       #${SECTION_ID} .ytb-hs-set-group h3,
-		#${SECTION_ID} .ytb-hs-set-group h4 { margin: 0 0 8px; font-size: 11px; font-weight: 800; }
-      #${SECTION_ID} .ytb-hs-field-label { display: block; margin-bottom: 5px; color: var(--ytb-ink-muted); font-size: 11px; }
-      #${SECTION_ID} .ytb-hs-name { width: 100%; }
-      #${SECTION_ID} .ytb-hs-room-status,
-      #${SECTION_ID} .ytb-hs-code-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-      #${SECTION_ID} .ytb-hs-room-status > span,
-      #${SECTION_ID} .ytb-hs-code-row > span:first-child { color: var(--ytb-ink-muted); }
-		#${SECTION_ID} .ytb-hs-room-status strong,
-		#${SECTION_ID} .ytb-hs-code-row strong { margin-left: auto; }
-		#${SECTION_ID} .ytb-hs-code-row strong { color: var(--ytb-accent-800); font-size: 16px; font-weight: 800; }
-      #${SECTION_ID} .ytb-hs-copy {
-        flex: none; display: inline-flex; align-items: center; justify-content: center;
-        width: 28px; height: 28px; padding: 4px; border: 1px solid var(--ytb-line-strong); border-radius: var(--ytb-r-sm);
-        background: var(--ytb-surface); color: var(--ytb-ink); cursor: pointer;
+      #${SECTION_ID} .ytb-hs-set-group h4 { margin: 0 0 2px; font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--ytb-ink-muted); }
+      /* Every setting is one row: label left, control right. */
+      #${SECTION_ID} .ytb-hs-row {
+        box-sizing: border-box; width: 100%; min-height: 40px; padding: 6px 0;
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        color: var(--ytb-ink); font: 600 13px/1.3 var(--ytb-font);
       }
-      #${SECTION_ID} .ytb-hs-code-row { flex-wrap: wrap; }
-      #${SECTION_ID} .ytb-hs-copy-feedback { flex-basis: 100%; color: var(--ytb-ink-muted); font-size: 11px; text-align: right; }
-      #${SECTION_ID} .ytb-hs-copy-feedback:empty { display: none; }
-      #${SECTION_ID} .ytb-hs-copy-feedback.is-error { color: var(--ytb-danger-text); }
-      #${SECTION_ID} .ytb-hs-copy svg { width: 18px; height: 18px; }
+      /* Hairline between a group's blocks; the first follows the eyebrow bare. */
+      #${SECTION_ID} .ytb-hs-set-group > * { border: 0 solid var(--ytb-line); }
+      #${SECTION_ID} .ytb-hs-set-group > * ~ * ~ * { border-top-width: 1px; }
+      #${SECTION_ID} .ytb-hs-row > label { flex: none; }
+      #${SECTION_ID} .ytb-hs-name { flex: 0 1 220px; min-width: 0; padding: 6px 10px; }
+      #${SECTION_ID} .ytb-hs-room-status strong { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+      #${SECTION_ID} .ytb-hs-room-status strong::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ytb-ink-faint); }
+      #${SECTION_ID} .ytb-hs-room-status strong[data-tone='live']::before { background: var(--ytb-success); }
+      #${SECTION_ID} .ytb-hs-room-status strong[data-tone='waiting']::before { background: var(--ytb-accent-500); }
+      #${SECTION_ID} .ytb-hs-room-status strong[data-tone='full']::before { background: var(--ytb-danger); }
+      #${SECTION_ID} .ytb-hs-code-row { gap: 4px; }
+      #${SECTION_ID} .ytb-hs-code-row > span:first-child { flex: none; margin-right: 8px; }
+      #${SECTION_ID} .ytb-hs-code-row strong { margin-left: auto; color: var(--ytb-accent-800); font-size: 16px; font-weight: 800; line-height: 1.2; text-align: right; }
+      /* Negative margin lines the 16px glyph up with the controls' right edge. */
+      #${SECTION_ID} .ytb-hs-copy-anchor { position: relative; flex: none; display: inline-flex; margin-right: -6px; }
+      #${SECTION_ID} .ytb-hs-copy {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ytb-r-sm);
+        background: transparent; color: var(--ytb-accent-700); cursor: pointer;
+        transition:
+          background var(--ytb-dur-quick) var(--ytb-ease-out),
+          color var(--ytb-dur-quick) var(--ytb-ease-out),
+          transform var(--ytb-dur-quick) var(--ytb-ease-spring);
+      }
+      #${SECTION_ID} .ytb-hs-copy svg { width: 16px; height: 16px; }
       #${SECTION_ID} .ytb-hs-copy .ytb-hs-copy-check,
       #${SECTION_ID} .ytb-hs-copy.is-copied > svg { display: none; }
-      #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { display: block; }
-      #${SECTION_ID} .ytb-hs-copy:hover { background: var(--ytb-accent-050); }
-      #${SECTION_ID} .ytb-hs-copy.is-copied { color: var(--ytb-accent-800); background: var(--ytb-accent-100); }
+      #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { display: block; animation: ytb-hs-copied-pop var(--ytb-dur-base) var(--ytb-ease-spring); }
+      #${SECTION_ID} .ytb-hs-copy:hover,
+      #${SECTION_ID} .ytb-hs-copy.is-copied { background: var(--ytb-accent-100); color: var(--ytb-accent-800); }
+      #${SECTION_ID} .ytb-hs-copy:active { transform: scale(0.92); }
+      /* Copy feedback: a chip that floats up from the button and fades; stays put if animations are off. */
+      #${SECTION_ID} .ytb-hs-copy-feedback {
+        position: absolute; right: 0; bottom: calc(100% + 2px); z-index: 1;
+        padding: 2px 8px; border-radius: var(--ytb-r-pill);
+        background: var(--ytb-accent-500); color: var(--ytb-on-accent);
+        font-size: 11px; font-weight: 700; line-height: 1.3; white-space: nowrap;
+        pointer-events: none;
+        animation: ytb-hs-copied-float 1200ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
+      }
+      #${SECTION_ID} .ytb-hs-copy-feedback:empty { display: none; }
+      #${SECTION_ID} .ytb-hs-copy-feedback.is-error { background: var(--ytb-danger); color: var(--ytb-on-fill); }
+      @keyframes ytb-hs-copied-float {
+        0% { opacity: 0; transform: translateY(6px); }
+        12% { opacity: 1; }
+        60% { opacity: 1; animation-timing-function: ease-in; }
+        100% { opacity: 0; transform: translateY(-14px); }
+      }
+      @keyframes ytb-hs-copied-fade {
+        0%, 100% { opacity: 0; }
+        12%, 60% { opacity: 1; }
+      }
+      @keyframes ytb-hs-copied-pop { from { transform: scale(0.6); } }
       #${SECTION_ID} .ytb-hs-copy:focus-visible,
       #${SECTION_ID} .ytb-hs-swatch:focus-visible,
       #${SECTION_ID} .ytb-hs-color:focus-visible,
       #${SECTION_ID} .ytb-hs-themes button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
-      #${SECTION_ID} .ytb-hs-roster { margin: 10px 0; }
-      #${SECTION_ID} .ytb-hs-buddy { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 0; }
+      #${SECTION_ID} .ytb-hs-roster { padding: 10px 0 6px; }
+      /* Swatch buttons keep a 24px target around a 14px square, so the row shifts left to align the square with the eyebrow. */
+      #${SECTION_ID} .ytb-hs-buddy { display: flex; align-items: center; min-height: 28px; margin-left: -5px; }
+      #${SECTION_ID} .ytb-hs-buddy > span { flex: 1 1 auto; min-width: 0; margin-left: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #${SECTION_ID} .ytb-hs-buddy > .ytb-hs-seen { flex: none; margin-left: 12px; color: var(--ytb-ink-muted); font-size: 11px; }
       #${SECTION_ID} .ytb-hs-swatch,
-      #${SECTION_ID} .ytb-hs-color { border: 2px solid transparent; border-radius: 2px; cursor: pointer; }
-      #${SECTION_ID} .ytb-hs-swatch { width: 24px; height: 24px; padding: 0; }
-      #${SECTION_ID} .ytb-hs-seen { color: var(--ytb-ink-muted); font-size: 11px; }
-      #${SECTION_ID} .ytb-hs-colors { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 8px 32px; }
-      #${SECTION_ID} .ytb-hs-color { flex: none; width: 24px; height: 24px; padding: 0; }
-      #${SECTION_ID} .ytb-hs-color[aria-pressed='true'] { box-shadow: 0 0 0 3px var(--ytb-ring); }
-      #${SECTION_ID} .ytb-hs-color:disabled { opacity: 0.25; cursor: default; }
+      #${SECTION_ID} .ytb-hs-color {
+        flex: none; position: relative; width: 24px; height: 24px; padding: 0;
+        border: 0; border-radius: 2px; background: transparent; cursor: pointer;
+      }
+      #${SECTION_ID} .ytb-hs-swatch::before,
+      #${SECTION_ID} .ytb-hs-color::before {
+        content: ''; position: absolute; inset: 5px; border-radius: 2px; background: var(--ytb-hs-fill);
+        transition: transform var(--ytb-dur-quick) var(--ytb-ease-spring);
+      }
+      #${SECTION_ID} .ytb-hs-swatch:hover::before,
+      #${SECTION_ID} .ytb-hs-color:not(:disabled):hover::before { transform: scale(1.15); }
+      #${SECTION_ID} .ytb-hs-colors { display: flex; flex-wrap: wrap; margin: 0 0 4px 17px; }
+      #${SECTION_ID} .ytb-hs-color[aria-pressed='true']::before { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-color:disabled { cursor: default; }
+      #${SECTION_ID} .ytb-hs-color:disabled::before { opacity: 0.25; }
 		#${SECTION_ID} .ytb-hs-danger { border-color: transparent; background: var(--ytb-danger); color: var(--ytb-on-fill); }
 		#${SECTION_ID} .ytb-hs-neutral { border-color: transparent; background: var(--ytb-neutral); color: var(--ytb-on-fill); }
+      /* Leave Room stays quiet here; its confirmation carries the danger fill. */
+      #${SECTION_ID} .ytb-hs-leave { padding: 6px 12px; background: transparent; color: var(--ytb-danger-text); }
+      #${SECTION_ID} .ytb-hs-leave:hover { border-color: var(--ytb-danger-text); }
       #${SECTION_ID} .ytb-hs-set-hint { margin: 4px 0; color: var(--ytb-ink-muted); font-size: 11px; }
-      #${SECTION_ID} .ytb-hs-switch-row {
-        width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-        padding: 8px 0; border: 0; border-bottom: 1px solid var(--ytb-line);
-        background: transparent; color: var(--ytb-ink); font: 600 13px/1.3 var(--ytb-font); text-align: left; cursor: pointer;
-      }
+      #${SECTION_ID} .ytb-hs-set-group > .ytb-hs-pair { padding: 12px 0 0; }
+      #${SECTION_ID} .ytb-hs-switch-row { background: transparent; text-align: left; cursor: pointer; }
       #${SECTION_ID} .ytb-hs-switch-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); border-radius: 8px; }
-      #${SECTION_ID} .ytb-hs-switch { width: 34px; height: 20px; padding: 2px; border-radius: 999px; background: var(--ytb-line-strong); }
+      #${SECTION_ID} .ytb-hs-switch {
+        flex: none; box-sizing: border-box; width: 36px; height: 20px; padding: 2px;
+        border-radius: var(--ytb-r-pill); background: var(--ytb-line-strong);
+      }
       #${SECTION_ID} .ytb-hs-switch > span {
-        display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ytb-surface);
-        box-shadow: 0 1px 3px oklch(52% 0.06 52 / 0.25); transition: transform 140ms;
+        display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ytb-on-fill);
+        box-shadow: 0 1px 2px oklch(45% 0.06 52 / 0.3);
       }
       #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch { background: var(--ytb-accent-500); }
-      #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch > span { transform: translateX(14px); }
-      #${SECTION_ID} .ytb-hs-notifications { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; font-weight: 600; }
-      #${SECTION_ID} .ytb-hs-edges { flex: none; width: 80px; height: 80px; display: grid; grid-template: repeat(3, 24px) / repeat(3, 24px); gap: 4px; }
-      #${SECTION_ID} .ytb-hs-edges button { border: 1px solid var(--ytb-line-strong); border-radius: var(--ytb-r-sm); background: var(--ytb-surface); cursor: pointer; }
+      #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch > span { transform: translateX(16px); }
+      #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch { animation: ytb-hs-track-off ${SWITCH_GLIDE_MS}ms var(--ytb-ease-out) var(--ytb-hs-flip-delay, 0ms) backwards; }
+      #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch > span { animation: ytb-hs-knob-off ${SWITCH_GLIDE_MS}ms var(--ytb-ease-out) var(--ytb-hs-flip-delay, 0ms) backwards; }
+      #${SECTION_ID} .ytb-hs-flip[aria-checked='true'] .ytb-hs-switch { animation-name: ytb-hs-track-on; }
+      #${SECTION_ID} .ytb-hs-flip[aria-checked='true'] .ytb-hs-switch > span { animation-name: ytb-hs-knob-on; }
+      @keyframes ytb-hs-knob-on { from { transform: translateX(0); } }
+      @keyframes ytb-hs-knob-off { from { transform: translateX(16px); } }
+      @keyframes ytb-hs-track-on { from { background: var(--ytb-line-strong); } }
+      @keyframes ytb-hs-track-off { from { background: var(--ytb-accent-500); } }
+      /* Notification Position: a miniature player with one bar per edge. */
+      #${SECTION_ID} .ytb-hs-edges {
+        flex: none; box-sizing: border-box; width: 84px; height: 54px;
+        display: grid; grid-template: 24px 1fr 24px / 24px 1fr 24px;
+        border: 1px solid var(--ytb-line-strong); border-radius: var(--ytb-r-sm); background: var(--ytb-surface);
+      }
+      #${SECTION_ID} .ytb-hs-edges button { position: relative; padding: 0; border: 0; border-radius: var(--ytb-r-sm); background: transparent; cursor: pointer; }
+      #${SECTION_ID} .ytb-hs-edges button::before {
+        content: ''; position: absolute; border-radius: var(--ytb-r-pill); background: var(--ytb-line-strong);
+        transition: background var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${SECTION_ID} .ytb-hs-edges button:hover::before { background: var(--ytb-ink-faint); }
+      #${SECTION_ID} .ytb-hs-edges button[aria-checked='true']::before { background: var(--ytb-accent-500); }
       #${SECTION_ID} .ytb-hs-edges button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-edges button[data-edge='top'] { grid-area: 1 / 2; }
-      #${SECTION_ID} .ytb-hs-edges button[data-edge='left'] { grid-area: 2 / 1; }
-      #${SECTION_ID} .ytb-hs-edges button[data-edge='right'] { grid-area: 2 / 3; }
       #${SECTION_ID} .ytb-hs-edges button[data-edge='bottom'] { grid-area: 3 / 2; }
-      #${SECTION_ID} .ytb-hs-edges button[aria-checked='true'] { border-color: var(--ytb-accent-700); background: var(--ytb-accent-500); }
-      #${SECTION_ID} .ytb-hs-themes { display: flex; gap: 4px; margin-top: 7px; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='left'] { grid-area: 1 / 1 / -1 / 2; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='right'] { grid-area: 1 / 3 / -1 / 4; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='top']::before,
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='bottom']::before { left: 50%; width: 18px; height: 5px; margin-left: -9px; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='left']::before,
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='right']::before { top: 50%; width: 5px; height: 18px; margin-top: -9px; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='top']::before { top: 5px; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='bottom']::before { bottom: 5px; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='left']::before { left: 5px; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='right']::before { right: 5px; }
+      /* Theme Preference: segmented control; the selected segment takes the accent fill like every other "on" state. */
+      #${SECTION_ID} .ytb-hs-themes { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--ytb-surface-sunk); }
       #${SECTION_ID} .ytb-hs-themes button {
-        flex: 1; padding: 7px; border: 1px solid var(--ytb-line-strong); border-radius: 8px;
-        background: var(--ytb-surface); color: var(--ytb-ink); font: 600 13px/1.45 var(--ytb-font); cursor: pointer;
+        min-width: 56px; padding: 4px 12px; border: 0; border-radius: var(--ytb-r-sm);
+        background: transparent; color: var(--ytb-ink-muted); font: 600 13px/1.45 var(--ytb-font); cursor: pointer;
+        transition: color var(--ytb-dur-quick) var(--ytb-ease-out);
       }
-      #${SECTION_ID} .ytb-hs-themes button[aria-checked='true'] { border-color: var(--ytb-accent-700); background: var(--ytb-accent-100); }
+      #${SECTION_ID} .ytb-hs-themes button:hover { color: var(--ytb-ink); }
+      #${SECTION_ID} .ytb-hs-themes button[aria-checked='true'] { background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
       #${SECTION_ID} .ytb-hs-confirm {
         position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
         padding: 20px; border-radius: var(--ytb-r-lg); background: rgba(0, 0, 0, 0.35);
@@ -1654,7 +1763,11 @@
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
       @media (prefers-reduced-motion: reduce) {
-		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more, #${SECTION_ID} .ytb-hs-switch > span { transition: none; }
+		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more,
+        #${SECTION_ID} .ytb-hs-copy, #${SECTION_ID} .ytb-hs-swatch::before, #${SECTION_ID} .ytb-hs-color::before { transition: none; }
+        #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch, #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch > span,
+        #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { animation: none; }
+        #${SECTION_ID} .ytb-hs-copy-feedback { animation-name: ytb-hs-copied-fade; }
         #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }
       }
     `;

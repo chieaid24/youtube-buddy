@@ -130,7 +130,8 @@ Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch her
 - Generous radius everywhere is the friendliness lever, with **one exception**: the
   buddy **color swatches stay 2px-radius squares** because they are the legend for the
   square on-video markers drawn by `renderer.js`. Do not round them into circles.
-- Keep every pointer target at least 24px.
+- Keep every pointer target at least 24px. A control may draw smaller than its
+  target: Buddy Color Swatches paint a 14px square centered in a 24px button.
 
 ### 1.4 Elevation
 
@@ -204,7 +205,11 @@ Never animate layout properties (width/height/top/left) for choreography — use
 - **Buttons:** press = scale 0.97 (`--ytb-dur-quick`); release settles back with
   `--ytb-ease-spring`. Hover = background/color glide only.
 - **View switch:** Settings replaces the normal Room Home content without resizing the shell.
-- **Switches:** the knob glides between states without bounce.
+- **Switches:** the knob glides between states without bounce. Settings rebuilds its
+  rows on every change, so the glide replays as a keyframe animation on the new node.
+- **Copy Room Code:** the icon pops into a check and a small accent chip reading
+  "Copied" floats up from the button and fades (~1.2s). It never shifts layout.
+  Reduced motion keeps the fade and drops the travel.
 - **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
   (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ytb-ease-out`),
   until the Mention or Reply is Acknowledged. The 6px dot itself never moves, resizes, or
@@ -249,13 +254,15 @@ The Buddy Room toggle matches whichever YouTube guide is active: a 40px row in t
 
 ### Settings sections
 
+Every setting is one row: a 13px/600 label on the left and its control on the right, 40px minimum height, with a hairline between a section's rows. Section eyebrows use `--t-label`. Selected and on states share one cue: the `--ytb-accent-500` fill.
+
 Profile contains one Nickname input. Persist edits to local storage and reassert presence on Enter or blur so Buddies receive the new Display Name.
 
-Room shows Room state and Room Code first. Unpaired and Room full show Create and Join. Waiting and In room show the Buddy roster, a Buddy Color Swatch for each Buddy, and Leave Room. Use the eight fixed Buddy Colors, disable colors assigned to another Buddy, and mark the selected color with the focus-ring token.
+Room shows Room state and Room Code first. Room state carries a 6px status dot: success for In room, accent for Waiting, faint for Unpaired, danger for Room full. The Room Code copy control is a borderless accent icon button. Unpaired and Room full show Create and Join. Waiting and In room show the Buddy roster, a Buddy Color Swatch for each Buddy, and Leave Room. Use the eight fixed Buddy Colors, disable colors assigned to another Buddy, and mark the selected color with the focus-ring token. Leave Room is a quiet outlined button with danger text; the danger fill belongs to its confirmation.
 
-On-video contains four switches in this order: Share video progress, Notes Visibility, Buddy Progress Visibility, and Spoiler Default. Put the four-edge Notification Position picker below them. Keep Stop sharing behind a confirmation.
+On-video contains four switches in this order: Share video progress, Show Notes (Notes Visibility), Show Buddy Progress (Buddy Progress Visibility), and Spoiler Default. Switches are 36x20px pills with a 16px light knob. Put the Notification Position picker below them: a miniature player frame with one bar per edge. Keep Stop sharing behind a confirmation.
 
-Appearance contains the segmented Theme Preference control: Light, Dark, and Auto.
+Appearance contains the segmented Theme Preference control: Light, Dark, and Auto on one sunk track.
 
 ### Confirmation dialog
 

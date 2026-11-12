@@ -78,11 +78,14 @@ for (const theme of ['light', 'dark']) {
 				await scroll.evaluate((el) => {
 					el.scrollTop = 0;
 				});
-				await scroll.hover();
-				await page.mouse.wheel(0, 400);
-				await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+				// The view fits the tall viewport; only the short one scrolls.
+				if (await scroll.evaluate((el) => el.scrollHeight > el.clientHeight)) {
+					await scroll.hover();
+					await page.mouse.wheel(0, 400);
+					await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+				}
 				await panel.getByRole('button', { name: 'Copy Room Code' }).click();
-				await expect(panel.getByRole('status')).toHaveText('Copied!');
+				await expect(panel.getByRole('status')).toHaveText('Copied');
 				await capture('copied-code');
 				await panel.getByRole('button', { name: 'Close the Buddy Room panel' }).click();
 				await page.mouse.move(10, 550);

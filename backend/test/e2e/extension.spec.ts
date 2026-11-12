@@ -4396,7 +4396,7 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 
 		// Notes off: zero Note UI on the player, live — dots AND the + button —
 		// while the Buddy marker (independent setting) survives. Back on restores.
-		const notesToggle = homePanel.getByRole('switch', { name: 'Notes Visibility' });
+		const notesToggle = homePanel.getByRole('switch', { name: 'Show Notes' });
 		await notesToggle.click();
 		await expect(dots).toHaveCount(0);
 		await expect(page.locator('#ytb-note-button')).toHaveCount(0);
@@ -4406,7 +4406,7 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
 
 		// Buddy Progress off: the timeline marker disappears live; dots stay.
-		const progressToggle = homePanel.getByRole('switch', { name: 'Buddy Progress Visibility' });
+		const progressToggle = homePanel.getByRole('switch', { name: 'Show Buddy Progress' });
 		await progressToggle.click();
 		await expect(page.locator('.ytb-watch-marker')).toHaveCount(0);
 		await expect(dots).toHaveCount(3);

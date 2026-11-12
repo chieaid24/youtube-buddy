@@ -98,7 +98,7 @@ describe('Room Code helpers', () => {
 	});
 
 	it.each([
-		['success', vi.fn().mockResolvedValue(undefined), 'Copied!', false, true],
+		['success', vi.fn().mockResolvedValue(undefined), 'Copied', false, true],
 		['failure', vi.fn().mockRejectedValue(new Error('denied')), 'Could not copy', true, false],
 	])('shows and clears anchored copy %s feedback', async (_case, writeText, message, isError, expected) => {
 		vi.useFakeTimers();
