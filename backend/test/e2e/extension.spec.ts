@@ -3952,7 +3952,7 @@ test('Note Feed rows link italic video titles and hide spoiler bodies', async ()
 		await expect(rows.nth(2)).toContainText('Sigma left a note on a video');
 		const plain = rows.nth(3);
 		await expect(plain).toContainText(
-			/Sigma (said|noted|wrote|remarked|commented|added|observed|shared|suggested|pointed out|quipped|yapped) "great moment" on /,
+			/Sigma (said|noted|wrote|remarked|commented|posted|shared|declared|speculated|quipped|proclaimed|babbled|squeaked) "great moment" on /,
 		);
 		await expect(plain.locator('a')).toHaveText(longTitle);
 		await expect(plain.locator('a')).not.toContainText('great moment');
