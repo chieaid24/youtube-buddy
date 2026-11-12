@@ -1,4 +1,4 @@
-# The Extension Popup reports status and launches Room Home
+# The Extension Popup launches Room Home
 
 ## Context
 
@@ -8,14 +8,14 @@ ADR-0005 makes the Room Home Panel the complete in-page hub. The toolbar still n
 
 ## Decision
 
-Keep the Chrome toolbar surface as the **Extension Popup**, but reduce it to read-only status and one destination action.
+Keep the Chrome toolbar surface as the **Extension Popup**, with one destination action.
 
-The Extension Popup reports Room state, Room Code, Buddy count, Sharing state, and Connection Lost state. It changes none of them. Its only action is a button labelled **Your Room**.
+The Extension Popup contains only a button labelled **Your Room**. Room state, Room Code, Buddy count, Sharing, and Connection Lost belong in Room Home. Launch failures show inline feedback and allow retry.
 
 Your Room follows an exact tab rule:
 
-- If the active tab is already on the YouTube home route, reuse that tab and open its Room Home Panel.
-- Otherwise, create an inactive YouTube Home tab, retry a direct message until its content script acknowledges that Room Home opened, and then activate the tab.
+- If the active tab is already on the YouTube home route, reuse that tab, open its Room Home Panel, and close the popup.
+- Otherwise, create an inactive YouTube Home tab, retry a direct message until its content script acknowledges that Room Home opened, and then activate the tab and close the popup.
 
 A YouTube watch page, another YouTube route, another site, or no suitable active tab never gets navigated away. Your Room opens a new tab in each case. The retry loop targets one tab ID and stores no launch request, so a later Home tab cannot consume stale intent.
 
@@ -30,4 +30,4 @@ Remove the Control Panel term, the guide-row Control Panel Launcher, the hidden 
 - Clicking Your Room from a watch page preserves the video by opening a new tab.
 - The new-tab launch needs a tested ready handshake because the popup may close before the content script mounts.
 - The manifest no longer exposes the relay page as a web-accessible resource.
-- Extension Popup tests cover status and launch routing. Live UI verification covers the Room Home Panel, including arrival from Your Room.
+- Extension Popup tests cover the single button, dismissal, and launch routing. Live UI verification covers the Room Home Panel, including arrival from Your Room.
