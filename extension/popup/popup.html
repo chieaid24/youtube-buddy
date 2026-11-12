@@ -17,6 +17,21 @@
 				color: var(--ytb-ink);
 				font: 13px/1.45 var(--ytb-font);
 			}
+			.brand {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				margin-bottom: 14px;
+			}
+			.brand-mark {
+				width: 28px;
+				height: 28px;
+			}
+			h1 {
+				margin: 0;
+				font-size: 15px;
+				font-weight: 800;
+			}
 			#your-room {
 				width: 100%;
 				padding: 10px 14px;
@@ -49,7 +64,11 @@
 		</style>
 	</head>
 	<body>
-		<button id="your-room" type="button">Your Room</button>
+		<header class="brand">
+			<img class="brand-mark" src="../icons/youtube-buddy.svg" alt="" />
+			<h1>Youtube Buddy</h1>
+		</header>
+		<button id="your-room" type="button">Check Out Your Room</button>
 		<p id="launch-feedback" class="feedback" role="status"></p>
 		<script src="popup.js"></script>
 	</body>
