@@ -1239,7 +1239,7 @@ test('opens the extension popup without runtime errors', async () => {
 		await expect(popup.getByRole('heading', { name: 'Youtube Buddy' })).toBeVisible();
 		await expect(popup.locator('.brand-mark')).toBeVisible();
 		await expect(popup.locator('button')).toHaveCount(1);
-		await expect(popup.locator('#your-room')).toHaveText('Check Out Your Room');
+		await expect(popup.locator('#your-room')).toHaveText('Check out your room!');
 		await expect(popup.locator('input, [role="switch"], [data-theme-choice], #leave-room')).toHaveCount(0);
 		await popup.waitForTimeout(250);
 		await extensions.reload();
