@@ -636,7 +636,7 @@
 
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== 'local' || !changes.buddyProgressHidden) return;
-		// Live Buddy Progress Visibility flip from the popup Settings.
+		// Apply live Buddy Progress Visibility changes from Room Home.
 		buddyProgressHidden = changes.buddyProgressHidden.newValue === true;
 		renderWatchMarker(currentVideoId);
 		renderThumbnails();

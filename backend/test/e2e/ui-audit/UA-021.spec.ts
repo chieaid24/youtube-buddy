@@ -12,21 +12,21 @@ test('UA-021: the retrying line shares the muted secondary styling', async () =>
 		routeBackend(context, state);
 		const popup = await seedPaired(context);
 		await popup.reload();
-		await popup.waitForFunction(() => (document.getElementById('status-sub')?.textContent || '').includes('Retrying'), null, {
+		await popup.waitForFunction(() => !(document.getElementById('connection-state') as HTMLElement)?.hidden, null, {
 			timeout: 25_000,
 		});
 		const { size, color, muted } = await popup.evaluate(() => {
-			const el = document.getElementById('status-sub')!;
+			const el = document.getElementById('connection-state')!;
 			const probe = document.createElement('span');
-			probe.style.color = 'var(--c-ink-muted)';
+			probe.style.color = 'var(--ytb-ink-muted)';
 			document.body.appendChild(probe);
 			const muted = getComputedStyle(probe).color;
 			probe.remove();
 			const s = getComputedStyle(el);
 			return { size: parseFloat(s.fontSize), color: s.color, muted };
 		});
-		expect.soft(size, `status-sub font-size ${size}`).toBe(11);
-		expect.soft(color, 'status-sub muted color').toBe(muted);
+		expect.soft(size, `connection-state font-size ${size}`).toBe(11);
+		expect.soft(color, 'connection-state muted color').toBe(muted);
 	} finally {
 		await context.close();
 	}

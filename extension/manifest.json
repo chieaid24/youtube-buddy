@@ -47,11 +47,5 @@
 			],
 			"run_at": "document_idle"
 		}
-	],
-	"web_accessible_resources": [
-		{
-			"resources": ["pages/control-panel-relay.html", "pages/control-panel-relay.js"],
-			"matches": ["*://*.youtube.com/*"]
-		}
 	]
 }

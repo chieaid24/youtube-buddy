@@ -47,6 +47,7 @@ async function launchExtension(): Promise<BrowserContext> {
 		args: [
 			`--disable-extensions-except=${extensionPath}`,
 			`--load-extension=${extensionPath}`,
+			'--disable-features=LocalNetworkAccessChecks',
 			// The dot-click playback test drives play() from evaluate(), which
 			// carries no user gesture.
 			'--autoplay-policy=no-user-gesture-required',
@@ -1062,6 +1063,35 @@ const homeFixture = `<!doctype html>
   </body>
 </html>`;
 
+const miniGuideHomeFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube mini guide home fixture</title></head>
+  <body>
+    <ytd-mini-guide-renderer><div id="items"></div></ytd-mini-guide-renderer>
+    <ytd-browse page-subtype="home"><div id="grid-container"><ytd-rich-grid-renderer></ytd-rich-grid-renderer></div></ytd-browse>
+  </body>
+</html>`;
+
+test('Room Home Toggle matches the compact YouTube mini guide', async () => {
+	const context = await launchExtension();
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: miniGuideHomeFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const toggle = page.locator('ytd-mini-guide-renderer #ytb-home-toggle');
+		await nudgeUntil(page, () => expect(toggle).toBeVisible());
+		await expect(toggle).toHaveCSS('width', '64px');
+		await expect(toggle).toHaveCSS('height', '76px');
+		await expect(toggle).toHaveCSS('font-size', '10px');
+		await toggle.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+	} finally {
+		await context.close();
+	}
+});
+
 test('Room Home Toggle opens the ephemeral panel; close control, scrim, and Esc all close it (ADR-0005)', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -1150,7 +1180,7 @@ test('Room Home Toggle opens the ephemeral panel; close control, scrim, and Esc 
 	}
 });
 
-test('Control Panel Launcher opens the real action popup through a home-only Relay Frame', async () => {
+test('Room Home Toggle is the guide row only action and no Relay Frame is exposed', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -1158,78 +1188,19 @@ test('Control Panel Launcher opens the real action popup through a home-only Rel
 		await context.route('https://www.youtube.com/**', (route) =>
 			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
 		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const toggle = page.locator('#ytb-home-toggle');
+		await expect(toggle).toHaveAttribute('aria-checked', 'false');
+		await expect(toggle.locator('.ytb-ht-launcher')).toHaveCount(0);
+		await expect(page.locator('#ytb-control-panel-relay')).toHaveCount(0);
 		const extensions = await context.newPage();
 		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
-		expect(extensionId).toMatch(/^[a-p]{32}$/);
-
-		// A directly navigated extension page gives the test access to the runtime
-		// API without itself being a Chrome-owned POPUP context.
 		const runtime = await context.newPage();
 		await runtime.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-		const popupContextCount = () => runtime.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length);
-		await expect.poll(popupContextCount).toBe(0);
-
-		const page = await context.newPage();
-		await page.goto('https://www.youtube.com/');
-		const toggle = page.locator('#ytb-home-toggle');
-		const launcher = toggle.locator('.ytb-ht-launcher');
-		const relay = page.locator('#ytb-control-panel-relay');
-		await expect(toggle).toHaveAttribute('aria-checked', 'false'); // panel closed by default; the Launcher is independent
-		await expect(launcher).toBeVisible();
-		await expect(relay).toHaveAttribute('src', `chrome-extension://${extensionId}/pages/control-panel-relay.html`);
-		expect(
-			await relay.evaluate((frame) => {
-				const rect = frame.getBoundingClientRect();
-				return { width: rect.width, height: rect.height, visibility: getComputedStyle(frame).visibility };
-			}),
-		).toEqual({ width: 0, height: 0, visibility: 'hidden' });
-
-		await launcher.click();
-		await expect.poll(popupContextCount, { timeout: 10_000 }).toBe(1);
-		// The Launcher opens the real Chrome popup, not the in-page panel: the toggle stays off and no overlay mounts.
-		await expect(toggle).toHaveAttribute('aria-checked', 'false');
-		await expect(page.locator('#ytb-panel-overlay, .ytb-panel-card, .ytb-panel-close, #ytb-home-overlay')).toHaveCount(0);
-
-		// The row and Relay Frame are one home-route surface and leave together.
-		await page.evaluate(() => history.pushState({}, '', '/watch?v=fixture-video'));
-		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
-		await expect(toggle).toHaveCount(0);
-		await expect(relay).toHaveCount(0);
-
-		expect(errors, errors.join('\n')).toEqual([]);
-	} finally {
-		await context.close();
-	}
-});
-
-test('Control Panel Launcher uses the shared toolbar toast when openPopup fails', async () => {
-	const context = await launchExtension();
-	const errors = collectErrors(context);
-
-	try {
-		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
-		);
-		const page = await context.newPage();
-		await page.goto('https://www.youtube.com/');
-		const toggle = page.locator('#ytb-home-toggle');
-		const launcher = toggle.locator('.ytb-ht-launcher');
-		await expect(page.locator('#ytb-control-panel-relay')).toHaveCount(1);
-		const relay = page.frames().find((frame) => frame.url().endsWith('/pages/control-panel-relay.html'));
-		expect(relay).toBeDefined();
-		await relay!.evaluate(() => {
-			Object.defineProperty(chrome.action, 'openPopup', {
-				configurable: true,
-				value: async () => {
-					throw new Error('forced openPopup failure');
-				},
-			});
-		});
-
-		await launcher.click();
-		await expect(page.locator('.ytb-toast')).toHaveText('Open YouTube Buddy from the toolbar icon');
-		await expect(toggle).toHaveAttribute('aria-checked', 'false');
-		await expect(page.locator('#ytb-panel-overlay, #ytb-home-overlay')).toHaveCount(0);
+		expect(await runtime.evaluate(() => chrome.runtime.getManifest().web_accessible_resources || [])).toEqual([]);
+		await toggle.click();
+		await expect(page.locator('#ytb-home-section')).toHaveCount(1);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -1276,7 +1247,13 @@ test('opens the extension popup without runtime errors', async () => {
 				128: 'icons/icon-128.png',
 			},
 		});
-		await expect(popup.locator('#choose-create')).toBeVisible();
+		await expect(popup.locator('#room-state')).toHaveText('Unpaired');
+		await expect(popup.locator('#room-code')).toHaveText('Not paired');
+		await expect(popup.locator('#buddy-count')).toHaveText('0');
+		await expect(popup.locator('#sharing-state')).toHaveText('On');
+		await expect(popup.locator('button')).toHaveCount(1);
+		await expect(popup.locator('#your-room')).toHaveText('Your Room');
+		await expect(popup.locator('input, [role="switch"], [data-theme-choice], #leave-room')).toHaveCount(0);
 		await popup.waitForTimeout(250);
 		await extensions.reload();
 		await expect((await extensionItem(extensions)).locator('#errors-button')).toHaveCount(0);
@@ -1287,7 +1264,191 @@ test('opens the extension popup without runtime errors', async () => {
 	}
 });
 
-test('popup retains its roster through Connection Lost and recovers on the next successful read', async () => {
+test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch once', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	let delayNextHome = false;
+
+	try {
+		await context.route('https://www.youtube.com/**', async (route) => {
+			if (delayNextHome) {
+				delayNextHome = false;
+				await new Promise((resolve) => setTimeout(resolve, 300));
+			}
+			await route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture });
+		});
+		await context.route('https://example.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Other site</title>' }),
+		);
+
+		const extensions = await context.newPage();
+		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
+		const popup = await context.newPage();
+		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		await home.bringToFront();
+		const pagesBeforeReuse = context.pages().length;
+		await popup.evaluate(() => (window as any).openYourRoom());
+		await expect(home.locator('#ytb-home-section')).toHaveCount(1);
+		expect(context.pages()).toHaveLength(pagesBeforeReuse);
+		await home.locator('.ytb-hs-close').click();
+
+		const preserved = await context.newPage();
+		await preserved.goto('https://www.youtube.com/watch?v=keep-playing');
+		await preserved.bringToFront();
+		await popup.reload();
+		delayNextHome = true;
+		const beforeNew = new Set(context.pages());
+		await popup.evaluate(() => (window as any).openYourRoom());
+		await expect.poll(() => context.pages().filter((page) => !beforeNew.has(page)).length).toBe(1);
+		const launched = context.pages().find((page) => !beforeNew.has(page));
+		expect(launched).toBeDefined();
+		await expect(launched!.locator('#ytb-home-section')).toHaveCount(1);
+		await expect.poll(() => launched!.url()).toBe('https://www.youtube.com/');
+		expect(preserved.url()).toBe('https://www.youtube.com/watch?v=keep-playing');
+
+		await launched!.locator('.ytb-hs-close').click();
+		const later = await context.newPage();
+		await later.goto('https://www.youtube.com/');
+		await later.waitForTimeout(500);
+		await expect(later.locator('#ytb-home-section')).toHaveCount(0);
+
+		for (const target of ['https://www.youtube.com/results?search_query=buddy', 'https://example.com/']) {
+			await popup.reload();
+			const active = await context.newPage();
+			await active.goto(target);
+			await active.bringToFront();
+			const prior = new Set(context.pages());
+			await popup.evaluate(() => (window as any).openYourRoom());
+			await expect.poll(() => context.pages().filter((page) => !prior.has(page)).length).toBe(1);
+			const next = context.pages().find((page) => !prior.has(page));
+			await expect(next!.locator('#ytb-home-section')).toHaveCount(1);
+			expect(active.url()).toBe(target);
+		}
+
+		const routingErrors = errors.filter(
+			(error) =>
+				!error.includes("Unexpected token '<'") &&
+				!error.includes('Manifest: Line: 1') &&
+				!error.includes('Failed to load resource: the server responded with a status of 401'),
+		);
+		expect(routingErrors, routingErrors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Room Home Settings owns Profile, Create, Join, Leave, and Buddy Colors', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await context.route('http://localhost:8787/**', (route) => {
+			const request = route.request();
+			if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			if (request.method() !== 'GET') {
+				return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
+			}
+			const code = new URL(request.url()).searchParams.get('code');
+			const presence = code === 'existing-room' ? [{ clientId: 'buddy-1', name: 'Robin', updatedAt: Date.now() }] : [];
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({ progress: [], presence, notes: [], replies: [], playlist: [], events: [] }),
+			});
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+
+		const extensions = await context.newPage();
+		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
+		const runtime = await context.newPage();
+		await runtime.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		await openHomePanel(home);
+		const panel = home.locator('#ytb-home-section');
+		await expect(panel.locator('.ytb-hs-settings')).toBeVisible();
+
+		const name = panel.getByLabel('Nickname');
+		await name.fill('New Viewer');
+		await name.press('Enter');
+		await expect.poll(() => runtime.evaluate(() => chrome.storage.local.get('name'))).toEqual({ name: 'New Viewer' });
+
+		await panel.getByRole('button', { name: 'Create a room' }).click();
+		await expect.poll(async () => (await runtime.evaluate(() => chrome.storage.local.get('code'))).code || '').not.toBe('');
+		await expect(panel.getByRole('button', { name: 'Leave Room' })).toBeVisible();
+		await panel.getByRole('button', { name: 'Leave Room' }).click();
+		await home.keyboard.press('Escape');
+		await expect(panel.locator('.ytb-hs-confirm')).toHaveCount(0);
+		await expect.poll(async () => Boolean((await runtime.evaluate(() => chrome.storage.local.get('code'))).code)).toBe(true);
+		await panel.getByRole('button', { name: 'Leave Room' }).click();
+		await panel.getByRole('button', { name: 'Leave', exact: true }).click();
+		await expect.poll(() => runtime.evaluate(() => chrome.storage.local.get('code'))).toEqual({ code: '' });
+
+		await panel.getByLabel('Room Code to join').fill('The Existing Room');
+		await panel.getByRole('button', { name: 'Join', exact: true }).click();
+		await expect.poll(() => runtime.evaluate(() => chrome.storage.local.get('code'))).toEqual({ code: 'existing-room' });
+		await expect(panel.locator('.ytb-hs-room-status strong')).toHaveText('In room');
+		const swatch = panel.getByRole('button', { name: 'Change color for Robin' });
+		await expect(swatch).toBeVisible();
+		await swatch.click();
+		await panel.locator('.ytb-hs-color:not([aria-pressed="true"]):not([disabled])').first().click();
+		await expect
+			.poll(async () => {
+				const stored = await runtime.evaluate(() => chrome.storage.local.get('buddyColors'));
+				return (stored.buddyColors as Record<string, Record<string, string>> | undefined)?.['existing-room']?.['buddy-1'];
+			})
+			.toMatch(/^#/);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Room full opens Settings without moving focus or scrolling', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {
+			progress: Array.from({ length: 5 }, (_, index) => ({
+				clientId: `buddy-${index}`,
+				name: `Buddy ${index}`,
+				videoId: 'fixture-video',
+				timestamp: index,
+				duration: 20,
+				updatedAt: Date.now(),
+			})),
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const runtime = await seedPairedRoom(context);
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		await home.waitForTimeout(300);
+		const toggle = home.locator('#ytb-home-toggle');
+		await toggle.click();
+		const panel = home.locator('#ytb-home-section');
+		await expect(panel.locator('.ytb-hs-settings')).toBeVisible();
+		await expect(panel.locator('.ytb-hs-room-status strong')).toHaveText('Room full');
+		expect(await home.evaluate(() => (document.activeElement as HTMLElement)?.id)).toBe('ytb-home-toggle');
+		expect(await panel.locator('.ytb-hs-settings').evaluate((element) => element.scrollTop)).toBe(0);
+		await expect(panel.locator('[autofocus], .is-highlighted')).toHaveCount(0);
+		await runtime.close();
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('popup retains its status through Connection Lost and recovers on the next successful read', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 	let backendUp = true;
@@ -1314,25 +1475,25 @@ test('popup retains its roster through Connection Lost and recovers on the next 
 
 		const popup = await seedPairedRoom(context);
 		await popup.reload();
-		await expect(popup.locator('#status-text')).toHaveText('Buddies');
-		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+		await expect(popup.locator('#room-state')).toHaveText('In room');
+		await expect(popup.locator('#buddy-count')).toHaveText('1');
 
 		backendUp = false;
-		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
-		await expect(popup.locator('#status-text')).toHaveText('Connecting to Room');
-		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
-		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
-		await expect(popup.locator('#status-text')).toHaveText("Can't reach the backend");
-		await expect(popup.locator('#status-sub')).toHaveText('Retrying...');
-		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+		await popup.evaluate(() => (window as any).refreshStatus());
+		await expect(popup.locator('#connection-state')).toBeHidden();
+		await expect(popup.locator('#room-state')).toHaveText('In room');
+		await popup.evaluate(() => (window as any).refreshStatus());
+		await expect(popup.locator('#connection-state')).toBeVisible();
+		await expect(popup.locator('#connection-state')).toHaveText("Can't reach the backend - retrying...");
+		await expect(popup.locator('#buddy-count')).toHaveText('1');
 		expect(errors).toHaveLength(2);
 		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
 		errors.length = 0;
 
 		backendUp = true;
-		await popup.evaluate(() => (window as any).refreshStatus('roome2e'));
-		await expect(popup.locator('#status-text')).toHaveText('Buddies');
-		await expect(popup.locator('.buddy-name')).toHaveText('Bob');
+		await popup.evaluate(() => (window as any).refreshStatus());
+		await expect(popup.locator('#room-state')).toHaveText('In room');
+		await expect(popup.locator('#connection-state')).toBeHidden();
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
@@ -1438,7 +1599,7 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 	}
 });
 
-test('Room Home Section keeps its Feed and Recommendations through Connection Lost and shows the retrying line', async () => {
+test('Room Home Panel keeps its Feed and Recommendations through Connection Lost and shows the retrying line', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 	let backendUp = false; // unreachable from the start: the Unpaired phase below must not care
@@ -1512,6 +1673,9 @@ test('Room Home Section keeps its Feed and Recommendations through Connection Lo
 		// Feed and one Recommendation card — and no Connection Lost line.
 		backendUp = true;
 		await driveRead();
+		await expect.poll(async () => (await broadcasts()).some((item) => item.paired && item.ok)).toBe(true);
+		await section.locator('.ytb-hs-close').click();
+		await openHomePanel(page);
 		await nudgeUntil(page, async () => {
 			await expect(feedRow).toHaveCount(1, { timeout: 700 });
 		});
@@ -3674,7 +3838,7 @@ test('re-assigning a Buddy Color repaints the Note Dot, the open Expanded Note, 
 		const initial = await buddyDot.evaluate((el) => getComputedStyle(el).backgroundColor);
 		const target = initial === 'rgb(232, 93, 4)' ? { hex: '#00a6d6', rgb: 'rgb(0, 166, 214)' } : { hex: '#e85d04', rgb: 'rgb(232, 93, 4)' };
 
-		// Re-assign through the popup's chrome.storage.local — the real writer's
+		// Re-assign through chrome.storage.local - the real writer's
 		// seam. No navigation and no reload follow; the repaint must be live.
 		await popup.evaluate((hex) => chrome.storage.local.set({ buddyColors: { roome2e: { 'buddy-1': hex } } }), target.hex);
 
@@ -4056,29 +4220,24 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 			});
 		});
 		const popup = await seedPairedRoom(context);
-		await popup.reload(); // re-init the popup UI onto the seeded Room
+		await popup.reload();
+		await expect(popup.locator('#sharing-state')).toHaveText('Off');
+		await expect(popup.locator('input, [role="switch"]')).toHaveCount(0);
 
-		// Sharing was seeded OFF: the main view offers a compact secondary turn-on.
-		await expect(popup.locator('#view-connected')).toBeVisible();
-		await expect(popup.locator('#sharing-turn-on')).toBeVisible();
-		await expect(popup.locator('#sharing-turn-on')).toHaveClass(/btn-secondary/);
-		await expect(popup.locator('#sharing-turn-on')).toHaveClass(/btn-status/);
-		await expect(popup.locator('#sharing-turn-on')).not.toHaveClass(/btn-primary/);
-		await expect(popup.locator('#sharing-on')).toBeHidden();
-		await popup.locator('#sharing-turn-on').click();
-		await expect(popup.locator('#sharing-on')).toBeVisible();
-		await expect(popup.locator('#sharing-turn-on')).toBeHidden();
-
-		// The gear opens Settings as a mutually-exclusive view.
-		await popup.locator('#settings-open').click();
-		await expect(popup.locator('#view-settings')).toBeVisible();
-		await expect(popup.locator('#room-section')).toBeHidden();
-		const sharingToggle = popup.locator('#settings-sharing');
+		const home = await context.newPage();
+		await home.goto('https://www.youtube.com/');
+		await openHomePanel(home);
+		const homePanel = home.locator('#ytb-home-section');
+		await expect(homePanel.locator('.ytb-hs-feed')).toBeVisible();
+		await homePanel.getByRole('button', { name: 'Settings' }).click();
+		await expect(homePanel.locator('.ytb-hs-settings')).toBeVisible();
+		await expect(homePanel.locator('.ytb-hs-set-group > h3')).toHaveText(['Profile', 'Room', 'On-video', 'Appearance']);
+		const sharingToggle = homePanel.getByRole('switch', { name: 'Share video progress' });
 		await expect(sharingToggle).toHaveRole('switch');
-		await expect(sharingToggle).toContainText('Share video progress');
+		await expect(sharingToggle).toHaveAttribute('aria-checked', 'false');
+		await expect(homePanel.getByRole('button', { name: 'Leave Room' })).toBeVisible();
+		await sharingToggle.click();
 		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
-		await expect(popup.locator('#settings-room .room-actions > button')).toHaveCount(1);
-		await expect(popup.locator('#settings-room #leave-room')).toBeVisible();
 
 		// A watch page with three Note dots, a Buddy marker, and the + button.
 		const page = await context.newPage();
@@ -4093,14 +4252,15 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
 
 		// Theme Preference: forced Dark stamps data-theme on BOTH surfaces live.
-		await popup.locator('[data-theme-choice="dark"]').click();
+		await homePanel.locator('[data-theme-choice="dark"]').click();
 		await expect(popup.locator('html')).toHaveAttribute('data-theme', 'dark');
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await expect(home.locator('html')).toHaveAttribute('data-theme', 'dark');
 
 		// Auto (stored 'system', ADR-0009): the popup follows the OS so its marker
 		// is unset, but in-page surfaces follow YouTube's own theme. The fixture is
 		// a light page, so the watch page stamps data-theme="light".
-		await popup.locator('[data-theme-choice="system"]').click();
+		await homePanel.locator('[data-theme-choice="system"]').click();
 		await expect.poll(() => popup.evaluate(() => document.documentElement.hasAttribute('data-theme'))).toBe(false);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
@@ -4114,25 +4274,27 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 
 		// Notes off: zero Note UI on the player, live — dots AND the + button —
 		// while the Buddy marker (independent setting) survives. Back on restores.
-		await popup.locator('#set-notes').click();
+		const notesToggle = homePanel.getByRole('switch', { name: 'Notes Visibility' });
+		await notesToggle.click();
 		await expect(dots).toHaveCount(0);
 		await expect(page.locator('#ytb-note-button')).toHaveCount(0);
 		await expect(page.locator('.ytb-watch-marker')).toHaveCount(1);
-		await popup.locator('#set-notes').click();
+		await notesToggle.click();
 		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
 
 		// Buddy Progress off: the timeline marker disappears live; dots stay.
-		await popup.locator('#set-progress').click();
+		const progressToggle = homePanel.getByRole('switch', { name: 'Buddy Progress Visibility' });
+		await progressToggle.click();
 		await expect(page.locator('.ytb-watch-marker')).toHaveCount(0);
 		await expect(dots).toHaveCount(3);
-		await popup.locator('#set-progress').click();
+		await progressToggle.click();
 		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
 
 		// Notification Position + Spoiler Default persist under their keys.
-		await popup.locator('.edge-cell[data-edge="left"]').click();
-		await expect(popup.locator('.edge-cell[data-edge="left"]')).toHaveAttribute('aria-checked', 'true');
-		await popup.locator('#set-spoiler').click();
+		await homePanel.locator('[data-edge="left"]').click();
+		await expect(homePanel.locator('[data-edge="left"]')).toHaveAttribute('aria-checked', 'true');
+		await homePanel.getByRole('switch', { name: 'Spoiler Default' }).click();
 		await expect
 			.poll(async () => popup.evaluate(() => chrome.storage.local.get(['notificationPosition', 'spoilerDefault'])))
 			.toEqual({ notificationPosition: 'left', spoilerDefault: false });
@@ -4146,57 +4308,42 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 
 		// Turning off is guarded; cancel preserves on, confirm stores off.
 		await sharingToggle.click();
-		await expect(popup.locator('#confirm-overlay')).toBeVisible();
-		await popup.locator('#confirm-cancel').click();
+		await expect(homePanel.locator('.ytb-hs-confirm')).toBeVisible();
+		await homePanel.getByRole('button', { name: 'Cancel' }).click();
 		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
 		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
 		await sharingToggle.click();
-		await popup.locator('#confirm-disconnect').click();
+		await homePanel.getByRole('button', { name: 'Stop sharing' }).click();
 		await expect(sharingToggle).toHaveAttribute('aria-checked', 'false');
 		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: false });
 		await sharingToggle.click();
 		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
 		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
 
-		// Room Home Panel (ADR-0005): the guide toggle opens/closes the ephemeral floating panel;
-		// a scrim click and Esc also close it. There is no popup control.
-		const home = await context.newPage();
-		await home.goto('https://www.youtube.com/');
 		const guideToggle = home.locator('#ytb-home-toggle');
-		const homePanel = home.locator('#ytb-home-section');
 		const homeOverlay = home.locator('#ytb-home-overlay');
-		await expect(guideToggle).toBeVisible();
-		// Closed by default: nothing floats, toggle reads off.
-		await expect(homeOverlay).toHaveCount(0);
-		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
-		// Toggle opens the panel; aria-checked mirrors open.
-		await guideToggle.click();
-		await expect(homePanel).toHaveCount(1);
-		await expect(guideToggle).toHaveAttribute('aria-checked', 'true');
-		// A scrim click (outside the panel) closes it; the toggle flips back off.
-		await homeOverlay.click({ position: { x: 5, y: 5 } });
-		await expect(homeOverlay).toHaveCount(0);
-		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
-		// Re-open, then Esc closes.
-		await guideToggle.click();
-		await expect(homePanel).toHaveCount(1);
+		await homePanel.getByRole('button', { name: 'Back' }).click();
+		await expect(homePanel.locator('.ytb-hs-feed')).toBeVisible();
+		await homePanel.getByRole('button', { name: 'Settings' }).click();
+		await sharingToggle.click();
+		await expect(homePanel.locator('.ytb-hs-confirm')).toBeVisible();
+		await home.keyboard.press('Escape');
+		await expect(homePanel.locator('.ytb-hs-confirm')).toHaveCount(0);
+		await expect(homePanel).toBeVisible();
 		await home.keyboard.press('Escape');
 		await expect(homeOverlay).toHaveCount(0);
-		await expect(guideToggle).toHaveAttribute('aria-checked', 'false');
+		await guideToggle.click();
+		await expect(homePanel.locator('.ytb-hs-feed')).toBeVisible();
 
-		// Back returns to the room view Settings was opened from.
-		await popup.locator('#settings-back').click();
-		await expect(popup.locator('#view-settings')).toBeHidden();
-		await expect(popup.locator('#view-connected')).toBeVisible();
-
-		// The sharing preference remains available while Unpaired.
 		await popup.evaluate(() => chrome.storage.local.remove('code'));
-		await popup.reload();
-		await expect(popup.locator('#view-chooser')).toBeVisible();
-		await popup.locator('#settings-open').click();
-		await expect(sharingToggle).toBeVisible();
-		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
-		await expect(popup.locator('#settings-room')).toBeHidden();
+		await home.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
+		await expect(homePanel).toContainText('Pair with a Room');
+		await homePanel.locator('.ytb-hs-close').click();
+		await guideToggle.click();
+		await expect(homePanel.locator('.ytb-hs-settings')).toBeVisible();
+		await expect(homePanel.locator('.ytb-hs-room-status strong')).toHaveText('Unpaired');
+		await expect(homePanel.getByRole('switch', { name: 'Share video progress' })).toBeVisible();
+		await expect(homePanel.getByRole('button', { name: 'Create a room' })).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -4204,19 +4351,66 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 	}
 });
 
-test('@live loads on YouTube without content-script errors', async () => {
+test('@live manages a Room on YouTube without content-script errors', async ({}, testInfo) => {
 	test.skip(!process.env.YTB_LIVE_YOUTUBE, 'Set YTB_LIVE_YOUTUBE=1 to run the live smoke test.');
+	test.setTimeout(90_000);
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
 	try {
 		const page = await context.newPage();
-		await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ', { waitUntil: 'domcontentloaded' });
-		// Unpaired, so the Add Note (+) button is intentionally absent (#194); assert
-		// composer.js still mounted on real YouTube via its injected styles instead.
-		await expect(page.locator('#ytb-composer-styles')).toBeAttached({ timeout: 20_000 });
+		await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });
+		await openHomePanel(page);
+		const panel = page.locator('#ytb-home-section');
+		await expect(panel.locator('.ytb-hs-settings')).toBeVisible();
+		await panel.locator('#ytb-hs-name').fill('Live Reviewer');
+		await panel.locator('#ytb-hs-name').blur();
+		const sharing = panel.getByRole('switch', { name: 'Share video progress' });
+		if ((await sharing.getAttribute('aria-checked')) === 'false') await sharing.click();
+		await panel.getByRole('button', { name: 'Create a room' }).click();
+		await expect(panel.locator('.ytb-hs-code-row strong')).toBeVisible({ timeout: 20_000 });
+
+		const settingsShot = testInfo.outputPath('live-room-home-settings.png');
+		await page.screenshot({ path: settingsShot });
+		await testInfo.attach('Room Home Settings on YouTube', { path: settingsShot, contentType: 'image/png' });
+
+		await sharing.click();
+		await expect(panel.getByRole('alertdialog')).toBeVisible();
+		const confirmShot = testInfo.outputPath('live-room-home-confirmation.png');
+		await page.screenshot({ path: confirmShot });
+		await testInfo.attach('Room Home confirmation on YouTube', { path: confirmShot, contentType: 'image/png' });
+		await page.keyboard.press('Escape');
+		await panel.getByText('Appearance', { exact: true }).scrollIntoViewIfNeeded();
+		const settingsLowerShot = testInfo.outputPath('live-room-home-settings-lower.png');
+		await page.screenshot({ path: settingsLowerShot });
+		await testInfo.attach('Room Home Settings lower section on YouTube', {
+			path: settingsLowerShot,
+			contentType: 'image/png',
+		});
+		await panel.getByRole('button', { name: 'Back' }).click();
+		await expect(panel.locator('.ytb-hs-feed')).toBeVisible();
+		const normalShot = testInfo.outputPath('live-room-home-normal.png');
+		await page.screenshot({ path: normalShot });
+		await testInfo.attach('Room Home on YouTube', { path: normalShot, contentType: 'image/png' });
+
 		const extensions = await context.newPage();
-		await expect((await extensionItem(extensions)).locator('#errors-button')).toHaveCount(0);
+		const extension = await extensionItem(extensions);
+		const extensionId = await extension.getAttribute('id');
+		const popup = await context.newPage();
+		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+		await expect(popup.locator('#room-state')).not.toHaveText('Loading...');
+		const popupShot = testInfo.outputPath('live-popup.png');
+		await popup.locator('body').screenshot({ path: popupShot });
+		await testInfo.attach('Extension Popup', { path: popupShot, contentType: 'image/png' });
+
+		await panel.getByRole('button', { name: 'Settings' }).click();
+		await panel.getByRole('button', { name: 'Leave Room' }).click();
+		await panel.getByRole('button', { name: 'Leave', exact: true }).click();
+		await expect(panel.locator('.ytb-hs-room-status strong')).toHaveText('Unpaired');
+
+		await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ', { waitUntil: 'domcontentloaded' });
+		await expect(page.locator('#ytb-composer-styles')).toBeAttached({ timeout: 20_000 });
+		await expect(extension.locator('#errors-button')).toHaveCount(0);
 		// Live YouTube's own console noise, none of it ours: resource-load
 		// failures, its ad-conversion pings rejected by CORS, and script blocks
 		// inside its sandboxed ad frames.

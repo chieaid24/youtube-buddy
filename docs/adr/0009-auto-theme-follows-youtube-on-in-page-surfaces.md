@@ -9,11 +9,11 @@ Two ways to close the gap: (a) pull the home card into the ADR-0008 contract as-
 ## Decision
 
 - The third Theme Preference value is renamed **Auto** in the UI (the stored value stays `'system'` — no migration). Forced Light/Dark behavior is unchanged: the explicit `data-theme` marker wins on every surface.
-- Under Auto, **in-page surfaces follow YouTube's own theme**: on YouTube pages, `theme.js` stamps `data-theme="dark"` when `<html dark>` is present and `data-theme="light"` when it is not, instead of leaving the marker unset. All `--ytb-*` consumers (Note UI, composer, previews, Room Home Section) follow automatically. The `prefers-color-scheme` media-query blocks remain as the fallback but no longer apply on YouTube pages, where the marker is now always stamped.
+- Under Auto, **in-page surfaces follow YouTube's own theme**: on YouTube pages, `theme.js` stamps `data-theme="dark"` when `<html dark>` is present and `data-theme="light"` when it is not. All `--ytb-*` consumers, including the Room Home Panel, follow automatically.
 - The **popup keeps following the OS** under Auto: it is a separate document that cannot see the page, and importing YouTube's theme would need cross-context plumbing with stale-value edge cases when no YouTube tab is open. `system` there still means "marker unset, media query applies".
 - YouTube theme flips are tracked **live**: `content.js` — the sole DOM/navigation observer (ADR-0001 discipline) — watches the `dark` attribute on `document.documentElement` and emits a namespaced event; `theme.js` restamps on it. `theme.js` grows no observer of its own.
-- The Room Home Section drops its private hex palette and `html[dark]` block and consumes the shared `--ytb-*` tokens, becoming a normal ADR-0008/0009 surface.
-- The home-route guide toggle row is intentionally exempt: it imitates a native YouTube guide row and keeps using YouTube's `--yt-spec-*` variables, following the page in every mode.
+- The Room Home Panel consumes the shared `--ytb-*` tokens as a normal ADR-0008/0009 surface.
+- The home-route guide toggle row is intentionally exempt: it uses measured native colors and geometry for YouTube's full and compact guides, following the page's `html[dark]` state in every mode.
 
 ## Consequences
 

@@ -6,26 +6,14 @@
 // home-section.js and mirrored here via ytb:home-panel-state CustomEvents
 // (no storage). Guide-DOM targeting is deliberately fragile, contained to
 // this module (ADR-0001 pure consumer): retried on content.js's throttled
-// ytb:mutation until the guide exists. Also hosts the Control Panel
-// Launcher (ADR-0012).
+// ytb:mutation until the guide exists.
 
 (function () {
 	'use strict';
 
 	const ROW_ID = 'ytb-home-toggle';
-	const LAUNCHER_CLASS = 'ytb-ht-launcher';
-	const RELAY_ID = 'ytb-control-panel-relay';
-	const RELAY_PAGE = 'pages/control-panel-relay.html';
-	const OPEN_MESSAGE = 'ytb:open-control-panel';
-	const OPEN_FAILED_MESSAGE = 'ytb:open-control-panel-failed';
-	const TOOLBAR_FALLBACK_COPY = 'Open YouTube Buddy from the toolbar icon';
-	const EXT_ORIGIN = new URL(chrome.runtime.getURL('')).origin;
 	const STYLE_ID = 'ytb-home-toggle-style';
 	const SVG_NS = 'http://www.w3.org/2000/svg';
-	// A control-knobs "tune" glyph (Material "tune"), deliberately not a gear -
-	// the launcher opens the whole Control Panel hub, not just Settings.
-	const TUNE_PATH =
-		'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z';
 	// A two-person "buddies" glyph (Material "people"): hidden, it inherits the
 	// row text color (measured off native guide icons, rgb(15,15,15) light /
 	// rgb(241,241,241) dark) to match Home/Shorts/Subscriptions; shown, it
@@ -35,7 +23,6 @@
 
 	let onHome = false;
 	let panelOpen = false; // mirrors home-section.js's ephemeral open state
-	let relayLoaded = false;
 
 	injectStyle();
 	ensureRow();
@@ -57,8 +44,9 @@
 	 * while the guide isn't built yet (retried on mutation). */
 	function guideSlot() {
 		const guide = document.querySelector('ytd-guide-renderer');
-		if (!guide) return null;
-		return guide.querySelector('#sections ytd-guide-section-renderer #items') || guide.querySelector('#sections') || guide;
+		if (guide) return guide.querySelector('#sections ytd-guide-section-renderer #items') || guide.querySelector('#sections') || guide;
+		const miniGuide = document.querySelector('ytd-mini-guide-renderer');
+		return miniGuide && (miniGuide.querySelector('#items') || miniGuide);
 	}
 
 	function ensureRow() {
@@ -69,14 +57,13 @@
 			removeHomeControls();
 			return;
 		}
-		let row = document.getElementById(ROW_ID);
-		if (row && row.isConnected) {
-			ensureRelayFrame(row.parentNode);
-			return;
-		}
-
 		const slot = guideSlot();
 		if (!slot) return; // guide not built yet - a later ytb:mutation retries
+		let row = document.getElementById(ROW_ID);
+		if (row && row.isConnected) {
+			if (row.parentElement !== slot) slot.append(row);
+			return;
+		}
 
 		row = document.createElement('button');
 		row.id = ROW_ID;
@@ -91,27 +78,7 @@
 		label.className = 'ytb-ht-label';
 		label.textContent = 'Buddy Room';
 
-		// Control Panel Launcher: a role=button span (a nested <button> is
-		// invalid here) that swallows its own activation so it never flips the toggle.
-		const launcher = document.createElement('span');
-		launcher.className = LAUNCHER_CLASS;
-		launcher.setAttribute('role', 'button');
-		launcher.tabIndex = 0;
-		launcher.setAttribute('aria-label', 'Open the Control Panel');
-		launcher.title = 'Control Panel';
-		launcher.append(buildIcon(TUNE_PATH, 20));
-		launcher.addEventListener('click', (event) => {
-			event.stopPropagation();
-			openControlPanel();
-		});
-		launcher.addEventListener('keydown', (event) => {
-			if (event.key !== 'Enter' && event.key !== ' ') return;
-			event.preventDefault();
-			event.stopPropagation();
-			openControlPanel();
-		});
-
-		row.append(iconWrap, label, launcher);
+		row.append(iconWrap, label);
 
 		row.addEventListener('click', () => {
 			// home-section.js owns the state: request a toggle, then mirror the
@@ -120,7 +87,7 @@
 		});
 
 		syncRow(row);
-		slot.append(row, ensureRelayFrame(slot));
+		slot.append(row);
 	}
 
 	/** aria-checked mirrors "panel open"; the is-on class tints the buddies
@@ -130,53 +97,7 @@
 		row.classList.toggle('is-on', panelOpen);
 	}
 
-	/** Hidden extension-origin frame that can call chrome.action.openPopup, so
-	 * this content script needs no background service worker (ADR-0012). A
-	 * sibling of the row, so YouTube tearing down the guide removes both. */
-	function ensureRelayFrame(slot) {
-		let frame = document.getElementById(RELAY_ID);
-		if (frame && frame.isConnected) return frame;
-		frame?.remove();
-		relayLoaded = false;
-		frame = document.createElement('iframe');
-		frame.id = RELAY_ID;
-		frame.tabIndex = -1;
-		frame.setAttribute('aria-hidden', 'true');
-		frame.title = '';
-		frame.addEventListener('load', () => {
-			if (frame.isConnected) relayLoaded = true;
-		});
-		frame.src = chrome.runtime.getURL(RELAY_PAGE);
-		if (slot && !frame.isConnected) slot.appendChild(frame);
-		return frame;
-	}
-
-	function openControlPanel() {
-		if (!YTB.isContextActive() || !onHome) return;
-		const row = document.getElementById(ROW_ID);
-		const frame = ensureRelayFrame(row && row.parentNode);
-		const send = () => {
-			try {
-				frame.contentWindow?.postMessage({ type: OPEN_MESSAGE }, EXT_ORIGIN);
-			} catch {
-				YTB.toast(TOOLBAR_FALLBACK_COPY);
-			}
-		};
-		if (relayLoaded) send();
-		else frame.addEventListener('load', send, { once: true });
-	}
-
-	/** Only a failure from our current extension frame can trigger fallback UI. */
-	function onRelayMessage(event) {
-		if (event.origin !== EXT_ORIGIN || event.data?.type !== OPEN_FAILED_MESSAGE) return;
-		const frame = document.getElementById(RELAY_ID);
-		if (!frame || event.source !== frame.contentWindow) return;
-		YTB.toast(TOOLBAR_FALLBACK_COPY);
-	}
-
 	function removeHomeControls() {
-		relayLoaded = false;
-		document.getElementById(RELAY_ID)?.remove();
 		document.getElementById(ROW_ID)?.remove();
 	}
 
@@ -194,24 +115,20 @@
 		ensureRow();
 	});
 
-	window.addEventListener('message', onRelayMessage);
-
 	YTB.onContextInvalidated(() => {
-		window.removeEventListener('message', onRelayMessage);
 		removeHomeControls();
 	});
 
-	/** An inline SVG glyph (fill follows currentColor). Defaults to the left
-	 * buddies people glyph; the launcher passes the "tune" sliders path. */
-	function buildIcon(pathData = PEOPLE_PATH, size = 24) {
+	/** An inline SVG glyph (fill follows currentColor). */
+	function buildIcon() {
 		const svg = document.createElementNS(SVG_NS, 'svg');
 		svg.setAttribute('viewBox', '0 0 24 24');
-		svg.setAttribute('width', String(size));
-		svg.setAttribute('height', String(size));
+		svg.setAttribute('width', '24');
+		svg.setAttribute('height', '24');
 		svg.setAttribute('aria-hidden', 'true');
 		svg.setAttribute('focusable', 'false');
 		const path = document.createElementNS(SVG_NS, 'path');
-		path.setAttribute('d', pathData);
+		path.setAttribute('d', PEOPLE_PATH);
 		path.setAttribute('fill', 'currentColor');
 		svg.append(path);
 		return svg;
@@ -271,43 +188,21 @@
         white-space: nowrap;
         color: inherit;
       }
-      /* Control Panel Launcher: pinned to the row's right end, native color at
-         rest, apricot on hover/focus. It carries no hover background of its own
-         (the row's own hover already lights up behind it) so the toggle icon
-         keeps the ON/OFF apricot as the row's sole state signal. */
-      #${ROW_ID} .${LAUNCHER_CLASS} {
-        flex: none;
-        margin-left: auto;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        color: inherit;
-        cursor: pointer;
-        transition: color 140ms;
+      ytd-mini-guide-renderer #${ROW_ID} {
+        width: 64px;
+        height: 76px;
+        flex-direction: column;
+        justify-content: flex-start;
+        padding: 16px 0 14px;
+        font-size: 10px;
+        line-height: 16px;
+        text-align: center;
       }
-      #${ROW_ID} .${LAUNCHER_CLASS}:hover { color: var(--ytbht-accent); }
-      #${ROW_ID} .${LAUNCHER_CLASS}:focus-visible {
-        outline: none;
-        color: var(--ytbht-accent);
-        box-shadow: 0 0 0 2px var(--ytbht-accent);
+      ytd-mini-guide-renderer #${ROW_ID} .ytb-ht-icon {
+        margin: 0 0 6px;
       }
-      #${ROW_ID} .${LAUNCHER_CLASS} svg { display: block; width: 20px; height: 20px; }
-
-      #${RELAY_ID} {
-        position: fixed;
-        width: 0;
-        height: 0;
-        border: 0;
-        visibility: hidden;
-        pointer-events: none;
-      }
-
       @media (prefers-reduced-motion: reduce) {
-        #${ROW_ID} .ytb-ht-icon,
-        #${ROW_ID} .${LAUNCHER_CLASS} { transition: none; }
+		#${ROW_ID} .ytb-ht-icon { transition: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);

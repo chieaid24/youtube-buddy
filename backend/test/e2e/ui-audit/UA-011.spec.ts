@@ -54,7 +54,6 @@ test('UA-011: rendered UI copy is printable ASCII', async () => {
 		await home.waitForTimeout(500);
 		await home.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
 		await home.waitForSelector('#ytb-home-section .ytb-hs-conn', { timeout: 15_000 });
-		// state.down stays true: the popup needs two failed 5s polls of its own.
 		const sectionText = await home.evaluate(() => document.getElementById('ytb-home-section')!.textContent || '');
 		expect.soft(nonAscii(sectionText), `home section copy`).toEqual([]);
 		// The Dismiss control is an icon, not a text glyph.
@@ -65,12 +64,10 @@ test('UA-011: rendered UI copy is printable ASCII', async () => {
 		// poll supply the two consecutive failures.
 		await popup.bringToFront();
 		await popup.reload();
-		await popup.waitForFunction(() => (document.getElementById('status-sub')?.textContent || '').includes('Retrying'), null, {
+		await popup.waitForFunction(() => !(document.getElementById('connection-state') as HTMLElement)?.hidden, null, {
 			timeout: 20_000,
 		});
-		const popupStatus = await popup.evaluate(
-			() => (document.getElementById('status-text')?.textContent || '') + (document.getElementById('status-sub')?.textContent || ''),
-		);
+		const popupStatus = (await popup.locator('#connection-state').textContent()) || '';
 		expect.soft(nonAscii(popupStatus), `popup status copy: ${popupStatus}`).toEqual([]);
 	} finally {
 		await context.close();

@@ -21,6 +21,12 @@
 	let lastNavUrl = null; // tells a real navigation from a same-URL poller nudge
 	let myClientId = null;
 	let pendingPair = false; // one Create/Join request at a time
+	let activeView = 'normal';
+	let currentSettings = null;
+	let currentSharing = true;
+	let currentName = '';
+	let pendingConfirm = null;
+	let selectedBuddyId = '';
 	let dismissedIds = new Set(); // this Room's local Dismissals (item ids)
 	let dismissedRoom = ''; // the Room Code dismissedIds belongs to
 
@@ -51,10 +57,13 @@
 		if (next === open) return;
 		open = next;
 		if (open) {
+			activeView = initialView();
 			resetFeedWindow(); // each open starts the Feed fresh
-			const panel = ensureOverlay();
-			panel?.querySelector('.ytb-hs-close')?.focus();
+			ensureOverlay();
+			hydrateSettings();
 		} else {
+			pendingConfirm = null;
+			selectedBuddyId = '';
 			teardownOverlay();
 		}
 		document.dispatchEvent(new CustomEvent('ytb:home-panel-state', { detail: { open } }));
@@ -76,7 +85,6 @@
 			root.addEventListener('click', (event) => {
 				if (event.target === root) setOpen(false); // scrim click closes; panel clicks don't
 			});
-			root.addEventListener('keydown', onOverlayKeydown);
 			// Feed scroll moves rows out from under the cursor; the card must not linger.
 			root.addEventListener('scroll', () => hideHoverCard(), true);
 
@@ -112,10 +120,11 @@
 	function dockOverlay() {
 		const root = document.getElementById(OVERLAY_ID);
 		if (!root) return;
-		let x = 0;
+		const toggleRight = document.getElementById('ytb-home-toggle')?.getBoundingClientRect().right || 0;
+		let x = toggleRight < window.innerWidth / 2 ? toggleRight : 0;
 		for (const el of document.querySelectorAll('ytd-guide-renderer, ytd-mini-guide-renderer')) {
 			const rect = el.getBoundingClientRect();
-			if (rect.width > 0 && rect.height > 0) x = Math.max(x, rect.right);
+			if (rect.width > 0 && rect.width < window.innerWidth / 2 && rect.height > 0) x = Math.max(x, rect.right);
 		}
 		root.style.setProperty('--ytb-hs-dock', `${Math.round(x) || GUIDE_FALLBACK_PX}px`);
 	}
@@ -124,7 +133,12 @@
 	function onOverlayKeydown(event) {
 		if (event.key === 'Escape') {
 			event.stopPropagation();
-			setOpen(false);
+			if (pendingConfirm) {
+				pendingConfirm = null;
+				render();
+			} else {
+				setOpen(false);
+			}
 		} else if (event.key === 'Tab') {
 			trapFocus(event);
 		}
@@ -160,6 +174,8 @@
 
 		// Chat rule: capture scroll before the rebuild - pinned follows the newest item, else keep the exact spot.
 		const prevScroll = section.querySelector('.ytb-hs-feed-scroll');
+		const prevSettings = section.querySelector('.ytb-hs-settings');
+		const prevSettingsTop = prevSettings ? prevSettings.scrollTop : 0;
 		const pinned = pinOverride || !prevScroll || prevScroll.scrollHeight - prevScroll.clientHeight - prevScroll.scrollTop <= PIN_PX;
 		const prevTop = prevScroll ? prevScroll.scrollTop : 0;
 		pinOverride = false;
@@ -170,8 +186,9 @@
 		dot.className = 'ytb-hs-dot';
 		const title = document.createElement('h2');
 		title.className = 'ytb-hs-title';
-		title.textContent = 'YouTube Buddy Room';
-		head.append(dot, title, buildCloseButton());
+		title.textContent = activeView === 'settings' ? 'Settings' : 'YouTube Buddy Room';
+		if (activeView === 'settings') head.append(buildBackButton(), title, buildCloseButton());
+		else head.append(dot, title, buildSettingsButton(), buildCloseButton());
 
 		// Connection Lost (PRD #137): quiet status line; never shown while Unpaired.
 		let conn = null;
@@ -182,24 +199,65 @@
 			conn.textContent = "Can't reach your Room. Retrying...";
 		}
 
-		const body = document.createElement('div');
-		body.className = 'ytb-hs-body';
-		if (!roomCode) {
-			body.append(buildPairPrompt());
-		} else if (detail.locked) {
-			const locked = document.createElement('p');
-			locked.className = 'ytb-hs-empty';
-			locked.textContent = 'This Room is full, so nothing can be shown here.';
-			body.append(locked);
-		} else {
-			body.append(buildFeedColumn(detail, pinned), buildRecommendedColumn(detail));
+		const body = activeView === 'settings' ? buildSettingsView() : document.createElement('div');
+		if (activeView === 'normal') {
+			body.className = 'ytb-hs-body';
+			if (!roomCode) {
+				body.append(buildEmptyNormal('Pair with a Room in Settings to see its Feed and Recommendations.'));
+			} else if (detail.locked) {
+				body.append(buildEmptyNormal('This Room is full. Open Settings to choose another Room.'));
+			} else {
+				body.append(buildFeedColumn(detail, pinned), buildRecommendedColumn(detail));
+			}
 		}
 
 		if (conn) section.replaceChildren(head, conn, body);
 		else section.replaceChildren(head, body);
+		if (pendingConfirm) section.append(buildConfirmDialog());
 
 		const scroll = section.querySelector('.ytb-hs-feed-scroll');
 		if (scroll) scroll.scrollTop = pinned ? scroll.scrollHeight : prevTop;
+		const settings = section.querySelector('.ytb-hs-settings');
+		if (settings) settings.scrollTop = prevSettingsTop;
+	}
+
+	function initialView() {
+		return !lastDetail || !lastDetail.roomCode || lastDetail.locked ? 'settings' : 'normal';
+	}
+
+	function buildEmptyNormal(text) {
+		const empty = document.createElement('p');
+		empty.className = 'ytb-hs-empty';
+		empty.textContent = text;
+		return empty;
+	}
+
+	function buildSettingsButton() {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'ytb-hs-icon';
+		button.append(YTBTheme.icon('settings'));
+		button.title = 'Settings';
+		button.setAttribute('aria-label', 'Settings');
+		button.addEventListener('click', () => {
+			activeView = 'settings';
+			render();
+		});
+		return button;
+	}
+
+	function buildBackButton() {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'ytb-hs-icon ytb-hs-back';
+		button.append(YTBTheme.icon('back'));
+		button.title = 'Back';
+		button.setAttribute('aria-label', 'Back');
+		button.addEventListener('click', () => {
+			activeView = 'normal';
+			render();
+		});
+		return button;
 	}
 
 	// Closes the panel (ephemeral): a close, never a leave - no Room state is touched.
@@ -593,6 +651,383 @@
 		return card;
 	}
 
+	// --- Settings view ---
+
+	async function hydrateSettings() {
+		const [settings, config, clientId] = await Promise.all([YTB.getSettings(), YTB.getConfig(), YTB.ensureClientId()]);
+		currentSettings = settings;
+		currentSharing = config.sharing;
+		currentName = config.name || '';
+		myClientId = clientId;
+		if (open && activeView === 'settings') render();
+	}
+
+	function buildSettingsView() {
+		const settings = document.createElement('div');
+		settings.className = 'ytb-hs-settings';
+		settings.append(buildProfileSettings(), buildRoomSettings(), buildOnVideoSettings(), buildAppearanceSettings());
+		return settings;
+	}
+
+	function buildSettingsGroup(title) {
+		const group = document.createElement('section');
+		group.className = 'ytb-hs-set-group';
+		const heading = document.createElement('h3');
+		heading.textContent = title;
+		group.append(heading);
+		return group;
+	}
+
+	function buildProfileSettings() {
+		const group = buildSettingsGroup('Profile');
+		const label = document.createElement('label');
+		label.className = 'ytb-hs-field-label';
+		label.textContent = 'Nickname';
+		label.htmlFor = 'ytb-hs-name';
+		const input = document.createElement('input');
+		input.id = 'ytb-hs-name';
+		input.className = 'ytb-hs-input ytb-hs-name';
+		input.value = currentName;
+		input.placeholder = 'Buddy "Buddy" McGee';
+		input.autocomplete = 'off';
+		input.addEventListener('input', () => YTB.setConfig({ name: input.value }));
+		const commit = async () => {
+			const name = input.value.trim();
+			currentName = name;
+			input.value = name;
+			await YTB.setConfig({ name });
+			const { code } = await YTB.getConfig();
+			if (code) await YTB.assertPresence(code);
+			requestRoomRefresh();
+		};
+		input.addEventListener('blur', commit);
+		input.addEventListener('keydown', (event) => {
+			if (event.key === 'Enter') input.blur();
+		});
+		group.append(label, input);
+		return group;
+	}
+
+	function roomState() {
+		if (!lastDetail || !lastDetail.roomCode) return { label: 'Unpaired', buddies: [], locked: false };
+		const view = YTB.roomView(lastDetail, myClientId);
+		if (lastDetail.locked || view.locked) return { label: 'Room full', buddies: [], locked: true };
+		return {
+			label: view.buddies.length ? 'In room' : 'Waiting',
+			buddies: view.buddies,
+			locked: false,
+		};
+	}
+
+	function buildRoomSettings() {
+		const group = buildSettingsGroup('Room');
+		const state = roomState();
+		const status = document.createElement('div');
+		status.className = 'ytb-hs-room-status';
+		status.innerHTML = '<span>Room state</span>';
+		const strong = document.createElement('strong');
+		strong.textContent = state.label;
+		status.append(strong);
+		group.append(status);
+
+		const code = lastDetail && lastDetail.roomCode;
+		if (code) group.append(buildRoomCode(code));
+		if (!code || state.locked) {
+			group.append(buildPairPrompt());
+		} else {
+			group.append(buildRoster(state.buddies));
+			const leave = document.createElement('button');
+			leave.type = 'button';
+			leave.className = 'ytb-hs-btn ytb-hs-danger';
+			leave.textContent = 'Leave Room';
+			leave.addEventListener('click', confirmLeaveRoom);
+			group.append(leave);
+		}
+		return group;
+	}
+
+	function buildRoomCode(code) {
+		const row = document.createElement('div');
+		row.className = 'ytb-hs-code-row';
+		const label = document.createElement('span');
+		label.textContent = 'Room Code';
+		const value = document.createElement('strong');
+		value.textContent = YTBRoomCode.pretty(code);
+		const copy = document.createElement('button');
+		copy.type = 'button';
+		copy.className = 'ytb-hs-copy';
+		copy.textContent = 'Copy';
+		const feedback = document.createElement('span');
+		feedback.className = 'ytb-hs-sr';
+		feedback.setAttribute('role', 'status');
+		copy.addEventListener('click', () => YTBRoomCode.copy({ text: value.textContent, feedback, button: copy }));
+		row.append(label, value, copy, feedback);
+		return row;
+	}
+
+	function buildRoster(buddies) {
+		const wrap = document.createElement('div');
+		wrap.className = 'ytb-hs-roster';
+		const heading = document.createElement('h4');
+		heading.textContent = buddies.length ? `Buddies (${buddies.length})` : 'Buddies';
+		wrap.append(heading);
+		if (!buddies.length) {
+			const empty = document.createElement('p');
+			empty.className = 'ytb-hs-set-hint';
+			empty.textContent = 'Waiting for a Buddy to join.';
+			wrap.append(empty);
+			return wrap;
+		}
+
+		const roster = YTB.roomRoster(lastDetail);
+		for (const buddy of buddies) {
+			const row = document.createElement('div');
+			row.className = 'ytb-hs-buddy';
+			const swatch = document.createElement('button');
+			swatch.type = 'button';
+			swatch.className = 'ytb-hs-swatch';
+			swatch.style.background = YTB.buddyColor(buddy.clientId);
+			swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(buddy.clientId, buddy.name, roster)}`);
+			swatch.addEventListener('click', () => {
+				selectedBuddyId = selectedBuddyId === buddy.clientId ? '' : buddy.clientId;
+				render();
+			});
+			const name = document.createElement('span');
+			name.textContent = YTB.buddyName(buddy.clientId, buddy.name, roster);
+			const seen = document.createElement('span');
+			seen.className = 'ytb-hs-seen';
+			seen.textContent = formatLastSeen(buddy.updatedAt);
+			row.append(swatch, name, seen);
+			wrap.append(row);
+			if (selectedBuddyId === buddy.clientId) wrap.append(buildColorPicker(buddy.clientId));
+		}
+		return wrap;
+	}
+
+	function buildColorPicker(clientId) {
+		const picker = document.createElement('div');
+		picker.className = 'ytb-hs-colors';
+		picker.setAttribute('role', 'group');
+		picker.setAttribute('aria-label', 'Buddy Color Swatches');
+		const room = YTB._buddyColors[(lastDetail && lastDetail.roomCode) || ''] || {};
+		const used = new Set(
+			Object.entries(room)
+				.filter(([id]) => id !== clientId)
+				.map(([, color]) => color),
+		);
+		for (const color of YTB.BUDDY_COLORS) {
+			const choice = document.createElement('button');
+			choice.type = 'button';
+			choice.className = 'ytb-hs-color';
+			choice.style.background = color;
+			choice.disabled = used.has(color);
+			choice.setAttribute('aria-label', choice.disabled ? `${color}, already assigned` : `Choose ${color}`);
+			choice.setAttribute('aria-pressed', String(room[clientId] === color));
+			choice.addEventListener('click', async () => {
+				if (await YTB.setBuddyColor(lastDetail.roomCode, clientId, color)) {
+					selectedBuddyId = '';
+					render();
+				}
+			});
+			picker.append(choice);
+		}
+		return picker;
+	}
+
+	function buildOnVideoSettings() {
+		const group = buildSettingsGroup('On-video');
+		if (!currentSettings) {
+			group.append(buildEmptyNormal('Loading Settings...'));
+			return group;
+		}
+		group.append(
+			buildSwitch('Share video progress', currentSharing, () => {
+				if (currentSharing) confirmStopSharing();
+				else setSharing(true);
+			}),
+			buildSwitch('Notes Visibility', !currentSettings.notesHidden, () => saveSettings({ notesHidden: !currentSettings.notesHidden })),
+			buildSwitch('Buddy Progress Visibility', !currentSettings.buddyProgressHidden, () =>
+				saveSettings({
+					buddyProgressHidden: !currentSettings.buddyProgressHidden,
+				}),
+			),
+			buildSwitch('Spoiler Default', currentSettings.spoilerDefault, () =>
+				saveSettings({ spoilerDefault: !currentSettings.spoilerDefault }),
+			),
+			buildNotificationPicker(),
+		);
+		return group;
+	}
+
+	function buildSwitch(label, checked, onClick) {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'ytb-hs-switch-row';
+		button.setAttribute('role', 'switch');
+		button.setAttribute('aria-checked', String(checked));
+		const text = document.createElement('span');
+		text.textContent = label;
+		const toggle = document.createElement('span');
+		toggle.className = 'ytb-hs-switch';
+		toggle.setAttribute('aria-hidden', 'true');
+		toggle.append(document.createElement('span'));
+		button.append(text, toggle);
+		button.addEventListener('click', onClick);
+		return button;
+	}
+
+	function buildNotificationPicker() {
+		const wrap = document.createElement('div');
+		wrap.className = 'ytb-hs-notifications';
+		const label = document.createElement('span');
+		label.textContent = 'Notification Position';
+		const picker = document.createElement('div');
+		picker.className = 'ytb-hs-edges';
+		picker.setAttribute('role', 'radiogroup');
+		picker.setAttribute('aria-label', 'Notification Position');
+		for (const edge of ['top', 'left', 'right', 'bottom']) {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.dataset.edge = edge;
+			button.setAttribute('role', 'radio');
+			button.setAttribute('aria-label', `Notifications at ${edge}`);
+			button.setAttribute('aria-checked', String(currentSettings.notificationPosition === edge));
+			button.addEventListener('click', () => saveSettings({ notificationPosition: edge }));
+			picker.append(button);
+		}
+		wrap.append(label, picker);
+		return wrap;
+	}
+
+	function buildAppearanceSettings() {
+		const group = buildSettingsGroup('Appearance');
+		const label = document.createElement('span');
+		label.textContent = 'Theme Preference';
+		const choices = document.createElement('div');
+		choices.className = 'ytb-hs-themes';
+		choices.setAttribute('role', 'radiogroup');
+		choices.setAttribute('aria-label', 'Theme Preference');
+		for (const [value, text] of [
+			['light', 'Light'],
+			['dark', 'Dark'],
+			['system', 'Auto'],
+		]) {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.dataset.themeChoice = value;
+			button.setAttribute('role', 'radio');
+			button.setAttribute('aria-checked', String(currentSettings && currentSettings.theme === value));
+			button.textContent = text;
+			button.addEventListener('click', () => saveSettings({ theme: value }));
+			choices.append(button);
+		}
+		group.append(label, choices);
+		return group;
+	}
+
+	function saveSettings(partial) {
+		if (!currentSettings) return;
+		currentSettings = { ...currentSettings, ...partial };
+		YTB.setSettings(partial);
+		render();
+	}
+
+	async function setSharing(next) {
+		currentSharing = next;
+		await YTB.setConfig({ sharing: next });
+		render();
+	}
+
+	function confirmStopSharing() {
+		pendingConfirm = {
+			title: 'Stop sharing?',
+			body: "Your Buddies won't see your progress until you start again.",
+			label: 'Stop sharing',
+			danger: false,
+			action: () => setSharing(false),
+		};
+		render();
+	}
+
+	async function confirmLeaveRoom() {
+		const code = lastDetail && lastDetail.roomCode;
+		const state = roomState();
+		const roster = YTB.roomRoster(lastDetail);
+		const names = state.buddies.map((buddy) => YTB.buddyName(buddy.clientId, buddy.name, roster));
+		pendingConfirm = {
+			title: names.length ? 'Are you sure you want to go?' : 'Leave this Room?',
+			body: names.length ? `This will remove you from the Room, away from: ${names.join(', ')}.` : 'No Buddy has joined the Room yet.',
+			label: 'Leave',
+			danger: true,
+			action: () => leaveRoom(code),
+		};
+		render();
+	}
+
+	function buildConfirmDialog() {
+		const overlay = document.createElement('div');
+		overlay.className = 'ytb-hs-confirm';
+		overlay.addEventListener('click', (event) => {
+			if (event.target === overlay) {
+				pendingConfirm = null;
+				render();
+			}
+		});
+		const box = document.createElement('div');
+		box.className = 'ytb-hs-confirm-box';
+		box.setAttribute('role', 'alertdialog');
+		box.setAttribute('aria-modal', 'true');
+		const title = document.createElement('h3');
+		title.textContent = pendingConfirm.title;
+		const body = document.createElement('p');
+		body.textContent = pendingConfirm.body;
+		const actions = document.createElement('div');
+		actions.className = 'ytb-hs-confirm-actions';
+		const cancel = document.createElement('button');
+		cancel.type = 'button';
+		cancel.className = 'ytb-hs-btn';
+		cancel.textContent = 'Cancel';
+		cancel.addEventListener('click', () => {
+			pendingConfirm = null;
+			render();
+		});
+		const confirm = document.createElement('button');
+		confirm.type = 'button';
+		confirm.className = `ytb-hs-btn ${pendingConfirm.danger ? 'ytb-hs-danger' : 'ytb-hs-neutral'}`;
+		confirm.textContent = pendingConfirm.label;
+		confirm.addEventListener('click', () => {
+			const action = pendingConfirm.action;
+			pendingConfirm = null;
+			action();
+		});
+		actions.append(cancel, confirm);
+		box.append(title, body, actions);
+		overlay.append(box);
+		queueMicrotask(() => cancel.isConnected && cancel.focus());
+		return overlay;
+	}
+
+	async function leaveRoom(code) {
+		await YTB.setConfig({ code: '' });
+		lastDetail = null;
+		selectedBuddyId = '';
+		render();
+		requestRoomRefresh();
+		if (code) {
+			await YTB.clearRoomColors(code);
+			await YTB.deleteMember(code, myClientId);
+		}
+	}
+
+	function formatLastSeen(updatedAt) {
+		const seconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
+		if (seconds < 60) return 'just now';
+		const minutes = Math.floor(seconds / 60);
+		if (minutes < 60) return `${minutes}m ago`;
+		const hours = Math.floor(minutes / 60);
+		return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+	}
+
 	// --- Unpaired: compact Create/Join prompt ---
 
 	function buildPairPrompt() {
@@ -625,7 +1060,7 @@
 		error.className = 'ytb-hs-error';
 		error.setAttribute('role', 'status');
 
-		// Same flows as the popup (ADR-0005); only renders while Unpaired, so there's no old-Room membership to clean up.
+		// Only renders while Unpaired, so there is no old Room membership to clean up.
 		create.addEventListener('click', async () => {
 			if (pendingPair) return;
 			pendingPair = true;
@@ -678,9 +1113,20 @@
 	}
 
 	async function commitCode(code) {
+		const { code: oldCode } = await YTB.getConfig();
 		await YTB.setConfig({ code });
+		lastDetail = { roomCode: code, myClientId, ok: false, locked: false };
+		selectedBuddyId = '';
+		render();
 		await YTB.assertPresence(code);
-		// Nudge renderer.js's poller to re-read now instead of waiting out its 60s cycle.
+		if (oldCode && oldCode !== code) {
+			await YTB.clearRoomColors(oldCode);
+			await YTB.deleteMember(oldCode, myClientId);
+		}
+		requestRoomRefresh();
+	}
+
+	function requestRoomRefresh() {
 		document.dispatchEvent(
 			new CustomEvent('ytb:navigate', {
 				detail: { url: location.href, videoId: null },
@@ -705,6 +1151,14 @@
 		if (!YTB.isContextActive()) return;
 		setOpen(!open);
 	});
+
+	document.addEventListener(
+		'keydown',
+		(event) => {
+			if (open) onOverlayKeydown(event);
+		},
+		true,
+	);
 
 	document.addEventListener('ytb:room-data', async (event) => {
 		if (!YTB.isContextActive()) return;
@@ -749,9 +1203,34 @@
 		if (!YTB.isContextActive()) return;
 		const section = document.getElementById(SECTION_ID);
 		if (!section) return;
+		if (activeView === 'settings') {
+			render(section);
+			return;
+		}
 		for (const span of section.querySelectorAll('[data-ytb-color-cid]')) {
 			span.style.color = YTB.buddyTextColor(span.dataset.ytbColorCid);
 		}
+	});
+
+	chrome.storage.onChanged.addListener(async (changes, area) => {
+		if (area !== 'local') return;
+		let shouldRender = false;
+		if ('name' in changes) currentName = changes.name.newValue || '';
+		if ('sharing' in changes) {
+			currentSharing = changes.sharing.newValue !== false;
+			shouldRender = true;
+		}
+		if (['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden'].some((key) => key in changes)) {
+			currentSettings = await YTB.getSettings();
+			shouldRender = true;
+		}
+		if (shouldRender && open && activeView === 'settings') render();
+	});
+
+	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+		if (!YTB.isContextActive() || message?.type !== 'ytb:open-room-home') return;
+		if (onHome) setOpen(true);
+		sendResponse({ opened: onHome });
 	});
 
 	YTB.onContextInvalidated(() => {
@@ -779,6 +1258,7 @@
       /* The floating panel: portrait, roomy, with its own internal scroll. */
       #${SECTION_ID} {
         box-sizing: border-box;
+        position: relative;
         display: flex;
         flex-direction: column;
         width: 480px;
@@ -793,7 +1273,7 @@
         font-family: var(--ytb-font);
         font-size: 13px;
         line-height: 1.45;
-        box-shadow: 10px 12px 40px rgba(0, 0, 0, 0.26);
+		box-shadow: var(--ytb-e-pop);
       }
       #${SECTION_ID} .ytb-hs-head { flex: none; display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
       #${SECTION_ID} .ytb-hs-dot {
@@ -826,6 +1306,15 @@
       #${SECTION_ID} .ytb-hs-close:focus-visible { background: var(--ytb-accent-050); color: var(--ytb-ink); outline: none; }
       #${SECTION_ID} .ytb-hs-close:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-close svg { width: 14px; height: 14px; }
+      #${SECTION_ID} .ytb-hs-icon {
+        flex: none; align-self: center; display: inline-flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
+        background: transparent; color: var(--ytb-ink-faint); cursor: pointer;
+      }
+      #${SECTION_ID} .ytb-hs-icon:hover,
+      #${SECTION_ID} .ytb-hs-icon:focus-visible { background: var(--ytb-accent-050); color: var(--ytb-ink); outline: none; }
+      #${SECTION_ID} .ytb-hs-icon:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-icon svg { width: 15px; height: 15px; }
       /* Portrait stack: Feed above Recommended (ADR-0005); the body scrolls if the two exceed the panel. */
       #${SECTION_ID} .ytb-hs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
       #${SECTION_ID} .ytb-hs-feed { min-width: 0; }
@@ -992,12 +1481,85 @@
         background: var(--ytb-surface-sunk);
         color: var(--ytb-ink);
         font-family: inherit;
-        font-size: 13px;
-        line-height: 1.2;
+		font-size: 13px;
+		line-height: 1.2;
+		box-sizing: border-box;
       }
       #${SECTION_ID} .ytb-hs-input:focus { outline: none; border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-error { margin: 0; min-height: 16px; font-size: 11px; color: var(--ytb-danger-text); }
+      #${SECTION_ID} .ytb-hs-settings {
+        flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 4px 8px 0;
+        display: flex; flex-direction: column; gap: 12px;
+      }
+      #${SECTION_ID} .ytb-hs-set-group {
+        padding: 12px; border: 1px solid var(--ytb-line); border-radius: var(--ytb-r-lg);
+        background: var(--ytb-surface-tint);
+      }
+      #${SECTION_ID} .ytb-hs-set-group h3,
+		#${SECTION_ID} .ytb-hs-set-group h4 { margin: 0 0 8px; font-size: 11px; font-weight: 800; }
+      #${SECTION_ID} .ytb-hs-field-label { display: block; margin-bottom: 5px; color: var(--ytb-ink-muted); font-size: 11px; }
+      #${SECTION_ID} .ytb-hs-name { width: 100%; }
+      #${SECTION_ID} .ytb-hs-room-status,
+      #${SECTION_ID} .ytb-hs-code-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      #${SECTION_ID} .ytb-hs-room-status > span,
+      #${SECTION_ID} .ytb-hs-code-row > span:first-child { color: var(--ytb-ink-muted); }
+		#${SECTION_ID} .ytb-hs-room-status strong,
+		#${SECTION_ID} .ytb-hs-code-row strong { margin-left: auto; }
+		#${SECTION_ID} .ytb-hs-code-row strong { color: var(--ytb-accent-800); font-size: 16px; font-weight: 800; }
+      #${SECTION_ID} .ytb-hs-copy {
+        padding: 3px 7px; border: 1px solid var(--ytb-line-strong); border-radius: 8px;
+        background: var(--ytb-surface); color: var(--ytb-ink); font: 600 11px/1.2 inherit; cursor: pointer;
+      }
+      #${SECTION_ID} .ytb-hs-roster { margin: 10px 0; }
+      #${SECTION_ID} .ytb-hs-buddy { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 0; }
+      #${SECTION_ID} .ytb-hs-swatch,
+      #${SECTION_ID} .ytb-hs-color { border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
+      #${SECTION_ID} .ytb-hs-swatch { width: 18px; height: 18px; padding: 0; }
+      #${SECTION_ID} .ytb-hs-seen { color: var(--ytb-ink-muted); font-size: 11px; }
+      #${SECTION_ID} .ytb-hs-colors { display: flex; gap: 7px; padding: 6px 0 8px 26px; }
+      #${SECTION_ID} .ytb-hs-color { width: 20px; height: 20px; padding: 0; }
+      #${SECTION_ID} .ytb-hs-color[aria-pressed='true'] { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-color:disabled { opacity: 0.25; cursor: default; }
+		#${SECTION_ID} .ytb-hs-danger { border-color: transparent; background: var(--ytb-danger); color: var(--ytb-on-fill); }
+		#${SECTION_ID} .ytb-hs-neutral { border-color: transparent; background: var(--ytb-neutral); color: var(--ytb-on-fill); }
+      #${SECTION_ID} .ytb-hs-set-hint { margin: 4px 0; color: var(--ytb-ink-muted); font-size: 11px; }
+      #${SECTION_ID} .ytb-hs-switch-row {
+        width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 8px 0; border: 0; border-bottom: 1px solid var(--ytb-line);
+        background: transparent; color: var(--ytb-ink); font: 600 13px/1.3 inherit; text-align: left; cursor: pointer;
+      }
+      #${SECTION_ID} .ytb-hs-switch-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); border-radius: 8px; }
+      #${SECTION_ID} .ytb-hs-switch { width: 34px; height: 20px; padding: 2px; border-radius: 999px; background: var(--ytb-line-strong); }
+      #${SECTION_ID} .ytb-hs-switch > span {
+        display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ytb-surface);
+        box-shadow: 0 1px 3px oklch(52% 0.06 52 / 0.25); transition: transform 140ms;
+      }
+      #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch { background: var(--ytb-accent-500); }
+      #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch > span { transform: translateX(14px); }
+      #${SECTION_ID} .ytb-hs-notifications { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; font-weight: 600; }
+      #${SECTION_ID} .ytb-hs-edges { width: 76px; height: 58px; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); gap: 3px; }
+      #${SECTION_ID} .ytb-hs-edges button { border: 1px solid var(--ytb-line-strong); border-radius: var(--ytb-r-sm); background: var(--ytb-surface); cursor: pointer; }
+      #${SECTION_ID} .ytb-hs-edges button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='top'] { grid-area: 1 / 2; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='left'] { grid-area: 2 / 1; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='right'] { grid-area: 2 / 3; }
+      #${SECTION_ID} .ytb-hs-edges button[data-edge='bottom'] { grid-area: 3 / 2; }
+      #${SECTION_ID} .ytb-hs-edges button[aria-checked='true'] { border-color: var(--ytb-accent-700); background: var(--ytb-accent-500); }
+      #${SECTION_ID} .ytb-hs-themes { display: flex; gap: 4px; margin-top: 7px; }
+      #${SECTION_ID} .ytb-hs-themes button {
+        flex: 1; padding: 7px; border: 1px solid var(--ytb-line-strong); border-radius: 8px;
+        background: var(--ytb-surface); color: var(--ytb-ink); font: 600 12px/1.2 inherit; cursor: pointer;
+      }
+      #${SECTION_ID} .ytb-hs-themes button[aria-checked='true'] { border-color: var(--ytb-accent-700); background: var(--ytb-accent-100); }
+      #${SECTION_ID} .ytb-hs-confirm {
+        position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
+        padding: 20px; border-radius: var(--ytb-r-lg); background: rgba(0, 0, 0, 0.35);
+      }
+      #${SECTION_ID} .ytb-hs-confirm-box { width: 100%; padding: 16px; border-radius: var(--ytb-r-lg); background: var(--ytb-surface); box-shadow: var(--ytb-e-dialog); }
+      #${SECTION_ID} .ytb-hs-confirm-box h3 { margin: 0 0 5px; font-size: 15px; }
+      #${SECTION_ID} .ytb-hs-confirm-box p { margin: 0 0 14px; color: var(--ytb-ink-muted); }
+      #${SECTION_ID} .ytb-hs-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
       /* Video Hover Card: follows the cursor, so pointer-events must stay off it. */
       #${OVERLAY_ID} .ytb-hs-hovercard {
         position: fixed;
@@ -1012,7 +1574,7 @@
         font-family: var(--ytb-font);
         font-size: 11px;
         line-height: 1.3;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+		box-shadow: var(--ytb-e-pop);
         pointer-events: none;
         opacity: 0;
         visibility: hidden;
@@ -1032,7 +1594,7 @@
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
       @media (prefers-reduced-motion: reduce) {
-        #${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-more { transition: none; }
+		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more, #${SECTION_ID} .ytb-hs-switch > span { transition: none; }
         #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }
       }
     `;

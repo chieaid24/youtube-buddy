@@ -1,7 +1,7 @@
 // extension/content/shared-buddies.js
 // Buddy identity on window.YTB: Room Code normalization, viewer-local Buddy
 // Colors (plus the ONE buddyColors storage subscription), display names, and
-// the popup's roomView reduction.
+// the shared roomView reduction.
 
 (() => {
 	const YTB = window.YTB;
@@ -140,7 +140,7 @@
 			return YTB.baseBuddyName(clientId, name);
 		},
 
-		// Reduce a Room read into the popup's view: a Buddy is any FOREIGN
+		// Reduce a Room read for the status surfaces: a Buddy is any FOREIGN
 		// clientId, preferring their latest Progress Record over a presence-only
 		// row; `locked` means the Room is full of OTHERS with me the rejected 6th.
 		roomView(records, myClientId) {

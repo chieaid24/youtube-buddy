@@ -15,9 +15,9 @@ The Extension Popup reports Room state, Room Code, Buddy count, Sharing state, a
 Your Room follows an exact tab rule:
 
 - If the active tab is already on the YouTube home route, reuse that tab and open its Room Home Panel.
-- Otherwise, open a new YouTube Home tab and open the Room Home Panel after the home content script is ready.
+- Otherwise, create an inactive YouTube Home tab, retry a direct message until its content script acknowledges that Room Home opened, and then activate the tab.
 
-A YouTube watch page, another YouTube route, another site, or no suitable active tab never gets navigated away. The launcher opens a new tab in each of those cases. The launch handoff must be one-shot so a later home tab cannot consume a stale request.
+A YouTube watch page, another YouTube route, another site, or no suitable active tab never gets navigated away. Your Room opens a new tab in each case. The retry loop targets one tab ID and stores no launch request, so a later Home tab cannot consume stale intent.
 
 The Room Home Panel chooses its initial view after launch. Waiting and In room open the normal Feed and Recommendations view. Unpaired and Room full open Settings directly.
 

@@ -145,7 +145,7 @@
       }
 
       /* Unseen pulse (ADR-0010): box-shadow only, so neighbouring dots are
-         never displaced; shares the popup Waiting dot's breathing rhythm. */
+		 never displaced; the cue changes paint only. */
       .${DOT_UNSEEN_CLASS} {
         animation: ytb-unseen-pulse 1.6s var(--ytb-ease-out) infinite;
       }
