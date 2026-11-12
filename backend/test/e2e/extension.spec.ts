@@ -1292,6 +1292,12 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 		await expectDismissed();
 		await expect(home.locator('#ytb-home-section')).toHaveCount(1);
 		expect(context.pages()).toHaveLength(pagesBeforeReuse);
+		await popup.reload();
+		await observeClose();
+		await popup.evaluate(() => (window as any).openYourRoom());
+		await expectDismissed();
+		await expect(home.locator('#ytb-home-section')).toHaveCount(1);
+		expect(context.pages()).toHaveLength(pagesBeforeReuse);
 		await home.locator('.ytb-hs-close').click();
 
 		const preserved = await context.newPage();
