@@ -41,16 +41,12 @@ Whether this installation currently reports its own Progress Records. It gates *
 _Avoid_: broadcasting, syncing (which also covers reads)
 
 **Connection Lost**:
-The state a read surface enters after **two or more consecutive failed Room reads** (a network failure, or a non-2xx from the backend) - the extension cannot reach its backend. Orthogonal to the Room states, which describe membership: a Room may be _In room_ yet Connection Lost. While Connection Lost, every surface **retains its last successful render** (Progress Markers, the Settings roster, the Room Feed, and Recommendations all stay put, stale) rather than blanking, and the Extension Popup and Room Home Panel additionally show a quiet "Can't reach the backend - retrying..." line. The Video Timeline shows no extra indicator; its markers stay as last seen. The state clears when any Room read succeeds. It is driven only by **reads**: a failed background write stays silent and self-healing, while a failed explicit write shows inline feedback through the `network` error category.
+The state a read surface enters after **two or more consecutive failed Room reads** (a network failure, or a non-2xx from the backend) - the extension cannot reach its backend. Orthogonal to the Room states, which describe membership: a Room may be _In room_ yet Connection Lost. While Connection Lost, every surface **retains its last successful render** (Progress Markers, the Settings roster, the Room Feed, and Recommendations all stay put, stale) rather than blanking, and the Room Home Panel additionally shows a quiet "Can't reach the backend - retrying..." line. The Video Timeline shows no extra indicator; its markers stay as last seen. The state clears when any Room read succeeds. It is driven only by **reads**: a failed background write stays silent and self-healing, while a failed explicit write shows inline feedback through the `network` error category.
 _Avoid_: offline (ambiguous because it reads as the _user_ being offline), disconnected, error, down, backend unreachable
 
 **Extension Popup**:
-The compact, read-only popup Chrome opens from the extension toolbar icon. It reports the Room state, Room Code, Buddy count, Sharing state, and Connection Lost state, but it cannot edit any of them. Its only action is **Your Room**, which opens the Room Home Panel on the YouTube home route (ADR-0012). It reuses the active tab only when that tab is already on YouTube Home; otherwise it opens a new YouTube Home tab. All identity, Room, Buddy Color, and Settings changes live in the Room Home Panel.
+The compact popup Chrome opens from the extension toolbar icon. It contains only **Your Room**, which opens the Room Home Panel on the YouTube home route and dismisses the popup (ADR-0012). It reuses the active tab only when that tab is already on YouTube Home; otherwise it opens and activates a new YouTube Home tab. Unpaired viewers arrive at Settings to create or join a Room. All identity, Room, Buddy Color, and Settings changes live in the Room Home Panel.
 _Avoid_: Control Panel, action popup, settings popup, dashboard
-
-**Sharing Dot**:
-The small read-only status indicator in the Extension Popup beside its Sharing status. It reports Sharing and never changes it. The **Share video progress** toggle in the Room Home Panel's Settings view owns the change and keeps the Stop-sharing confirmation. Sharing off never stops _seeing_ Buddies' markers.
-_Avoid_: toggle, switch (the flip is the Share video progress toggle), status light
 
 **Buddy Color Swatch**:
 The small color control in the Room section of the Settings view, shown beside each Buddy's Display Name, that opens the eight-color picker to (re)assign that Buddy's Buddy Color for this Room (see Buddy Color). Private to one viewer and Room.
@@ -236,5 +232,5 @@ A per-install switch that hides the ENTIRE on-video Note layer at once — every
 _Avoid_: mute notes, hide comments, disable notes
 
 **Buddy Progress Visibility**:
-A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the Progress Markers on the Video Timeline and the Watched-By Dots on feed/home thumbnails (the fractional thumbnail Progress Bar it used to hide is retired). Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the popup roster or presence.
+A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the Progress Markers on the Video Timeline and the Watched-By Dots on feed/home thumbnails (the fractional thumbnail Progress Bar it used to hide is retired). Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the Room Home roster or presence.
 _Avoid_: hide markers (alone), hide buddies, hide bars

@@ -143,9 +143,6 @@ async function seedPairedRoom(context: BrowserContext) {
 	const extensionId = await (await extensionItem(extensions)).getAttribute('id');
 	const popup = await context.newPage();
 	await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-	// popup.js mints a clientId on open (read-then-write); wait for that write
-	// to land or it would clobber the seeded clientId in a losing race.
-	await popup.waitForFunction(async () => (await chrome.storage.local.get('clientId')).clientId);
 	await popup.evaluate(() => chrome.storage.local.set({ code: 'roome2e', clientId: 'viewer-e2e', name: 'Viewer', sharing: false }));
 	return popup;
 }
@@ -1220,14 +1217,6 @@ test('opens the extension popup without runtime errors', async () => {
 
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-		await expect(popup.locator('h1')).toContainText('YouTube Buddy');
-		await expect(popup.locator('.brand-mark')).toBeVisible();
-		expect(
-			await popup.locator('.brand-mark').evaluate((image: HTMLImageElement) => ({
-				width: image.naturalWidth,
-				height: image.naturalHeight,
-			})),
-		).toEqual({ width: 128, height: 128 });
 		expect(
 			await popup.evaluate(() => {
 				const manifest = chrome.runtime.getManifest();
@@ -1247,10 +1236,7 @@ test('opens the extension popup without runtime errors', async () => {
 				128: 'icons/icon-128.png',
 			},
 		});
-		await expect(popup.locator('#room-state')).toHaveText('Unpaired');
-		await expect(popup.locator('#room-code')).toHaveText('Not paired');
-		await expect(popup.locator('#buddy-count')).toHaveText('0');
-		await expect(popup.locator('#sharing-state')).toHaveText('On');
+		await expect(popup.locator('body')).toHaveText('Your Room');
 		await expect(popup.locator('button')).toHaveCount(1);
 		await expect(popup.locator('#your-room')).toHaveText('Your Room');
 		await expect(popup.locator('input, [role="switch"], [data-theme-choice], #leave-room')).toHaveCount(0);
@@ -1285,12 +1271,24 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 		const extensionId = await (await extensionItem(extensions)).getAttribute('id');
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+		const observeClose = () =>
+			popup.evaluate(() => {
+				(window as any).closedByLauncher = false;
+				window.close = () => {
+					(window as any).closedByLauncher = true;
+				};
+			});
+		const expectDismissed = async () => {
+			await expect.poll(() => popup.evaluate(() => (window as any).closedByLauncher)).toBe(true);
+		};
+		await observeClose();
 
 		const home = await context.newPage();
 		await home.goto('https://www.youtube.com/');
 		await home.bringToFront();
 		const pagesBeforeReuse = context.pages().length;
 		await popup.evaluate(() => (window as any).openYourRoom());
+		await expectDismissed();
 		await expect(home.locator('#ytb-home-section')).toHaveCount(1);
 		expect(context.pages()).toHaveLength(pagesBeforeReuse);
 		await home.locator('.ytb-hs-close').click();
@@ -1299,14 +1297,19 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 		await preserved.goto('https://www.youtube.com/watch?v=keep-playing');
 		await preserved.bringToFront();
 		await popup.reload();
+		await observeClose();
 		delayNextHome = true;
 		const beforeNew = new Set(context.pages());
 		await popup.evaluate(() => (window as any).openYourRoom());
+		await expectDismissed();
 		await expect.poll(() => context.pages().filter((page) => !beforeNew.has(page)).length).toBe(1);
 		const launched = context.pages().find((page) => !beforeNew.has(page));
 		expect(launched).toBeDefined();
 		await expect(launched!.locator('#ytb-home-section')).toHaveCount(1);
 		await expect.poll(() => launched!.url()).toBe('https://www.youtube.com/');
+		expect(await popup.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].url)).toBe(
+			'https://www.youtube.com/',
+		);
 		expect(preserved.url()).toBe('https://www.youtube.com/watch?v=keep-playing');
 
 		await launched!.locator('.ytb-hs-close').click();
@@ -1317,11 +1320,13 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 
 		for (const target of ['https://www.youtube.com/results?search_query=buddy', 'https://example.com/']) {
 			await popup.reload();
+			await observeClose();
 			const active = await context.newPage();
 			await active.goto(target);
 			await active.bringToFront();
 			const prior = new Set(context.pages());
 			await popup.evaluate(() => (window as any).openYourRoom());
+			await expectDismissed();
 			await expect.poll(() => context.pages().filter((page) => !prior.has(page)).length).toBe(1);
 			const next = context.pages().find((page) => !prior.has(page));
 			await expect(next!.locator('#ytb-home-section')).toHaveCount(1);
@@ -1490,58 +1495,6 @@ test('Room full opens Settings without moving focus or scrolling', async () => {
 		expect(await panel.locator('.ytb-hs-settings').evaluate((element) => element.scrollTop)).toBe(0);
 		await expect(panel.locator('[autofocus], .is-highlighted')).toHaveCount(0);
 		await runtime.close();
-		expect(errors, errors.join('\n')).toEqual([]);
-	} finally {
-		await context.close();
-	}
-});
-
-test('popup retains its status through Connection Lost and recovers on the next successful read', async () => {
-	const context = await launchExtension();
-	const errors = collectErrors(context);
-	let backendUp = true;
-
-	try {
-		await context.route('http://localhost:8787/**', (route) => {
-			if (route.request().method() !== 'GET') {
-				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
-			}
-			if (!backendUp) return route.abort('connectionrefused');
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					progress: [],
-					presence: [{ clientId: 'buddy-1', name: 'Bob', updatedAt: Date.now() }],
-					notes: [],
-					replies: [],
-					playlist: [],
-					events: [],
-				}),
-			});
-		});
-
-		const popup = await seedPairedRoom(context);
-		await popup.reload();
-		await expect(popup.locator('#room-state')).toHaveText('In room');
-		await expect(popup.locator('#buddy-count')).toHaveText('1');
-
-		backendUp = false;
-		await popup.evaluate(() => (window as any).refreshStatus());
-		await expect(popup.locator('#connection-state')).toBeHidden();
-		await expect(popup.locator('#room-state')).toHaveText('In room');
-		await popup.evaluate(() => (window as any).refreshStatus());
-		await expect(popup.locator('#connection-state')).toBeVisible();
-		await expect(popup.locator('#connection-state')).toHaveText("Can't reach the backend - retrying...");
-		await expect(popup.locator('#buddy-count')).toHaveText('1');
-		expect(errors).toHaveLength(2);
-		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
-		errors.length = 0;
-
-		backendUp = true;
-		await popup.evaluate(() => (window as any).refreshStatus());
-		await expect(popup.locator('#room-state')).toHaveText('In room');
-		await expect(popup.locator('#connection-state')).toBeHidden();
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
@@ -4343,7 +4296,7 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		});
 		const popup = await seedPairedRoom(context);
 		await popup.reload();
-		await expect(popup.locator('#sharing-state')).toHaveText('Off');
+		await expect(popup.locator('body')).toHaveText('Your Room');
 		await expect(popup.locator('input, [role="switch"]')).toHaveCount(0);
 
 		const home = await context.newPage();
@@ -4524,7 +4477,7 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 		const extensionId = await extension.getAttribute('id');
 		const popup = await context.newPage();
 		await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-		await expect(popup.locator('#room-state')).not.toHaveText('Loading...');
+		await expect(popup.locator('#your-room')).toBeVisible();
 		const popupShot = testInfo.outputPath('live-popup.png');
 		await popup.locator('body').screenshot({ path: popupShot });
 		await testInfo.attach('Extension Popup', { path: popupShot, contentType: 'image/png' });
