@@ -822,6 +822,32 @@ describe('own churn + Watched-By ownership (#174)', () => {
 	});
 });
 
+describe('videoChannel', () => {
+	it('reads the oEmbed author once per video and caches it', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ author_name: ' sugarfree ' }) });
+		vi.stubGlobal('fetch', fetchMock);
+		await expect(window.YTB.videoChannel('oe-cache')).resolves.toBe('sugarfree');
+		await expect(window.YTB.videoChannel('oe-cache')).resolves.toBe('sugarfree');
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=oe-cache'),
+		);
+	});
+
+	it('yields "" for an unknown video and retries after a network failure', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => null }));
+		await expect(window.YTB.videoChannel('oe-missing')).resolves.toBe('');
+		const fetchMock = vi
+			.fn()
+			.mockRejectedValueOnce(new Error('offline'))
+			.mockResolvedValue({ ok: true, json: async () => ({ author_name: 'Back' }) });
+		vi.stubGlobal('fetch', fetchMock);
+		await expect(window.YTB.videoChannel('oe-offline')).resolves.toBe('');
+		await expect(window.YTB.videoChannel('oe-offline')).resolves.toBe('Back');
+		await expect(window.YTB.videoChannel('')).resolves.toBe('');
+	});
+});
+
 describe('shared playlist client API', () => {
 	it('posts a Playlist add with the canonical payload and returns the complete item', async () => {
 		storage = { code: 'silly-otters' };
@@ -1042,19 +1068,15 @@ describe('titleLinkTooltip', () => {
 	});
 });
 
-describe('recommendationHoverCard', () => {
-	it('shows the full title and channel without a thumbnail', () => {
-		expect(window.YTB.recommendationHoverCard({ title: '  A Very Long Title  ', channel: ' Lofi Girl ' })).toEqual({
-			thumbnail: null,
-			label: 'A Very Long Title',
-			detail: 'Lofi Girl',
-		});
+describe('recommendationTooltip', () => {
+	it('puts the full title over the channel', () => {
+		expect(window.YTB.recommendationTooltip('  A Very Long Title  ', ' Lofi Girl ')).toBe('A Very Long Title\nLofi Girl');
 	});
 
-	it('omits the channel when none was captured', () => {
-		expect(window.YTB.recommendationHoverCard({ title: 'T', channel: '' })?.detail).toBe('');
-		expect(window.YTB.recommendationHoverCard({ title: 'T' })?.detail).toBe('');
-		expect(window.YTB.recommendationHoverCard({ title: ' ' })?.label).toBe('a video');
+	it('omits the channel when none is known', () => {
+		expect(window.YTB.recommendationTooltip('T', '')).toBe('T');
+		expect(window.YTB.recommendationTooltip('T', undefined)).toBe('T');
+		expect(window.YTB.recommendationTooltip(' ', 'C')).toBe('a video\nC');
 	});
 });
 
@@ -2277,6 +2299,7 @@ declare global {
 			NOTE_EMOJIS: string[];
 			MAX_PLAYLIST_ITEMS: number;
 			postPlaylistAdd(item: object): Promise<WriteResult<'item', object>>;
+			videoChannel(videoId: string): Promise<string>;
 			deletePlaylistItem(target: { clientId: string; videoId: string }): Promise<{ ok: true } | { ok: false; category: string }>;
 			recommendedForYou(
 				playlist: Array<{ id: string; videoId: string; addedBy: string; addedAt: number }> | undefined,
@@ -2314,7 +2337,7 @@ declare global {
 				},
 				doc: { location: { pathname: string }; querySelector(selector: string): { textContent: string } | null },
 			): string;
-			recommendationHoverCard(item: { title?: string; channel?: string }): { thumbnail: null; label: string; detail: string };
+			recommendationTooltip(title: string, channel?: string): string;
 			noteVerb(noteId: string): string;
 			videoContext(note: { videoTitle?: string } | null): string;
 			titleLinkTooltip(title: string | null): string;

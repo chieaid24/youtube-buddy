@@ -5,6 +5,7 @@
 
 (() => {
 	const YTB = window.YTB;
+	const channelLookups = new Map(); // videoId -> Promise<string>
 
 	Object.assign(YTB, {
 		// POST this user's current Progress Record (server sets updatedAt);
@@ -163,6 +164,26 @@
 			} catch {
 				return { ok: false, category: 'network' };
 			}
+		},
+
+		// A video's channel name from YouTube's oEmbed, for Recommendations recorded without one;
+		// '' when unknown. Cached per video; a network failure isn't cached, so a later hover retries.
+		videoChannel(videoId) {
+			if (!videoId) return Promise.resolve('');
+			const cached = channelLookups.get(videoId);
+			if (cached) return cached;
+			const url = 'https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + videoId);
+			const lookup = fetch(url)
+				.then(async (res) => {
+					const data = res.ok ? await res.json().catch(() => null) : null;
+					return data && typeof data.author_name === 'string' ? data.author_name.trim() : '';
+				})
+				.catch(() => {
+					channelLookups.delete(videoId);
+					return '';
+				});
+			channelLookups.set(videoId, lookup);
+			return lookup;
 		},
 
 		// Focused conversation read (parent + Replies oldest-first) for the open

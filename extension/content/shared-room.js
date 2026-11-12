@@ -143,12 +143,11 @@
 			};
 		},
 
-		// Text-only Video Hover Card plan for a Recommended for you card: the card already shows the
-		// thumbnail, so the hover adds the untruncated title and the channel (omitted when not captured).
-		recommendationHoverCard(item) {
-			const title = item && typeof item.title === 'string' ? item.title.trim() : '';
-			const channel = item && typeof item.channel === 'string' ? item.channel.trim() : '';
-			return { thumbnail: null, label: title === '' ? 'a video' : title, detail: channel };
+		// Native tooltip for a Recommended for you card: the full title, then the channel when known.
+		recommendationTooltip(title, channel) {
+			const t = typeof title === 'string' ? title.trim() : '';
+			const c = typeof channel === 'string' ? channel.trim() : '';
+			return [t || 'a video', c].filter(Boolean).join('\n');
 		},
 
 		// Where the cursor-following Video Hover Card sits: below-right of the point,

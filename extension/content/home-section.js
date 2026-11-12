@@ -428,8 +428,7 @@
 		const card = ensureHoverCard();
 		if (!card) return;
 		const img = card.querySelector('.ytb-hs-hovercard-thumb');
-		card.classList.toggle('ytb-hs-hovercard-text', !plan.thumbnail);
-		if (plan.thumbnail && img.getAttribute('src') !== plan.thumbnail) {
+		if (img.getAttribute('src') !== plan.thumbnail) {
 			img.style.display = '';
 			img.src = plan.thumbnail;
 		}
@@ -629,7 +628,7 @@
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-thumb';
 		link.href = '/watch?v=' + encodeURIComponent(item.videoId);
-		// No native title= tooltip (alt keeps it accessible); hover shows the text-only Video Hover Card.
+		// Native title= tooltip (full title + channel), matching the Dismiss button's.
 		const img = document.createElement('img');
 		// A normal in-page image load on youtube.com - no extra host permission.
 		img.src = 'https://i.ytimg.com/vi/' + encodeURIComponent(item.videoId) + '/mqdefault.jpg';
@@ -663,9 +662,16 @@
 		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId, roster);
 		watched.textContent = label ? 'Watched by ' + label : 'New to the Room';
 
-		const hover = YTB.recommendationHoverCard(item);
-		attachHoverCard(link, hover);
-		attachHoverCard(title, hover);
+		const setTooltip = (channel) => {
+			link.title = title.title = YTB.recommendationTooltip(item.title, channel);
+		};
+		setTooltip(item.channel);
+		// Recommendations recorded without a channel look it up up front: a native tooltip can't update once shown.
+		if (!item.channel) {
+			YTB.videoChannel(item.videoId).then((channel) => {
+				if (channel) setTooltip(channel);
+			});
+		}
 
 		card.append(link, dismiss, title, watched);
 		return card;
@@ -1670,10 +1676,6 @@
       }
       #${OVERLAY_ID} .ytb-hs-hovercard-detail { margin-top: 2px; color: var(--ytb-ink-muted); overflow-wrap: anywhere; }
       #${OVERLAY_ID} .ytb-hs-hovercard-detail:empty { display: none; }
-      /* Text-only (Recommended for you): the card already shows the thumbnail, so this hover is the full title + channel. */
-      #${OVERLAY_ID} .ytb-hs-hovercard-text { width: auto; max-width: 260px; padding: 7px 10px; }
-      #${OVERLAY_ID} .ytb-hs-hovercard-text .ytb-hs-hovercard-thumb { display: none; }
-      #${OVERLAY_ID} .ytb-hs-hovercard-text .ytb-hs-hovercard-label { margin-top: 0; display: block; overflow: visible; }
       @media (prefers-reduced-motion: reduce) {
 		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more, #${SECTION_ID} .ytb-hs-switch > span { transition: none; }
         #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }
