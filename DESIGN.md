@@ -100,7 +100,7 @@ the punctuation actually used; target < 40KB. Fall back to `ui-rounded, system-u
 | Token       | Size / line | Weight | Use                                                                                                                                       |
 | ----------- | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `--t-code`  | 16px / 1.2  | 800    | The pretty Room Code ("The Silly Otters") in Room Home. Color `--ytb-accent-800`.                                                         |
-| `--t-title` | 15px / 1.2  | 800    | Reserved surface title.                                                                                                              |
+| `--t-title` | 15px / 1.2  | 800    | Popup title "Youtube Buddy".                                                                                                              |
 | `--t-body`  | 13px / 1.45 | 400    | Default body, inputs, buttons (buttons 600).                                                                                              |
 | `--t-label` | 11px / 1.3  | 600    | Section eyebrows. **Sentence case, no uppercase, minimal letter-spacing** (uppercase reads colder; softer here). Color `--ytb-ink-muted`. |
 | `--t-meta`  | 11px / 1.3  | 500    | Buddy last-seen, backend URL, footnotes. Color `--ytb-ink-muted`.                                                                         |
@@ -135,7 +135,7 @@ Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch her
 ### 1.4 Elevation
 
 Two levels only, both warm-tinted (see `--ytb-e-pop`, `--ytb-e-dialog`). No glassmorphism and no
-blur. The Extension Popup contains only its destination button. Room Home uses one grouped card per Settings section.
+blur. The Extension Popup has a brand header and one destination button. Room Home uses one grouped card per Settings section.
 
 ### 1.5 Shared delivery (namespaced injected tokens)
 
@@ -230,7 +230,7 @@ strict no-bounce guidance for personality; keep it restrained so it reads warm, 
 
 ### Extension Popup
 
-Keep the Extension Popup at 320px wide with one full-width primary button labelled **Your Room**. Show inline feedback only if launch fails. Do not render branding, status, or Settings controls. Close the popup after Room Home opens and its YouTube tab is activated.
+Keep the Extension Popup at 320px wide with the logo and **Youtube Buddy** heading above one full-width primary button labelled **Check Out Your Room**. Show inline feedback only if launch fails. Do not render status or Settings controls. Close the popup after Room Home opens and its YouTube tab is activated.
 
 ### Room Home Panel
 
@@ -291,7 +291,7 @@ A forced Light or Dark Theme Preference stamps the same marker on the popup and 
 | --------- | ----------------------------------------------------- |
 | Accent    | Soft apricot and warm neutrals                        |
 | Typeface  | Bundled Nunito with rounded system fallbacks          |
-| Popup     | 320px with one Your Room button  |
+| Popup     | 320px with branding and one Check Out Your Room button  |
 | Room Home | 480px portrait shell with normal and Settings views   |
 | Settings  | Four visible sections in one scroll                   |
 | Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens |

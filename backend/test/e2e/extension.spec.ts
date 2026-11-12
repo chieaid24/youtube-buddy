@@ -1236,9 +1236,10 @@ test('opens the extension popup without runtime errors', async () => {
 				128: 'icons/icon-128.png',
 			},
 		});
-		await expect(popup.locator('body')).toHaveText('Your Room');
+		await expect(popup.getByRole('heading', { name: 'Youtube Buddy' })).toBeVisible();
+		await expect(popup.locator('.brand-mark')).toBeVisible();
 		await expect(popup.locator('button')).toHaveCount(1);
-		await expect(popup.locator('#your-room')).toHaveText('Your Room');
+		await expect(popup.locator('#your-room')).toHaveText('Check Out Your Room');
 		await expect(popup.locator('input, [role="switch"], [data-theme-choice], #leave-room')).toHaveCount(0);
 		await popup.waitForTimeout(250);
 		await extensions.reload();
@@ -4319,7 +4320,8 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		});
 		const popup = await seedPairedRoom(context);
 		await popup.reload();
-		await expect(popup.locator('body')).toHaveText('Your Room');
+		await expect(popup.getByRole('heading', { name: 'Youtube Buddy' })).toBeVisible();
+		await expect(popup.locator('.brand-mark')).toBeVisible();
 		await expect(popup.locator('input, [role="switch"]')).toHaveCount(0);
 
 		const home = await context.newPage();

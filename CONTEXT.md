@@ -45,7 +45,7 @@ The state a read surface enters after **two or more consecutive failed Room read
 _Avoid_: offline (ambiguous because it reads as the _user_ being offline), disconnected, error, down, backend unreachable
 
 **Extension Popup**:
-The compact popup Chrome opens from the extension toolbar icon. It contains only **Your Room**, which opens the Room Home Panel on the YouTube home route and dismisses the popup (ADR-0012). It reuses the active tab only when that tab is already on YouTube Home; otherwise it opens and activates a new YouTube Home tab. Unpaired viewers arrive at Settings to create or join a Room. All identity, Room, Buddy Color, and Settings changes live in the Room Home Panel.
+The compact popup Chrome opens from the extension toolbar icon. It shows the logo and **Youtube Buddy** heading above **Check Out Your Room**, which opens the Room Home Panel on the YouTube home route and dismisses the popup (ADR-0012). It reuses the active tab only when that tab is already on YouTube Home; otherwise it opens and activates a new YouTube Home tab. Unpaired viewers arrive at Settings to create or join a Room. All identity, Room, Buddy Color, and Settings changes live in the Room Home Panel.
 _Avoid_: Control Panel, action popup, settings popup, dashboard
 
 **Buddy Color Swatch**:
