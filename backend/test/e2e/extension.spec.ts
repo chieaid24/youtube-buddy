@@ -3915,7 +3915,77 @@ test('re-assigning a Buddy Color repaints the Note Dot, the open Expanded Note, 
 	}
 });
 
-test('a posted Note captures the video title, and Feed rows name the video — plain text, only when captured', async () => {
+test('Note Feed rows link italic video titles and hide spoiler bodies', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	const longTitle = 'A very long video title about a surprising adventure with many unexpected twists and turns';
+	try {
+		await stubRoomBackend(context, {
+			notes: [longTitle, 'Short title', undefined, longTitle].map((videoTitle, i) => ({
+				id: 'spoiler-' + i,
+				clientId: i === 1 ? 'viewer-e2e' : 'buddy-1',
+				name: i === 1 ? 'Viewer' : 'Sigma',
+				videoId: 'spoiler-video-' + i,
+				videoTitle,
+				timestamp: 42,
+				kind: 'text',
+				body: i === 3 ? 'great moment' : 'secret ending',
+				spoiler: i < 3,
+				createdAt: Date.now() + i,
+			})),
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		await context.route('https://i.ytimg.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>' }),
+		);
+		await seedPairedRoom(context);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await page.addStyleTag({ content: 'ytd-guide-renderer { display: block; width: 240px; }' });
+		await openHomePanel(page);
+		const rows = page.locator('#ytb-home-section .ytb-hs-item');
+		await nudgeUntil(page, () => expect(rows).toHaveCount(4, { timeout: 700 }));
+		await expect(rows.nth(0)).toContainText('Sigma left a note on ' + longTitle);
+		await expect(rows.nth(1)).toContainText('You left a note on Short title');
+		await expect(rows.nth(2)).toContainText('Sigma left a note on a video');
+		const plain = rows.nth(3);
+		await expect(plain).toContainText(
+			/Sigma (said|noted|wrote|remarked|commented|added|observed|shared|suggested|pointed out|quipped|yapped) "great moment" on /,
+		);
+		await expect(plain.locator('a')).toHaveText(longTitle);
+		await expect(plain.locator('a')).not.toContainText('great moment');
+		await expect(plain).not.toHaveClass(/ytb-hs-emph/);
+		await expect(rows.locator('.ytb-hs-context')).toHaveCount(0);
+		await expect(rows.filter({ hasText: /Spoiler|secret ending/ })).toHaveCount(0);
+		for (let i = 0; i < 4; i++) {
+			const link = rows.nth(i).locator('a');
+			await expect(link).toHaveCount(1);
+			await expect(link).toHaveAttribute('href', '/watch?v=spoiler-video-' + i);
+			await expect(link).toHaveCSS('font-style', 'italic');
+			await expect(link).toHaveCSS('text-overflow', 'ellipsis');
+		}
+		const longLink = rows.nth(0).locator('a');
+		await expect(longLink).not.toHaveAttribute('title');
+		await longLink.hover();
+		await expect(page.locator('.ytb-hs-hovercard-label')).toHaveText(longTitle);
+		expect(await longLink.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+		expect(
+			await rows
+				.nth(1)
+				.locator('a')
+				.evaluate((el) => el.scrollWidth > el.clientWidth),
+		).toBe(false);
+		await longLink.click();
+		await expect(page).toHaveURL('https://www.youtube.com/watch?v=spoiler-video-0');
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('a posted Note captures the video title and the Feed keeps mention emphasis', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -3996,11 +4066,12 @@ test('a posted Note captures the video title, and Feed rows name the video — p
 		await expect(hoverCard.locator('.ytb-hs-hovercard-label')).toHaveText('Rick Astley - Never Gonna Give You Up');
 		await expect(hoverCard).toBeVisible();
 
-		// A Note with no captured title names no video — never a placeholder.
-		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'mentioned you' });
+		// A Mention without a title keeps its emphasis and fallback video link.
+		const mentionRow = page.locator('#ytb-home-section .ytb-hs-item', { hasText: 'hey @Viewer' });
 		await expect(mentionRow).toHaveCount(1);
+		await expect(mentionRow).toHaveClass(/ytb-hs-emph/);
 		await expect(mentionRow.locator('.ytb-hs-context')).toHaveCount(0);
-		await expect(mentionRow.locator('a.ytb-hs-text-link .ytb-hs-sr')).toHaveText('Watch this video');
+		await expect(mentionRow.locator('a.ytb-hs-text-link')).toHaveText('a video');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -4466,7 +4537,7 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 		// inside its sandboxed ad frames.
 		const isYouTubeNoise = (error: string) =>
 			error.includes('Failed to load resource') ||
-			(error.includes('blocked by CORS policy') && /doubleclick\.net|googleads/.test(error)) ||
+			(error.includes('blocked by CORS policy') && /doubleclick\.net|googleads|https:\/\/www\.google\.com\/pagead\//.test(error)) ||
 			error.includes("Blocked script execution in 'about:blank'");
 		const lifecycleErrors = errors.filter((error) => !isYouTubeNoise(error));
 		expect(lifecycleErrors, lifecycleErrors.join('\n')).toEqual([]);

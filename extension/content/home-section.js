@@ -459,7 +459,7 @@
 
 	function buildFeedRow(item, roster) {
 		const record = item.reply || item.note;
-		// Parent Note for a Reply, the Note itself for a Mention; absent leaves the body non-clickable.
+		// Replies link to their parent Note's video.
 		const target = item.note;
 		const canOpen = Boolean(target && target.videoId);
 		// Addressed-to-me rows ('reply'/'mention') are the emphasized ones.
@@ -478,33 +478,31 @@
 			author.dataset.ytbColorCid = record.clientId; // live repaint hook (#115)
 		}
 
+		const spoiler = !item.reply && Boolean(record.spoiler);
 		const action = document.createElement('span');
 		action.className = 'ytb-hs-action';
-		action.textContent =
-			item.type === 'reply'
+		action.textContent = !item.reply
+			? spoiler
+				? ' left a note on '
+				: ' ' + YTB.noteVerb(record.id) + ' '
+			: item.type === 'reply'
 				? ' replied to your note '
 				: item.type === 'mention'
 					? ' mentioned you '
-					: item.reply
-						? ' replied '
-						: ' left a note ';
+					: ' replied ';
 
-		// A Spoiler Note's body never renders in the Feed (Replies carry no flag).
-		const spoiler = !item.reply && Boolean(record.spoiler);
-
-		// Only the quoted body links (CONTEXT.md Feed link rule): no &t= seek (ADR-0010),
-		// plus an arrival handshake so notes.js pauses on an Unseen dot there.
+		// Notes link their title; Replies link their body. Neither seeks (ADR-0010).
 		const body = document.createElement(canOpen ? 'a' : 'span');
-		body.className = (canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text') + (spoiler ? ' ytb-hs-spoiler' : '');
-		body.textContent = spoiler ? 'Spoiler' : '"' + record.body + '"';
+		body.className = (canOpen ? 'ytb-hs-text ytb-hs-text-link' : 'ytb-hs-text') + (!item.reply ? ' ytb-hs-video-title' : '');
+		body.textContent = item.reply ? '"' + record.body + '"' : target.videoTitle?.trim() || 'a video';
 		if (canOpen) {
 			body.href = '/watch?v=' + encodeURIComponent(target.videoId);
-			// The destination video: a Video Hover Card for pointers, sr-only text for AT
-			// (no title= - that is the native tooltip the card replaces).
-			const dest = document.createElement('span');
-			dest.className = 'ytb-hs-sr';
-			dest.textContent = ' ' + YTB.titleLinkTooltip(target.videoTitle);
-			body.append(dest);
+			if (item.reply) {
+				const dest = document.createElement('span');
+				dest.className = 'ytb-hs-sr';
+				dest.textContent = ' ' + YTB.titleLinkTooltip(target.videoTitle);
+				body.append(dest);
+			}
 			attachVideoHover(body, target.videoId, target.videoTitle);
 			body.addEventListener('click', () => {
 				YTB.setPendingArrival(target.videoId);
@@ -515,9 +513,15 @@
 		when.className = 'ytb-hs-when';
 		when.textContent = YTB.relativeTime(item.at);
 
-		row.append(author, action, body);
-		// Video context: plain text, never a link; absent if the Note predates title capture.
-		const context = YTB.videoContext(target);
+		row.append(author, action);
+		if (!item.reply && !spoiler) {
+			const message = document.createElement('span');
+			message.className = 'ytb-hs-text';
+			message.textContent = '"' + record.body + '"';
+			row.append(message, ' on ');
+		}
+		row.append(body);
+		const context = item.reply ? YTB.videoContext(target) : '';
 		if (context) {
 			const span = document.createElement('span');
 			span.className = 'ytb-hs-context';
@@ -1378,7 +1382,15 @@
         background: var(--ytb-accent-050);
       }
       #${SECTION_ID} .ytb-hs-emph .ytb-hs-action { color: var(--ytb-accent-800); font-weight: 600; }
-      #${SECTION_ID} .ytb-hs-spoiler { font-style: italic; color: var(--ytb-ink-muted); }
+      #${SECTION_ID} .ytb-hs-video-title {
+        display: inline-block;
+        max-width: min(28ch, 100%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+        font-style: italic;
+      }
       #${SECTION_ID} a.ytb-hs-text-link {
         color: inherit;
         text-decoration: none;
