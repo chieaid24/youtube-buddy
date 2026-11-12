@@ -3445,6 +3445,11 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		// would 404 there and fail the console-error gate.
 		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		const oembedCalls: string[] = [];
+		await context.route('https://www.youtube.com/oembed**', (route) => {
+			oembedCalls.push(route.request().url());
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ author_name: 'Looked Up Channel' }) });
+		});
 		const popup = await seedPairedRoom(context);
 
 		const page = await context.newPage();
@@ -3460,20 +3465,20 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		await expect(section).not.toContainText('Shared Playlist');
 		await expect(section).not.toContainText('My Own Pick');
 
-		// Hovering a card shows the text-only Video Hover Card: full title + channel, no second thumbnail.
-		const hover = page.locator('#ytb-home-overlay .ytb-hs-hovercard');
-		await cards.filter({ hasText: 'Buddy Keeper' }).locator('.ytb-hs-thumb').hover();
-		await expect(hover).toBeVisible();
-		await expect(hover.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Keeper');
-		await expect(hover.locator('.ytb-hs-hovercard-detail')).toHaveText('Keeper Channel');
-		await expect(hover.locator('.ytb-hs-hovercard-thumb')).toBeHidden();
-		await expect(cards.filter({ hasText: 'Buddy Keeper' }).locator('.ytb-hs-thumb')).not.toHaveAttribute('title');
-		// No captured channel: the title stands alone.
-		await cards.filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-card-title').hover();
-		await expect(hover.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Dismissed');
-		await expect(hover.locator('.ytb-hs-hovercard-detail')).toBeHidden();
-		await section.locator('.ytb-hs-col-head').first().hover();
-		await expect(hover).toBeHidden();
+		// Cards carry a native title= tooltip like the Dismiss button: full title, then the channel.
+		const keeper = cards.filter({ hasText: 'Buddy Keeper' });
+		await expect(keeper.locator('.ytb-hs-thumb')).toHaveAttribute('title', 'Buddy Keeper\nKeeper Channel');
+		await expect(keeper.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Keeper\nKeeper Channel');
+		// No stored channel: looked up once from YouTube's oEmbed.
+		const dismissed = cards.filter({ hasText: 'Buddy Dismissed' });
+		await expect(dismissed.locator('.ytb-hs-thumb')).toHaveAttribute('title', 'Buddy Dismissed\nLooked Up Channel');
+		await expect(dismissed.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Dismissed\nLooked Up Channel');
+		expect(oembedCalls).toHaveLength(1);
+		expect(oembedCalls[0]).toContain(encodeURIComponent('https://www.youtube.com/watch?v=vid-dismiss'));
+		// No custom hover card on Recommended cards.
+		await keeper.locator('.ytb-hs-thumb').hover();
+		await page.waitForTimeout(300);
+		await expect(page.locator('#ytb-home-overlay .ytb-hs-hovercard-on')).toHaveCount(0);
 
 		// Dismiss hides the card for this viewer immediately...
 		await section.locator('.ytb-hs-card').filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-remove').click();
