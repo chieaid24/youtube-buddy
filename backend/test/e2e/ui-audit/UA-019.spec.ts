@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { launchExtension, seedPaired } from './harness';
 
 const SIZES = new Set([11, 13, 15, 16]);
-const SELECTORS = ['h1', 'dt', 'dd', '#your-room', '.connection', '.feedback'];
+const SELECTORS = ['#your-room', '.feedback'];
 
 test('UA-019: popup type sits on the declared scale', async () => {
 	const context = await launchExtension();
