@@ -932,8 +932,16 @@ describe('watchTitle', () => {
 	});
 });
 
-// The Room Feed's "on \"Title\"" fragment. A Note with no captured title names
-// no video — never a placeholder like "a video".
+describe('noteVerb', () => {
+	it('gives each Note a stable verb while varying the feed', () => {
+		const verbs = Array.from({ length: 100 }, (_, i) => window.YTB.noteVerb('note-' + i));
+		expect(new Set(verbs).size).toBeGreaterThan(6);
+		expect(verbs.every((verb) => typeof verb === 'string' && verb.length > 0)).toBe(true);
+		expect(window.YTB.noteVerb('note-42')).toBe(verbs[42]);
+	});
+});
+
+// Reply context is omitted when its parent has no captured title.
 describe('videoContext', () => {
 	it("quotes the Note's captured title", () => {
 		expect(window.YTB.videoContext({ videoTitle: 'Never Gonna Give You Up' })).toBe('on "Never Gonna Give You Up"');
@@ -2190,6 +2198,7 @@ declare global {
 			filterRoster(roster: Array<{ clientId: string; name: string }>, query: string): Array<{ clientId: string; name: string }>;
 			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
 			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
+			noteVerb(noteId: string): string;
 			videoContext(note: { videoTitle?: string } | null): string;
 			titleLinkTooltip(title: string | null): string;
 			videoHoverCard(videoId: string | null, title: string | null): { thumbnail: string; label: string } | null;

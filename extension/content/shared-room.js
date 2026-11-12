@@ -5,8 +5,28 @@
 
 (() => {
 	const YTB = window.YTB;
-
+	const NOTE_VERBS = [
+		'said',
+		'noted',
+		'wrote',
+		'remarked',
+		'commented',
+		'added',
+		'observed',
+		'shared',
+		'suggested',
+		'pointed out',
+		'quipped',
+		'yapped',
+	];
 	Object.assign(YTB, {
+		// A Note keeps the same varied verb across polls, viewers, and reloads.
+		noteVerb(noteId) {
+			let hash = 0;
+			for (const ch of noteId) hash = (Math.imul(hash, 31) + ch.codePointAt(0)) >>> 0;
+			return NOTE_VERBS[hash % NOTE_VERBS.length];
+		},
+
 		// One roster entry per distinct Client ID across every record kind,
 		// carrying their latest nonblank Display Name, newest activity first.
 		roomRoster(records) {
@@ -77,8 +97,7 @@
 			return text || doc.title.replace(/ - YouTube$/, '').trim();
 		},
 
-		// Feed context fragment for a reply/mention row's Note: `on "Title"`, or
-		// '' with no title. Plain text, never a link.
+		// Plain video context for a Reply; omitted without a captured title.
 		videoContext(note) {
 			const title = note && typeof note.videoTitle === 'string' ? note.videoTitle.trim() : '';
 			return title === '' ? '' : 'on "' + title + '"';
