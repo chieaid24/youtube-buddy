@@ -15,7 +15,7 @@ Profile owns Nickname. Room owns Room state, Room Code, Create or Join, the Budd
 
 Waiting and In room viewers open into the normal view. Unpaired and Room full viewers open directly into Settings because neither can use the Feed. Room full receives no forced focus, scroll, or highlight. Closing and reopening the panel resets it to the state-appropriate initial view; Settings visibility is never persisted.
 
-The panel remains ephemeral. The Room Home Toggle opens or closes it. The header close control, a scrim click, Escape, or a single-page navigation closes it. Closing hides the surface and never changes Room membership, Sharing, or Recommendations.
+The panel remains ephemeral. The Room Home Toggle opens or closes it. The header close control, a scrim click, Escape, or a single-page navigation closes it. Closing hides the surface and never changes Room membership, Sharing, or Recommendations. While the panel is open, the document cannot scroll and internal scroll areas contain overscroll. Removing the overlay releases the scroll lock, including on navigation or extension context invalidation; the page's own overflow styles remain intact.
 
 The panel stays outside YouTube's layout flow. It appends to the page body, reads no home-grid layout DOM, and coordinates with the toggle through in-page events. ADR-0001 still applies: the content script owns the in-page experience, and the extension adds no background service worker.
 

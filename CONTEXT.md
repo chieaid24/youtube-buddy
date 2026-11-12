@@ -224,7 +224,7 @@ The viewer's chosen color theme - **Light**, **Dark**, or **Auto** (the default;
 _Avoid_: dark mode toggle, skin, appearance, system theme
 
 **Spoiler Default**:
-The per-install default state of the Add Note composer's Spoiler checkbox — on by default. It only seeds each opening's checkbox; the author can still flip it per Note, and Reactions are never Spoilers regardless.
+The per-install default state of the Add Note composer's Spoiler checkbox - off by default. It only seeds each opening's checkbox; the author can still flip it per Note, and Reactions are never Spoilers regardless.
 _Avoid_: auto spoiler, spoiler mode
 
 **Notification Position**:

@@ -16,7 +16,7 @@
 
 	// Spoiler Default seeds the checkbox on each open; the + button is removed while
 	// Notes Visibility is off or Unpaired (need a Room to read Notes, so to write them).
-	let spoilerDefault = true;
+	let spoilerDefault = false;
 	let notesHidden = false;
 	let hasRoomCode = false; // Room membership gates the + button (Unpaired hides it)
 
@@ -33,7 +33,7 @@
 
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area !== 'local' || !YTB.isContextActive()) return;
-		if (changes.spoilerDefault) spoilerDefault = changes.spoilerDefault.newValue !== false;
+		if (changes.spoilerDefault) spoilerDefault = changes.spoilerDefault.newValue === true;
 		if (changes.notesHidden) {
 			notesHidden = changes.notesHidden.newValue === true;
 			if (notesHidden) closeComposer(); // dismissal semantics: lease-aware resume
