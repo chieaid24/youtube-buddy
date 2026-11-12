@@ -277,6 +277,13 @@ const YTB = {
 		return `${years} year${years === 1 ? '' : 's'} ago`;
 	},
 
+	// Local wall-clock time, e.g. "4:24 PM".
+	clockTime(ms) {
+		const d = new Date(Number(ms));
+		const h = d.getHours();
+		return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+	},
+
 	// User-facing copy for a failed write, keyed by the server's machine-readable
 	// category (never its prose); unknown categories fall back to a generic retry.
 	errorCopy(category, action) {

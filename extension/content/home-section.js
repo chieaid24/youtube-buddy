@@ -509,9 +509,7 @@
 			});
 		}
 
-		const when = document.createElement('time');
-		when.className = 'ytb-hs-when';
-		when.textContent = YTB.relativeTime(item.at);
+		const when = buildWhen(item.at);
 
 		row.append(author, action);
 		if (!item.reply && !spoiler) {
@@ -530,6 +528,13 @@
 		}
 		row.append(when);
 		return row;
+	}
+
+	function buildWhen(at) {
+		const when = document.createElement('time');
+		when.className = 'ytb-hs-when';
+		when.textContent = YTB.clockTime(at);
+		return when;
 	}
 
 	// The row's ONLY link (CONTEXT.md Feed link rule); plain text without a videoId
@@ -562,9 +567,7 @@
 			sr.textContent = line.srSuffix;
 			text.append(sr);
 		}
-		const when = document.createElement('time');
-		when.className = 'ytb-hs-when';
-		when.textContent = YTB.relativeTime(item.at);
+		const when = buildWhen(item.at);
 		row.append(text, when);
 		return row;
 	}
@@ -575,9 +578,7 @@
 		row.className = 'ytb-hs-item ytb-hs-system';
 		const text = document.createElement('span');
 		text.append(YTB.buddyName(item.clientId, item.name, roster) + ' started watching ', buildTitleLink(item.videoId, item.title));
-		const when = document.createElement('time');
-		when.className = 'ytb-hs-when';
-		when.textContent = YTB.relativeTime(item.at);
+		const when = buildWhen(item.at);
 		row.append(text, when);
 		return row;
 	}
@@ -1359,11 +1360,20 @@
         background: var(--ytb-surface-tint);
       }
       #${SECTION_ID} .ytb-hs-day {
+        display: flex; align-items: center; justify-content: center; gap: 8px;
         margin: 8px 0 4px;
-        text-align: center;
         font-size: 11px; font-weight: 600;
         color: var(--ytb-ink-muted);
       }
+      /* Short rules fading out away from the label. */
+      #${SECTION_ID} .ytb-hs-day::before,
+      #${SECTION_ID} .ytb-hs-day::after {
+        content: '';
+        flex: 0 1 72px;
+        height: 1px;
+      }
+      #${SECTION_ID} .ytb-hs-day::before { background: linear-gradient(to left, var(--ytb-line-strong), transparent); }
+      #${SECTION_ID} .ytb-hs-day::after { background: linear-gradient(to right, var(--ytb-line-strong), transparent); }
       #${SECTION_ID} .ytb-hs-day:first-child { margin-top: 0; }
       /* Show more: inline above the topmost day divider, scrolls with content (not sticky); adds no height to the section. */
       #${SECTION_ID} .ytb-hs-more {
@@ -1401,6 +1411,7 @@
         white-space: nowrap;
         vertical-align: bottom;
         font-style: italic;
+        padding-right: 0.15em; /* italic overhang, else overflow clips the last glyph */
       }
       #${SECTION_ID} a.ytb-hs-text-link {
         color: inherit;

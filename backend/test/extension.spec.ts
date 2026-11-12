@@ -285,6 +285,14 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.relativeTime(now - 400 * DAY, now)).toBe('1 year ago');
 	});
 
+	it('formats 12-hour local clock times for Feed rows', () => {
+		const at = (h: number, m: number) => new Date(2026, 6, 5, h, m).getTime();
+		expect(window.YTB.clockTime(at(16, 24))).toBe('4:24 PM');
+		expect(window.YTB.clockTime(at(0, 5))).toBe('12:05 AM');
+		expect(window.YTB.clockTime(at(12, 0))).toBe('12:00 PM');
+		expect(window.YTB.clockTime(at(9, 7))).toBe('9:07 AM');
+	});
+
 	it('maps error categories to safe user copy', () => {
 		expect(window.YTB.errorCopy('network', 'note')).toBe("Can't reach the backend. Check your connection and try again.");
 		expect(window.YTB.errorCopy('network', 'recommendation')).toBe("Can't reach the backend. Check your connection and try again.");
@@ -2286,6 +2294,7 @@ declare global {
 			buddyColor(clientId: string, code?: string): string;
 			BUDDY_COLORS: string[];
 			relativeTime(thenMs: number, nowMs?: number): string;
+			clockTime(ms: number): string;
 			errorCopy(category: string, action: 'note' | 'reply' | 'reaction' | 'recommendation'): string;
 			connectionState(prevFailures: number, ok: boolean): { failures: number; lost: boolean };
 			crossedNotes<T extends { timestamp: number }>(notes: T[], previousTime: number, currentTime: number): T[];
