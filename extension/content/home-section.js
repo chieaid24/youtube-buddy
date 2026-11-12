@@ -613,11 +613,6 @@
 			return column;
 		}
 
-		const count = document.createElement('span');
-		count.className = 'ytb-hs-count';
-		count.textContent = String(items.length);
-		head.append(count);
-
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-pl-row';
 		for (const item of items) row.append(buildRecommendationCard(item, detail, roster));
@@ -1362,7 +1357,6 @@
         margin-bottom: 4px;
         font-size: 11px; font-weight: 600; color: var(--ytb-ink-muted);
       }
-      #${SECTION_ID} .ytb-hs-count { font-weight: 500; }
       #${SECTION_ID} .ytb-hs-feed-scroll {
         max-height: 380px;
         overflow-y: auto;
