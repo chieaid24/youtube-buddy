@@ -1601,9 +1601,9 @@
         pointer-events: none;
         opacity: 0;
         visibility: hidden;
-        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out), visibility 0s linear var(--ytb-dur-quick);
       }
-      #${OVERLAY_ID} .ytb-hs-hovercard-on { opacity: 1; visibility: visible; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-on { opacity: 1; visibility: visible; transition-delay: 0s; }
       #${OVERLAY_ID} .ytb-hs-hovercard-thumb {
         display: block;
         width: 186px; height: 105px;
