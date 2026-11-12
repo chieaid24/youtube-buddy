@@ -1,5 +1,6 @@
 const OPEN_ROOM_MESSAGE = 'ytb:open-room-home';
-const HOME_URL = 'https://www.youtube.com/';
+const ROOM_URL = 'https://www.youtube.com/#ytb-room';
+const EXISTING_TAB_TIMEOUT_MS = 500;
 
 const el = {
 	openRoom: document.getElementById('your-room'),
@@ -20,38 +21,42 @@ function isYouTubeHome(url) {
 async function openYourRoom() {
 	if (el.openRoom.disabled) return;
 	el.openRoom.disabled = true;
+	el.openRoom.textContent = 'Opening your room...';
+	el.openRoom.setAttribute('aria-busy', 'true');
 	el.feedback.textContent = '';
 	try {
 		const [active] = await chrome.tabs.query({
 			active: true,
 			currentWindow: true,
 		});
-		if (active && active.id != null && isYouTubeHome(active.url)) {
-			await waitForRoomHome(active.id);
+		if (active && active.id != null && isYouTubeHome(active.url) && (await openExistingRoom(active.id))) {
 			window.close();
 			return;
 		}
 
-		const target = await chrome.tabs.create({ url: HOME_URL, active: false });
-		if (target.id == null) throw new Error('Missing target tab');
-		await waitForRoomHome(target.id);
-		await chrome.tabs.update(target.id, { active: true });
+		await chrome.tabs.create({ url: ROOM_URL, active: true });
 		window.close();
 	} catch {
 		el.feedback.textContent = "Couldn't open Your Room. Try again.";
 		el.openRoom.disabled = false;
+		el.openRoom.textContent = 'Check out your room!';
+		el.openRoom.removeAttribute('aria-busy');
 	}
 }
 
-async function waitForRoomHome(tabId) {
-	for (let attempt = 0; attempt < 100; attempt++) {
-		try {
-			const response = await chrome.tabs.sendMessage(tabId, {
-				type: OPEN_ROOM_MESSAGE,
-			});
-			if (response && response.opened) return;
-		} catch {}
-		await new Promise((resolve) => setTimeout(resolve, 100));
+async function openExistingRoom(tabId) {
+	let timeout;
+	try {
+		const response = await Promise.race([
+			chrome.tabs.sendMessage(tabId, { type: OPEN_ROOM_MESSAGE }),
+			new Promise((resolve) => {
+				timeout = setTimeout(() => resolve(null), EXISTING_TAB_TIMEOUT_MS);
+			}),
+		]);
+		return Boolean(response && response.opened);
+	} catch {
+		return false;
+	} finally {
+		clearTimeout(timeout);
 	}
-	throw new Error('Room Home did not become ready');
 }

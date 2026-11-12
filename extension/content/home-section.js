@@ -1168,6 +1168,11 @@
 		onHome = isHomePath();
 		// A real navigation closes the panel; a same-URL poller nudge (commitCode) leaves it open.
 		if (navigated && open) setOpen(false);
+		if (onHome && location.hash === '#ytb-room') {
+			history.replaceState(history.state, '', location.pathname + location.search);
+			lastNavUrl = location.href;
+			setOpen(true);
+		}
 	});
 
 	// The Room Home Toggle requests an open/close; we own the state (ADR-0005).
@@ -1257,8 +1262,11 @@
 
 	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (!YTB.isContextActive() || message?.type !== 'ytb:open-room-home') return;
-		if (onHome) setOpen(true);
-		sendResponse({ opened: onHome });
+		if (onHome) {
+			setOpen(true);
+			if (!document.getElementById(SECTION_ID)) ensureOverlay();
+		}
+		sendResponse({ opened: onHome && Boolean(document.getElementById(SECTION_ID)) });
 	});
 
 	YTB.onContextInvalidated(() => {

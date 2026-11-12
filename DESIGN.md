@@ -231,7 +231,7 @@ strict no-bounce guidance for personality; keep it restrained so it reads warm, 
 
 ### Extension Popup
 
-Keep the Extension Popup at 280px wide with the logo and **Youtube Buddy** heading above one full-width primary button labelled **Check out your room!**. Show inline feedback only if launch fails. Do not render status or Settings controls. Close the popup after Room Home opens and its YouTube tab is activated.
+Keep the Extension Popup at 280px wide with the logo and **Youtube Buddy** heading above one full-width primary button labelled **Check out your room!**. Show inline feedback only if launch fails. Do not render status or Settings controls. Show **Opening your room...** immediately on press. Close after an existing Home tab acknowledges the Room, or as soon as a new active Home tab is created.
 
 ### Room Home Panel
 
@@ -262,7 +262,7 @@ Render confirmations inside Room Home, never with `window.confirm`. Use the surf
 
 ### Your Room launch
 
-Reuse the active tab only when its URL is the YouTube home route. Create a new inactive YouTube Home tab for a watch page, another YouTube route, another site, or no active tab. Retry the direct content-script message until Room Home acknowledges that it opened, then activate the tab and dismiss the popup. Reusing the active Home tab also dismisses the popup after acknowledgement. This ordering preserves the viewer's current page, covers delayed content-script startup, and leaves no persisted launch request for a later tab.
+Reuse a responsive active YouTube Home tab, including when its Room Home Panel is already open. Allow at most 500ms for its acknowledgement. If the tab cannot respond, or the current page is a watch page, another YouTube route, or another site, create an active YouTube Home tab and dismiss the popup immediately. The new tab consumes its own `#ytb-room` launch fragment on startup and removes it before opening Room Home. Preserve the original page. The launch must finish without relying on the popup staying alive while YouTube loads.
 
 ---
 
