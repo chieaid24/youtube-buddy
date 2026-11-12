@@ -169,7 +169,7 @@ window.YTBRoomCode = (function () {
 			// The visible failure message is the complete error handling contract.
 		}
 
-		feedback.textContent = succeeded ? 'Copied!' : 'Could not copy';
+		feedback.textContent = succeeded ? 'Copied' : 'Could not copy';
 		feedback.classList.toggle('is-error', !succeeded);
 		if (button) button.classList.toggle('is-copied', succeeded);
 		const timer = setTimeout(() => {

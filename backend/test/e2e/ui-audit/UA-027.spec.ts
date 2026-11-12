@@ -30,10 +30,7 @@ test('UA-027: Settings controls meet target, type, swatch, and focus rules', asy
 		for (const swatch of [panel.getByRole('button', { name: 'Change color for Sam' }), swatches.first()]) {
 			expect.soft(await swatch.evaluate((el) => getComputedStyle(el).borderRadius)).toBe('2px');
 		}
-		for (const control of [
-			panel.getByRole('switch', { name: 'Notes Visibility' }),
-			panel.getByRole('radio', { name: 'Light', exact: true }),
-		]) {
+		for (const control of [panel.getByRole('switch', { name: 'Show Notes' }), panel.getByRole('radio', { name: 'Light', exact: true })]) {
 			const style = await control.evaluate((el) => {
 				const s = getComputedStyle(el);
 				return { family: s.fontFamily, size: s.fontSize, weight: s.fontWeight };
