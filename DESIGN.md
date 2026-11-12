@@ -124,7 +124,7 @@ Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch her
 }
 ```
 
-- **Popup width: 320px** (up from 300 for breathing room), padding `--ytb-sp-4`.
+- **Popup width: 280px**, padding `--ytb-sp-4`.
 - Use **rhythmic**, not uniform, spacing: tighter within a group (label -> control =
   `--ytb-sp-1`), looser between groups (`--ytb-sp-4`/`--ytb-sp-5`). Same-padding-everywhere is a ban.
 - Generous radius everywhere is the friendliness lever, with **one exception**: the
@@ -230,7 +230,7 @@ strict no-bounce guidance for personality; keep it restrained so it reads warm, 
 
 ### Extension Popup
 
-Keep the Extension Popup at 320px wide with the logo and **Youtube Buddy** heading above one full-width primary button labelled **Check Out Your Room**. Show inline feedback only if launch fails. Do not render status or Settings controls. Close the popup after Room Home opens and its YouTube tab is activated.
+Keep the Extension Popup at 280px wide with the logo and **Youtube Buddy** heading above one full-width primary button labelled **Check out your room!**. Show inline feedback only if launch fails. Do not render status or Settings controls. Close the popup after Room Home opens and its YouTube tab is activated.
 
 ### Room Home Panel
 
@@ -291,7 +291,7 @@ A forced Light or Dark Theme Preference stamps the same marker on the popup and 
 | --------- | ----------------------------------------------------- |
 | Accent    | Soft apricot and warm neutrals                        |
 | Typeface  | Bundled Nunito with rounded system fallbacks          |
-| Popup     | 320px with branding and one Check Out Your Room button  |
+| Popup     | 280px with branding and one Check out your room! button  |
 | Room Home | 480px portrait shell with normal and Settings views   |
 | Settings  | Four visible sections in one scroll                   |
 | Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens |
