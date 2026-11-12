@@ -1340,6 +1340,54 @@ test('Your Room reuses only YouTube Home and consumes a delayed new-tab launch o
 	}
 });
 
+test('a Room Home opened before the first Room read settles on the state-appropriate view', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	let release: () => void = () => {};
+	let gate = new Promise<void>((resolve) => (release = resolve));
+
+	try {
+		await context.route('http://localhost:8787/**', async (route) => {
+			if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+			await gate;
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				headers: CORS,
+				body: JSON.stringify({ progress: [], presence: [], notes: [], replies: [], playlist: [], events: [] }),
+			});
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		await seedPairedRoom(context);
+
+		// In room arrival: Loading until the read lands, then the normal view (not Settings).
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
+		await expect(page.locator('#ytb-home-section .ytb-hs-empty')).toHaveText('Loading your Room...');
+		await expect(page.locator('#ytb-home-section .ytb-hs-settings')).toHaveCount(0);
+		release();
+		await expect(page.locator('#ytb-home-section .ytb-hs-feed-scroll')).toHaveCount(1);
+		await expect(page.locator('#ytb-home-section .ytb-hs-settings')).toHaveCount(0);
+
+		// A gear click before the read lands wins over the deferred choice.
+		gate = new Promise<void>((resolve) => (release = resolve));
+		const second = await context.newPage();
+		await second.goto('https://www.youtube.com/');
+		await openHomePanel(second);
+		await second.locator('#ytb-home-section [aria-label="Settings"]').click();
+		release();
+		await nudgeUntil(second, () => expect(second.locator('#ytb-home-section .ytb-hs-feed-scroll')).toHaveCount(0, { timeout: 700 }));
+		await expect(second.locator('#ytb-home-section .ytb-hs-settings')).toHaveCount(1);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('Room Home Settings owns Profile, Create, Join, Leave, and Buddy Colors', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);

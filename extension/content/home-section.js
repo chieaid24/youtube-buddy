@@ -22,6 +22,7 @@
 	let myClientId = null;
 	let pendingPair = false; // one Create/Join request at a time
 	let activeView = 'normal';
+	let viewSettled = true; // false while an open awaits its first Room read to pick the initial view
 	let currentSettings = null;
 	let currentSharing = true;
 	let currentName = '';
@@ -58,6 +59,7 @@
 		open = next;
 		if (open) {
 			activeView = initialView();
+			viewSettled = Boolean(lastDetail);
 			resetFeedWindow(); // each open starts the Feed fresh
 			ensureOverlay();
 			hydrateSettings();
@@ -202,7 +204,9 @@
 		const body = activeView === 'settings' ? buildSettingsView() : document.createElement('div');
 		if (activeView === 'normal') {
 			body.className = 'ytb-hs-body';
-			if (!roomCode) {
+			if (!detail) {
+				body.append(buildEmptyNormal('Loading your Room...'));
+			} else if (!roomCode) {
 				body.append(buildEmptyNormal('Pair with a Room in Settings to see its Feed and Recommendations.'));
 			} else if (detail.locked) {
 				body.append(buildEmptyNormal('This Room is full. Open Settings to choose another Room.'));
@@ -222,7 +226,8 @@
 	}
 
 	function initialView() {
-		return !lastDetail || !lastDetail.roomCode || lastDetail.locked ? 'settings' : 'normal';
+		if (!lastDetail) return 'normal'; // undecided until the first Room read
+		return !lastDetail.roomCode || lastDetail.locked ? 'settings' : 'normal';
 	}
 
 	function buildEmptyNormal(text) {
@@ -241,6 +246,7 @@
 		button.setAttribute('aria-label', 'Settings');
 		button.addEventListener('click', () => {
 			activeView = 'settings';
+			viewSettled = true;
 			render();
 		});
 		return button;
@@ -255,6 +261,7 @@
 		button.setAttribute('aria-label', 'Back');
 		button.addEventListener('click', () => {
 			activeView = 'normal';
+			viewSettled = true;
 			render();
 		});
 		return button;
@@ -1195,6 +1202,10 @@
 			for (const id of persisted) dismissedIds.add(id);
 		}
 
+		if (open && !viewSettled && lastDetail) {
+			activeView = initialView();
+			viewSettled = true;
+		}
 		if (open) ensureOverlay();
 	});
 
