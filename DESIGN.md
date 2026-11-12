@@ -104,6 +104,7 @@ the punctuation actually used; target < 40KB. Fall back to `ui-rounded, system-u
 | `--t-body`  | 13px / 1.45 | 400    | Default body, inputs, buttons (buttons 600).                                                                                              |
 | `--t-label` | 11px / 1.3  | 600    | Section eyebrows. **Sentence case, no uppercase, minimal letter-spacing** (uppercase reads colder; softer here). Color `--ytb-ink-muted`. |
 | `--t-meta`  | 11px / 1.3  | 500    | Buddy last-seen, backend URL, footnotes. Color `--ytb-ink-muted`.                                                                         |
+| `--t-stamp` | 10px / 1.3  | 500    | Room Feed clock times only; the one step below 11px. Color `--ytb-ink-muted`.                                                             |
 
 Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch here.
 
