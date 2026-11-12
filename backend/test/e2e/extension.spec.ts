@@ -3417,7 +3417,15 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 			{
 				playlist: [
 					{ id: 'rec-own', videoId: 'vid-own', title: 'My Own Pick', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 1000 },
-					{ id: 'rec-keep', videoId: 'vid-keep', title: 'Buddy Keeper', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 2000 },
+					{
+						id: 'rec-keep',
+						videoId: 'vid-keep',
+						title: 'Buddy Keeper',
+						channel: 'Keeper Channel',
+						addedBy: 'buddy-1',
+						addedByName: 'Buddy',
+						addedAt: 2000,
+					},
 					{ id: 'rec-dismiss', videoId: 'vid-dismiss', title: 'Buddy Dismissed', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 3000 },
 				],
 			},
@@ -3444,6 +3452,21 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		await expect(section).toContainText('Recommended for you');
 		await expect(section).not.toContainText('Shared Playlist');
 		await expect(section).not.toContainText('My Own Pick');
+
+		// Hovering a card shows the text-only Video Hover Card: full title + channel, no second thumbnail.
+		const hover = page.locator('#ytb-home-overlay .ytb-hs-hovercard');
+		await cards.filter({ hasText: 'Buddy Keeper' }).locator('.ytb-hs-thumb').hover();
+		await expect(hover).toBeVisible();
+		await expect(hover.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Keeper');
+		await expect(hover.locator('.ytb-hs-hovercard-detail')).toHaveText('Keeper Channel');
+		await expect(hover.locator('.ytb-hs-hovercard-thumb')).toBeHidden();
+		await expect(cards.filter({ hasText: 'Buddy Keeper' }).locator('.ytb-hs-thumb')).not.toHaveAttribute('title');
+		// No captured channel: the title stands alone.
+		await cards.filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-card-title').hover();
+		await expect(hover.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Dismissed');
+		await expect(hover.locator('.ytb-hs-hovercard-detail')).toBeHidden();
+		await section.locator('.ytb-hs-col-head').first().hover();
+		await expect(hover).toBeHidden();
 
 		// Dismiss hides the card for this viewer immediately...
 		await section.locator('.ytb-hs-card').filter({ hasText: 'Buddy Dismissed' }).locator('.ytb-hs-remove').click();

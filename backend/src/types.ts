@@ -40,6 +40,7 @@ export interface PlaylistBody {
 	name: string;
 	videoId: string;
 	title: string;
+	channel?: string;
 }
 
 // Stable machine-readable error categories; the extension branches on these, never on error's prose.

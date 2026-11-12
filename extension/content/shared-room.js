@@ -98,6 +98,23 @@
 			return text || doc.title.replace(/ - YouTube$/, '').trim();
 		},
 
+		// The watch page's channel name, or '' when YouTube hasn't rendered it.
+		watchChannel(doc) {
+			const link = doc.querySelector('ytd-watch-metadata ytd-channel-name a');
+			return link && link.textContent ? link.textContent.trim() : '';
+		},
+
+		// A feed tile's channel name, or ''. Lockup tiles list the channel as the first of two or more
+		// metadata rows; on a channel page they show only one row (views), so the page header names it.
+		tileChannel(tile, doc) {
+			const classic = tile.querySelector('ytd-channel-name a');
+			if (classic && classic.textContent.trim()) return classic.textContent.trim();
+			const rows = tile.querySelectorAll('.ytContentMetadataViewModelMetadataRow, .yt-content-metadata-view-model__metadata-row');
+			if (rows.length >= 2) return rows[0].textContent.trim();
+			const header = /^\/(@|channel\/|c\/|user\/)/.test(doc.location.pathname) && doc.querySelector('yt-page-header-renderer h1');
+			return header && header.textContent ? header.textContent.trim() : '';
+		},
+
 		// Plain video context for a Reply; omitted without a captured title.
 		videoContext(note) {
 			const title = note && typeof note.videoTitle === 'string' ? note.videoTitle.trim() : '';
@@ -121,6 +138,14 @@
 				thumbnail: 'https://i.ytimg.com/vi/' + encodeURIComponent(id) + '/mqdefault.jpg',
 				label: trimmed === '' ? 'a video' : trimmed,
 			};
+		},
+
+		// Text-only Video Hover Card plan for a Recommended for you card: the card already shows the
+		// thumbnail, so the hover adds the untruncated title and the channel (omitted when not captured).
+		recommendationHoverCard(item) {
+			const title = item && typeof item.title === 'string' ? item.title.trim() : '';
+			const channel = item && typeof item.channel === 'string' ? item.channel.trim() : '';
+			return { thumbnail: null, label: title === '' ? 'a video' : title, detail: channel };
 		},
 
 		// Where the cursor-following Video Hover Card sits: below-right of the point,

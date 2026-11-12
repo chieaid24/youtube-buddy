@@ -134,7 +134,7 @@
 
 		// Recommend a video to the Room (ADR-0007; API keeps the playlist name).
 		// NOT gated by Sharing; re-adding is a server no-op returning the item.
-		async postPlaylistAdd({ clientId, name, videoId, title }) {
+		async postPlaylistAdd({ clientId, name, videoId, title, channel }) {
 			const { code } = await YTB.getConfig();
 			if (!code) return { ok: false, category: 'unpaired' };
 			return YTB._postJson('/playlist?code=' + encodeURIComponent(code), {
@@ -142,6 +142,7 @@
 				name,
 				videoId,
 				title,
+				...(channel ? { channel } : {}),
 			});
 		},
 

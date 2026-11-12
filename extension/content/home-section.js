@@ -370,7 +370,10 @@
 
 	function attachVideoHover(el, videoId, title) {
 		const plan = YTB.videoHoverCard(videoId, title);
-		if (!plan) return el;
+		return plan ? attachHoverCard(el, plan) : el;
+	}
+
+	function attachHoverCard(el, plan) {
 		el.addEventListener('pointerenter', (event) => {
 			if (event.pointerType === 'touch') return;
 			hoverPoint = { x: event.clientX, y: event.clientY };
@@ -411,7 +414,9 @@
 		});
 		const label = document.createElement('div');
 		label.className = 'ytb-hs-hovercard-label';
-		card.append(img, label);
+		const detail = document.createElement('div');
+		detail.className = 'ytb-hs-hovercard-detail';
+		card.append(img, label, detail);
 		root.appendChild(card);
 		return card;
 	}
@@ -422,11 +427,13 @@
 		const card = ensureHoverCard();
 		if (!card) return;
 		const img = card.querySelector('.ytb-hs-hovercard-thumb');
-		if (img.getAttribute('src') !== plan.thumbnail) {
+		card.classList.toggle('ytb-hs-hovercard-text', !plan.thumbnail);
+		if (plan.thumbnail && img.getAttribute('src') !== plan.thumbnail) {
 			img.style.display = '';
 			img.src = plan.thumbnail;
 		}
 		card.querySelector('.ytb-hs-hovercard-label').textContent = plan.label;
+		card.querySelector('.ytb-hs-hovercard-detail').textContent = plan.detail || '';
 		hoverOwner = owner;
 		positionHoverCard();
 		card.classList.add('ytb-hs-hovercard-on');
@@ -625,7 +632,7 @@
 		const link = document.createElement('a');
 		link.className = 'ytb-hs-thumb';
 		link.href = '/watch?v=' + encodeURIComponent(item.videoId);
-		// No native title= tooltip (alt keeps it accessible); hover shows the card wash instead.
+		// No native title= tooltip (alt keeps it accessible); hover shows the text-only Video Hover Card.
 		const img = document.createElement('img');
 		// A normal in-page image load on youtube.com - no extra host permission.
 		img.src = 'https://i.ytimg.com/vi/' + encodeURIComponent(item.videoId) + '/mqdefault.jpg';
@@ -658,6 +665,10 @@
 		watched.className = 'ytb-hs-watched';
 		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId, roster);
 		watched.textContent = label ? 'Watched by ' + label : 'New to the Room';
+
+		const hover = YTB.recommendationHoverCard(item);
+		attachHoverCard(link, hover);
+		attachHoverCard(title, hover);
 
 		card.append(link, dismiss, title, watched);
 		return card;
@@ -1653,6 +1664,12 @@
         font-weight: 600;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
+      #${OVERLAY_ID} .ytb-hs-hovercard-detail { margin-top: 2px; color: var(--ytb-ink-muted); }
+      #${OVERLAY_ID} .ytb-hs-hovercard-detail:empty { display: none; }
+      /* Text-only (Recommended for you): the card already shows the thumbnail, so this hover is the full title + channel. */
+      #${OVERLAY_ID} .ytb-hs-hovercard-text { width: auto; max-width: 260px; padding: 7px 10px; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-text .ytb-hs-hovercard-thumb { display: none; }
+      #${OVERLAY_ID} .ytb-hs-hovercard-text .ytb-hs-hovercard-label { margin-top: 0; display: block; overflow: visible; }
       @media (prefers-reduced-motion: reduce) {
 		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more, #${SECTION_ID} .ytb-hs-switch > span { transition: none; }
         #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }

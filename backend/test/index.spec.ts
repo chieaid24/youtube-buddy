@@ -809,6 +809,18 @@ describe('POST /playlist?code=', () => {
 		expect(events[0]).toMatchObject({ type: 'added', videoId: 'abc123', title: 'A Great Video', actorClientId: 'a1b2c3d4' });
 	});
 
+	it('stores the channel trimmed, and drops a missing or invalid one to "" rather than rejecting', async () => {
+		const stored = async (code: string, channel: unknown) => {
+			expect((await postPlaylist(code, playlistBody({ channel }))).status).toBe(200);
+			return JSON.parse((await env.PROGRESS.get(`${code}:playlist:abc123`))!).channel;
+		};
+		expect(await stored('playlist-channel', '  Lofi Girl  ')).toBe('Lofi Girl');
+		expect(await stored('playlist-channel-missing', undefined)).toBe('');
+		expect(await stored('playlist-channel-blank', '   ')).toBe('');
+		expect(await stored('playlist-channel-type', 42)).toBe('');
+		expect(await stored('playlist-channel-long', 'x'.repeat(201))).toBe('');
+	});
+
 	it('re-adding an existing videoId is a no-op: no duplicate, no new Event, same id', async () => {
 		const code = 'playlist-dedup';
 		const first = ((await (await postPlaylist(code, playlistBody())).json()) as { item: { id: string } }).item;

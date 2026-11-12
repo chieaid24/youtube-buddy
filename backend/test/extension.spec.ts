@@ -842,6 +842,22 @@ describe('shared playlist client API', () => {
 		});
 	});
 
+	it('sends the channel only when one was captured', async () => {
+		storage = { code: 'silly-otters' };
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, item: {} }) });
+		vi.stubGlobal('fetch', fetchMock);
+		await window.YTB.postPlaylistAdd({ clientId: 'a', name: '', videoId: 'v', title: 't', channel: 'Lofi Girl' });
+		await window.YTB.postPlaylistAdd({ clientId: 'a', name: '', videoId: 'v', title: 't', channel: '' });
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			clientId: 'a',
+			name: '',
+			videoId: 'v',
+			title: 't',
+			channel: 'Lofi Girl',
+		});
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ clientId: 'a', name: '', videoId: 'v', title: 't' });
+	});
+
 	it('requires a Room Code but ignores the Sharing toggle (curation is not position reporting)', async () => {
 		storage = { code: 'silly-otters', sharing: false };
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, item: {} }) }));
@@ -940,6 +956,51 @@ describe('watchTitle', () => {
 	});
 });
 
+// Channel names frozen into a Recommendation; both readers take injected DOM so selectors are testable.
+describe('watchChannel', () => {
+	const fakeDoc = (text: string | null) => ({
+		querySelector: (selector: string) =>
+			selector === 'ytd-watch-metadata ytd-channel-name a' && text !== null ? { textContent: text } : null,
+	});
+
+	it('reads the owner channel, trimmed', () => {
+		expect(window.YTB.watchChannel(fakeDoc('  Lofi Girl \n'))).toBe('Lofi Girl');
+	});
+
+	it('returns an empty string before YouTube renders the owner', () => {
+		expect(window.YTB.watchChannel(fakeDoc(null))).toBe('');
+	});
+});
+
+describe('tileChannel', () => {
+	const fakeTile = (classic: string | null, rows: string[]) => ({
+		querySelector: (selector: string) => (selector === 'ytd-channel-name a' && classic !== null ? { textContent: classic } : null),
+		querySelectorAll: () => rows.map((textContent) => ({ textContent })),
+	});
+	const fakeDoc = (pathname: string, header: string | null) => ({
+		location: { pathname },
+		querySelector: (selector: string) => (selector === 'yt-page-header-renderer h1' && header !== null ? { textContent: header } : null),
+	});
+	const feed = fakeDoc('/', null);
+
+	it('reads a classic tile channel link', () => {
+		expect(window.YTB.tileChannel(fakeTile(' Lofi Girl ', []), feed)).toBe('Lofi Girl');
+	});
+
+	it("reads a lockup tile's first metadata row when a stats row follows it", () => {
+		expect(window.YTB.tileChannel(fakeTile(null, [' Lofi Girl ', '4K watching']), feed)).toBe('Lofi Girl');
+	});
+
+	it('never mistakes a lone stats row for the channel', () => {
+		expect(window.YTB.tileChannel(fakeTile(null, ['1.2M views - 2 days ago']), feed)).toBe('');
+	});
+
+	it("falls back to the channel page's header for its own videos", () => {
+		expect(window.YTB.tileChannel(fakeTile(null, ['1.2M views']), fakeDoc('/@LofiGirl/videos', ' Lofi Girl '))).toBe('Lofi Girl');
+		expect(window.YTB.tileChannel(fakeTile(null, ['1.2M views']), fakeDoc('/results', 'Not A Channel'))).toBe('');
+	});
+});
+
 describe('noteVerb', () => {
 	it('gives each Note a stable verb while varying the feed', () => {
 		const verbs = Array.from({ length: 100 }, (_, i) => window.YTB.noteVerb('note-' + i));
@@ -977,6 +1038,22 @@ describe('titleLinkTooltip', () => {
 		expect(window.YTB.titleLinkTooltip('')).toBe('Watch this video');
 		expect(window.YTB.titleLinkTooltip('   ')).toBe('Watch this video');
 		expect(window.YTB.titleLinkTooltip(null)).toBe('Watch this video');
+	});
+});
+
+describe('recommendationHoverCard', () => {
+	it('shows the full title and channel without a thumbnail', () => {
+		expect(window.YTB.recommendationHoverCard({ title: '  A Very Long Title  ', channel: ' Lofi Girl ' })).toEqual({
+			thumbnail: null,
+			label: 'A Very Long Title',
+			detail: 'Lofi Girl',
+		});
+	});
+
+	it('omits the channel when none was captured', () => {
+		expect(window.YTB.recommendationHoverCard({ title: 'T', channel: '' })?.detail).toBe('');
+		expect(window.YTB.recommendationHoverCard({ title: 'T' })?.detail).toBe('');
+		expect(window.YTB.recommendationHoverCard({ title: ' ' })?.label).toBe('a video');
 	});
 });
 
@@ -2211,6 +2288,15 @@ declare global {
 			filterRoster(roster: Array<{ clientId: string; name: string }>, query: string): Array<{ clientId: string; name: string }>;
 			mentionName(roster: Array<{ clientId: string; name: string }>, clientId: string): string;
 			watchTitle(doc: { querySelector(selector: string): { textContent: string } | null; title: string }): string;
+			watchChannel(doc: { querySelector(selector: string): { textContent: string } | null }): string;
+			tileChannel(
+				tile: {
+					querySelector(selector: string): { textContent: string } | null;
+					querySelectorAll(selector: string): ArrayLike<{ textContent: string }>;
+				},
+				doc: { location: { pathname: string }; querySelector(selector: string): { textContent: string } | null },
+			): string;
+			recommendationHoverCard(item: { title?: string; channel?: string }): { thumbnail: null; label: string; detail: string };
 			noteVerb(noteId: string): string;
 			videoContext(note: { videoTitle?: string } | null): string;
 			titleLinkTooltip(title: string | null): string;
