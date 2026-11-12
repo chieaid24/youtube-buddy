@@ -187,7 +187,7 @@
 
 		// Announce "I'm here" under `code`, independent of watching/Sharing;
 		// idempotent upsert doubling as a keep-alive.
-		async assertPresence(code) {
+		async assertPresence(code, joining = false) {
 			if (!code) return false; // Unpaired - nobody to appear to.
 			const { name } = await YTB.getConfig();
 			const clientId = await YTB.ensureClientId();
@@ -196,7 +196,7 @@
 				const res = await fetch(YTB.BACKEND_URL + '/presence?code=' + encodeURIComponent(code), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ clientId, name }),
+					body: JSON.stringify({ clientId, name, joining }),
 				});
 				return res.ok ? { ok: true } : false;
 			} catch {

@@ -1507,6 +1507,22 @@ describe('room home section helpers', () => {
 		expect(after.map((i) => i.own)).toEqual([true, true]);
 	});
 
+	it('renders shared joins as plain system messages for every viewer', () => {
+		const event = { id: 'join-1', type: 'joined', actorClientId: 'sigma', actorName: 'Sigma', at: Date.now() };
+		for (const viewer of ['sigma', 'other']) {
+			const item = window.YTB.buildFeed({ events: [event] }, viewer).flatMap((group) => group.items)[0];
+			expect(item).toMatchObject({ type: 'system', removed: false });
+			expect(window.YTB.systemLine(item, [])).toMatchObject({
+				prefix: 'Sigma joined the room',
+				label: '',
+				struck: false,
+				linkVideoId: null,
+			});
+		}
+		expect(window.YTB.roomRoster({ events: [event] })).toEqual([]);
+		expect(window.YTB.systemLine({ event: { ...event, actorName: '' } }, []).prefix).toMatch(/Buddy joined the room$/);
+	});
+
 	it('systemLine: a struck System Message renders no anchor and explains itself to assistive tech', () => {
 		const roster: RosterEntry[] = [{ clientId: 'bob22222', name: 'Bob' }];
 		const event = { id: 'e1', videoId: 'v1', title: 'Otters 101', actorClientId: 'bob22222' };

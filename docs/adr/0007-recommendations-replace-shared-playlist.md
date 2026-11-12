@@ -137,3 +137,13 @@ does not resurface it".
 
 Storage shape is otherwise unchanged: the item gains one field, un-recommends still emit no
 Event, and nothing per-recipient is stored on the backend.
+
+## Amendment (2026-11-12)
+
+The shared event log also records `joined` events on an explicit Create/Join action
+(`POST /presence` with `joining: true`), capturing `actorClientId` and `actorName`. Startup and presence refreshes emit no
+event; leaving and rejoining emits a new one. Everyone sees the plain, unlinked
+"Sigma joined the room" System Message in chronological Feed order, using the
+captured name or Buddy fallback. This replaces the per-tab join toast. Join history
+shares the 14-day TTL and newest-50 cap with recommendations and survives leaving,
+but does not count as current membership for Room capacity or roster derivation.

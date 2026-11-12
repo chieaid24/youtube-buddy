@@ -566,7 +566,8 @@
 		row.className = 'ytb-hs-item ytb-hs-system' + (line.struck ? ' ytb-hs-struck' : '');
 		if (line.rowTooltip) row.title = line.rowTooltip;
 		const text = document.createElement('span');
-		text.append(line.prefix, buildTitleLink(line.linkVideoId, line.label));
+		text.append(line.prefix);
+		if (line.label) text.append(buildTitleLink(line.linkVideoId, line.label));
 		if (line.suffix) text.append(line.suffix);
 		if (line.srSuffix) {
 			const sr = document.createElement('span');
@@ -1145,7 +1146,7 @@
 		lastDetail = { roomCode: code, myClientId, ok: false, locked: false };
 		selectedBuddyId = '';
 		render();
-		await YTB.assertPresence(code);
+		await YTB.assertPresence(code, true);
 		if (oldCode && oldCode !== code) {
 			await YTB.clearRoomColors(oldCode);
 			await YTB.deleteMember(oldCode, myClientId);
