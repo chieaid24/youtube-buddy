@@ -196,6 +196,7 @@ Never animate layout properties (width/height/top/left) for choreography — use
 	--ytb-dur-slow: 300ms;
 	--ytb-ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quint, default */
 	--ytb-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1); /* mild overshoot, "settle" */
+	--ytb-ease-yt: cubic-bezier(0.05, 0, 0, 1); /* YouTube's card-hover curve, only where we mirror it */
 }
 @media (prefers-reduced-motion: reduce) {
 	/* springs -> ease-out, transforms -> none, keep short opacity fades */
@@ -206,6 +207,10 @@ Never animate layout properties (width/height/top/left) for choreography — use
 
 - **Buttons:** press = scale 0.97 (`--ytb-dur-quick`); release settles back with
   `--ytb-ease-spring`. Hover = background/color glide only.
+- **Recommendation card hover:** the `--ytb-accent-050` wash grows in from scale 0.9 while
+  fading in, over `--ytb-dur-slow` on `--ytb-ease-yt`, and leaves the same way. These are
+  YouTube's own card-hover values, so a card answers the pointer like the thumbnails behind
+  the panel. Reduced motion keeps a `--ytb-dur-quick` fade and drops the growth.
 - **View switch:** Settings replaces the normal Room Home content without resizing the shell.
 - **Switches:** the knob glides between states without bounce. Settings rebuilds its
   rows on every change, so the glide replays as a keyframe animation on the new node.
@@ -250,7 +255,7 @@ Show a gear in the normal header. Show Back in the Settings header. Keep Close a
 
 Do not move focus, scroll, or highlight a control for Room full. Trap Tab inside the open panel. If a confirmation is open, Escape dismisses it before a later Escape can close Room Home.
 
-The Buddy Room toggle matches whichever YouTube guide is active: a 40px row in the full guide or a 64x76px entry in the compact mini guide. Keep the buddies icon as the only open-state color change.
+Both YouTube guides carry a Buddy Room toggle, so one shows at every window size: a 40px row in the full guide and a 64x76px entry in the compact mini guide. Match each to its guide's native entries, including the 400 label weight of entries off the current page. Keep the buddies icon as the only open-state color change.
 
 ### Settings sections
 
@@ -302,12 +307,12 @@ A forced Light or Dark Theme Preference stamps the same marker on the popup and 
 
 ## 6. Decisions locked (2026-09-05)
 
-| Decision  | Choice                                                |
-| --------- | ----------------------------------------------------- |
-| Accent    | Soft apricot and warm neutrals                        |
-| Typeface  | Bundled Nunito with rounded system fallbacks          |
-| Popup     | 280px with branding and one Check out your room! button  |
-| Room Home | 480px portrait shell with normal and Settings views   |
-| Settings  | Four visible sections in one scroll                   |
-| Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens |
-| Motion    | Gentle ease-out with reduced-motion fallbacks         |
+| Decision  | Choice                                                  |
+| --------- | ------------------------------------------------------- |
+| Accent    | Soft apricot and warm neutrals                          |
+| Typeface  | Bundled Nunito with rounded system fallbacks            |
+| Popup     | 280px with branding and one Check out your room! button |
+| Room Home | 480px portrait shell with normal and Settings views     |
+| Settings  | Four visible sections in one scroll                     |
+| Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens   |
+| Motion    | Gentle ease-out with reduced-motion fallbacks           |

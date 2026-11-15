@@ -161,7 +161,8 @@ async function nudgeUntil(page: Page, assertion: () => Promise<void>) {
 
 /** Open the ephemeral Room Home Panel via the guide toggle; waits for the panel to mount (ADR-0005). */
 async function openHomePanel(page: Page) {
-	const toggle = page.locator('#ytb-home-toggle');
+	// Each guide carries its own row; click whichever one YouTube is showing.
+	const toggle = page.locator('#ytb-home-toggle, #ytb-home-toggle-mini').filter({ visible: true });
 	await nudgeUntil(page, () => expect(toggle).toHaveCount(1, { timeout: 700 }));
 	if ((await page.locator('#ytb-home-section').count()) === 0) await toggle.click();
 	await expect(page.locator('#ytb-home-section')).toHaveCount(1);
@@ -1077,13 +1078,77 @@ test('Room Home Toggle matches the compact YouTube mini guide', async () => {
 		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
-		const toggle = page.locator('ytd-mini-guide-renderer #ytb-home-toggle');
+		const toggle = page.locator('ytd-mini-guide-renderer #ytb-home-toggle-mini');
 		await nudgeUntil(page, () => expect(toggle).toBeVisible());
 		await expect(toggle).toHaveCSS('width', '64px');
 		await expect(toggle).toHaveCSS('height', '76px');
 		await expect(toggle).toHaveCSS('font-size', '10px');
 		await toggle.click();
 		await expect(page.locator('#ytb-home-section')).toBeVisible();
+	} finally {
+		await context.close();
+	}
+});
+
+// Real YouTube keeps the full guide mounted in a closed drawer while the mini guide shows.
+const collapsedGuideHomeFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube collapsed guide home fixture</title></head>
+  <body style="margin: 0">
+    <div id="guide" hidden>
+      <ytd-guide-renderer>
+        <div id="sections">
+          <ytd-guide-section-renderer><div id="items"></div></ytd-guide-section-renderer>
+        </div>
+      </ytd-guide-renderer>
+    </div>
+    <ytd-mini-guide-renderer style="display: block; width: 72px"><div id="items"></div></ytd-mini-guide-renderer>
+    <ytd-browse page-subtype="home"><div id="grid-container"><ytd-rich-grid-renderer></ytd-rich-grid-renderer></div></ytd-browse>
+  </body>
+</html>`;
+
+test('Room Home Toggle keeps a row in both YouTube guides at once', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: collapsedGuideHomeFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const full = page.locator('ytd-guide-renderer #items #ytb-home-toggle');
+		const mini = page.locator('ytd-mini-guide-renderer #items #ytb-home-toggle-mini');
+		await nudgeUntil(page, () => expect(mini).toBeVisible());
+		await expect(full).toHaveCount(1);
+		await expect(full).toBeHidden();
+		await expect(mini).toHaveCSS('height', '76px');
+
+		// Either row drives the one panel, both mirror it, and it docks past the guide on show.
+		await mini.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+		await expect(mini).toHaveAttribute('aria-checked', 'true');
+		await expect(full).toHaveAttribute('aria-checked', 'true');
+		const dock = () => page.locator('#ytb-home-overlay').evaluate((el) => el.style.getPropertyValue('--ytb-hs-dock'));
+		expect(await dock()).toBe('72px');
+
+		// Expanding the guide swaps which row shows without re-injecting either.
+		await page.evaluate(() => {
+			document.getElementById('guide')!.hidden = false;
+			document.querySelector<HTMLElement>('ytd-guide-renderer')!.style.cssText = 'display: block; width: 240px';
+			document.querySelector<HTMLElement>('ytd-mini-guide-renderer')!.style.display = 'none';
+			window.dispatchEvent(new Event('resize'));
+		});
+		await expect(full).toBeVisible();
+		await expect(full).toHaveCSS('height', '40px');
+		await expect(mini).toBeHidden();
+		expect(await dock()).toBe('240px');
+		await page.keyboard.press('Escape');
+		await expect(full).toHaveAttribute('aria-checked', 'false');
+		await expect(mini).toHaveAttribute('aria-checked', 'false');
+		await full.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+		await expect(mini).toHaveAttribute('aria-checked', 'true');
+		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
 	}
@@ -3645,6 +3710,101 @@ test('Recommended to you grid hides own items; Dismiss is local-only and survive
 	}
 });
 
+test("a Recommended to you card's hover wash grows in on YouTube's hover curve; reduced motion only fades", async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {
+			playlist: [
+				{
+					id: 'rec-grow',
+					videoId: 'vid-grow',
+					title: 'Buddy Pick',
+					channel: 'Pick Channel',
+					addedBy: 'buddy-1',
+					addedByName: 'Buddy',
+					addedAt: 1000,
+				},
+			],
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
+		const card = page.locator('#ytb-home-section .ytb-hs-card');
+		await nudgeUntil(page, () => expect(card).toHaveCount(1, { timeout: 700 }));
+
+		// Record every transition that actually runs on a card's wash, with its resolved timing.
+		await page.evaluate(() => {
+			const runs: object[] = [];
+			(window as any).__washRuns = runs;
+			document.addEventListener('transitionrun', (event) => {
+				const target = event.target as Element;
+				if (!target.matches('.ytb-hs-card') || event.pseudoElement !== '::before') return;
+				for (const animation of document.getAnimations()) {
+					const effect = animation.effect as KeyframeEffect;
+					if (!(animation instanceof CSSTransition) || animation.transitionProperty !== event.propertyName) continue;
+					if (effect.target !== target || effect.pseudoElement !== '::before') continue;
+					const timing = effect.getComputedTiming();
+					const [from, to] = effect.getKeyframes().map((frame) => String(frame[event.propertyName]));
+					runs.push({ property: event.propertyName, from, to, duration: timing.duration, delay: timing.delay, easing: timing.easing });
+				}
+			});
+		});
+		const takeRuns = () =>
+			page.evaluate(() => {
+				const runs = (window as any).__washRuns as { property: string }[];
+				return runs.splice(0).sort((a, b) => a.property.localeCompare(b.property));
+			});
+		const wash = () =>
+			card.evaluate((el) => {
+				const style = getComputedStyle(el, '::before');
+				return { opacity: style.opacity, transform: style.transform };
+			});
+		const leave = () => page.mouse.move(2, 2);
+
+		// At rest the wash is invisible and shrunk to 90%, like YouTube's own card hover highlight.
+		expect(await wash()).toEqual({ opacity: '0', transform: 'matrix(0.9, 0, 0, 0.9, 0, 0)' });
+
+		// Hover grows it to full size while fading in: 300ms on YouTube's curve, no delay.
+		const youtube = { duration: 300, delay: 0, easing: 'cubic-bezier(0.05, 0, 0, 1)' };
+		await card.locator('.ytb-hs-thumb').hover();
+		await expect.poll(wash).toEqual({ opacity: '1', transform: 'matrix(1, 0, 0, 1, 0, 0)' });
+		expect(await takeRuns()).toEqual([
+			{ property: 'opacity', from: '0', to: '1', ...youtube },
+			{ property: 'transform', from: 'scale(0.9)', to: 'scale(1)', ...youtube },
+		]);
+
+		// Leaving shrinks it back out the same way.
+		await leave();
+		await expect.poll(wash).toEqual({ opacity: '0', transform: 'matrix(0.9, 0, 0, 0.9, 0, 0)' });
+		expect(await takeRuns()).toEqual([
+			{ property: 'opacity', from: '1', to: '0', ...youtube },
+			{ property: 'transform', from: 'scale(1)', to: 'scale(0.9)', ...youtube },
+		]);
+
+		// Reduced motion (DESIGN.md): no transform at all, just the short fade.
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		expect(await wash()).toEqual({ opacity: '0', transform: 'none' });
+		await card.locator('.ytb-hs-thumb').hover();
+		await expect.poll(wash).toEqual({ opacity: '1', transform: 'none' });
+		expect(await takeRuns()).toEqual([
+			{ property: 'opacity', from: '0', to: '1', duration: 140, delay: 0, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+		]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('recommend Feed lines: own "You recommended", recipient copy, title-only links, strikethrough on un-recommend', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -3679,6 +3839,20 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		// videoIds would 404 there and fail the console-error gate.
 		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		// Buddy Pick captured no channel, so its lookup is held until its card is open.
+		let releaseLookup = () => {};
+		const lookupHeld = new Promise<void>((resolve) => {
+			releaseLookup = resolve;
+		});
+		await context.route('https://www.youtube.com/oembed**', async (route) => {
+			const live = route.request().url().includes(encodeURIComponent('https://www.youtube.com/watch?v=vid-live'));
+			if (live) await lookupHeld;
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(live ? { author_name: 'Looked Up Channel' } : {}),
+			});
+		});
 		await seedPairedRoom(context);
 
 		const page = await context.newPage();
@@ -3748,12 +3922,24 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
 		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('My Channel');
 		await expect(card).toHaveCSS('width', '170px');
+		// Extra bottom room keeps the last text line clear of the rounded corners.
+		await expect(card).toHaveCSS('padding', '5px 5px 8px');
 		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
 		// The card follows the cursor, so it must never eat the hover under it.
 		await expect(card).toHaveCSS('pointer-events', 'none');
 		// Leaving the link hides it again.
 		await page.locator('#ytb-home-section .ytb-hs-title').hover();
 		await expect(card).toBeHidden();
+
+		// No captured channel: it is looked up from YouTube's oEmbed, and a lookup
+		// landing while the card is open fills the channel in.
+		await recipient.locator('a.ytb-hs-title-link').hover();
+		await expect(card).toBeVisible();
+		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Pick');
+		await expect(card.locator('.ytb-hs-hovercard-detail')).toBeHidden();
+		releaseLookup();
+		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('Looked Up Channel');
+		await expect(card).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -4745,6 +4931,33 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 			error.includes("Blocked script execution in 'about:blank'");
 		const lifecycleErrors = errors.filter((error) => !isYouTubeNoise(error));
 		expect(lifecycleErrors, lifecycleErrors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('@live keeps a Buddy Room row in whichever YouTube guide is showing', async ({}, testInfo) => {
+	test.skip(!process.env.YTB_LIVE_YOUTUBE, 'Set YTB_LIVE_YOUTUBE=1 to run the live smoke test.');
+	test.setTimeout(90_000);
+	const context = await launchExtension();
+
+	try {
+		const page = await context.newPage();
+		await page.setViewportSize({ width: 1600, height: 900 });
+		await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });
+		const full = page.locator('ytd-guide-renderer #ytb-home-toggle');
+		const mini = page.locator('ytd-mini-guide-renderer #ytb-home-toggle-mini');
+		await expect(full).toBeInViewport({ timeout: 20_000 });
+
+		// Narrowing swaps in the mini guide while the full one stays mounted off-screen.
+		await page.setViewportSize({ width: 1100, height: 900 });
+		await expect(mini).toBeInViewport({ timeout: 20_000 });
+		await expect(full).not.toBeInViewport();
+		await mini.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+		const shot = testInfo.outputPath('live-mini-guide-toggle.png');
+		await page.screenshot({ path: shot });
+		await testInfo.attach('Buddy Room row in the mini guide', { path: shot, contentType: 'image/png' });
 	} finally {
 		await context.close();
 	}

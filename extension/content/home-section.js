@@ -125,9 +125,8 @@
 	function dockOverlay() {
 		const root = document.getElementById(OVERLAY_ID);
 		if (!root) return;
-		const toggleRight = document.getElementById('ytb-home-toggle')?.getBoundingClientRect().right || 0;
-		let x = toggleRight < window.innerWidth / 2 ? toggleRight : 0;
-		for (const el of document.querySelectorAll('ytd-guide-renderer, ytd-mini-guide-renderer')) {
+		let x = 0;
+		for (const el of document.querySelectorAll('#ytb-home-toggle, #ytb-home-toggle-mini, ytd-guide-renderer, ytd-mini-guide-renderer')) {
 			const rect = el.getBoundingClientRect();
 			if (rect.width > 0 && rect.width < window.innerWidth / 2 && rect.height > 0) x = Math.max(x, rect.right);
 		}
@@ -375,7 +374,16 @@
 	function attachVideoHover(el, videoId, title, channel) {
 		const recommendation = lastDetail?.playlist?.find((item) => item.videoId === videoId);
 		const plan = YTB.videoHoverCard(videoId, title, channel || recommendation?.channel);
-		return plan ? attachHoverCard(el, plan) : el;
+		if (!plan) return el;
+		// No captured channel: look it up up front so the card rarely grows while shown.
+		if (!plan.detail) {
+			YTB.videoChannel(videoId).then((found) => {
+				if (!found) return;
+				plan.detail = found;
+				if (hoverOwner === el) showHoverCard(el, plan);
+			});
+		}
+		return attachHoverCard(el, plan);
 	}
 
 	function attachHoverCard(el, plan) {
@@ -1517,13 +1525,14 @@
       /* isolate makes the card a stacking context so the ::before wash (z-index -1) stays behind its own content. */
       #${SECTION_ID} .ytb-hs-card { position: relative; isolation: isolate; flex: 0 0 132px; width: 132px; }
       /* Card hover wash (#200) bleeds within the 12px row gap so adjacent washes never collide; keyboard focus uses rings. */
+      /* Grows in from 90% while fading, timed like YouTube's own card hover highlight. */
       #${SECTION_ID} .ytb-hs-card::before {
         content: ''; position: absolute; z-index: -1; inset: -6px -4px;
         border-radius: var(--ytb-r-lg); background: var(--ytb-accent-050);
-        opacity: 0; pointer-events: none;
-        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        opacity: 0; transform: scale(0.9); pointer-events: none;
+        transition: opacity var(--ytb-dur-slow) var(--ytb-ease-yt), transform var(--ytb-dur-slow) var(--ytb-ease-yt);
       }
-      #${SECTION_ID} .ytb-hs-card:hover::before { opacity: 1; }
+      #${SECTION_ID} .ytb-hs-card:hover::before { opacity: 1; transform: scale(1); }
       #${SECTION_ID} .ytb-hs-thumb { display: block; border-radius: 12px; overflow: hidden; }
       #${SECTION_ID} .ytb-hs-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-thumb img { display: block; width: 132px; height: 74px; object-fit: cover; }
@@ -1756,7 +1765,7 @@
         left: 0; top: 0;
         box-sizing: border-box;
         width: 170px;
-        padding: 5px;
+        padding: 5px 5px 8px; /* extra bottom room: the text sits between the rounded corners */
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -1791,6 +1800,10 @@
         #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch, #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch > span,
         #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { animation: none; }
         #${SECTION_ID} .ytb-hs-copy-feedback { animation-name: ytb-hs-copied-fade; }
+        #${SECTION_ID} .ytb-hs-card::before, #${SECTION_ID} .ytb-hs-card:hover::before {
+          transform: none;
+          transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        }
         #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }
       }
     `;
