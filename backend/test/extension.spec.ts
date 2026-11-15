@@ -1070,13 +1070,13 @@ describe('titleLinkTooltip', () => {
 
 describe('recommendationTooltip', () => {
 	it('puts the full title over the channel', () => {
-		expect(window.YTB.recommendationTooltip('  A Very Long Title  ', ' Lofi Girl ')).toBe('A Very Long Title\nLofi Girl');
+		expect(window.YTB.recommendationTooltip('  A Very Long Title  ', ' Lofi Girl ')).toBe('A Very Long Title\nby Lofi Girl');
 	});
 
 	it('omits the channel when none is known', () => {
 		expect(window.YTB.recommendationTooltip('T', '')).toBe('T');
 		expect(window.YTB.recommendationTooltip('T', undefined)).toBe('T');
-		expect(window.YTB.recommendationTooltip(' ', 'C')).toBe('a video\nC');
+		expect(window.YTB.recommendationTooltip(' ', 'C')).toBe('a video\nby C');
 	});
 });
 

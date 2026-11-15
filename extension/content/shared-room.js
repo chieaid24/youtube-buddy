@@ -143,11 +143,11 @@
 			};
 		},
 
-		// Native tooltip for a Recommended to you card: the full title, then the channel when known.
+		// Native tooltip for a Recommended to you card: the full title, then "by <channel>" when known.
 		recommendationTooltip(title, channel) {
 			const t = typeof title === 'string' ? title.trim() : '';
 			const c = typeof channel === 'string' ? channel.trim() : '';
-			return [t || 'a video', c].filter(Boolean).join('\n');
+			return c ? `${t || 'a video'}\nby ${c}` : t || 'a video';
 		},
 
 		// Where the cursor-following Video Hover Card sits: below-right of the point,

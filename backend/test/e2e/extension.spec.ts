@@ -3467,12 +3467,12 @@ test('Recommended to you grid hides own items; Dismiss is local-only and survive
 
 		// Cards carry a native title= tooltip like the Dismiss button: full title, then the channel.
 		const keeper = cards.filter({ hasText: 'Buddy Keeper' });
-		await expect(keeper.locator('.ytb-hs-thumb')).toHaveAttribute('title', 'Buddy Keeper\nKeeper Channel');
-		await expect(keeper.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Keeper\nKeeper Channel');
+		await expect(keeper.locator('.ytb-hs-thumb')).toHaveAttribute('title', 'Buddy Keeper\nby Keeper Channel');
+		await expect(keeper.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Keeper\nby Keeper Channel');
 		// No stored channel: looked up once from YouTube's oEmbed.
 		const dismissed = cards.filter({ hasText: 'Buddy Dismissed' });
-		await expect(dismissed.locator('.ytb-hs-thumb')).toHaveAttribute('title', 'Buddy Dismissed\nLooked Up Channel');
-		await expect(dismissed.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Dismissed\nLooked Up Channel');
+		await expect(dismissed.locator('.ytb-hs-thumb')).toHaveAttribute('title', 'Buddy Dismissed\nby Looked Up Channel');
+		await expect(dismissed.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Dismissed\nby Looked Up Channel');
 		expect(oembedCalls).toHaveLength(1);
 		expect(oembedCalls[0]).toContain(encodeURIComponent('https://www.youtube.com/watch?v=vid-dismiss'));
 		// No custom hover card on Recommended cards.
