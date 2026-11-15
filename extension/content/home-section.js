@@ -1764,8 +1764,8 @@
         position: fixed;
         left: 0; top: 0;
         box-sizing: border-box;
-        width: 170px;
-        padding: 5px 5px 8px; /* extra bottom room: the text sits between the rounded corners */
+        width: 176px;
+        padding: var(--ytb-sp-2); /* = r-lg - r-sm, so the thumbnail's corners nest concentrically */
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
@@ -1783,7 +1783,7 @@
       #${OVERLAY_ID} .ytb-hs-hovercard-thumb {
         display: block;
         width: 100%; aspect-ratio: 16 / 9;
-        border-radius: 8px;
+        border-radius: var(--ytb-r-sm);
         object-fit: cover;
         background: var(--ytb-surface-sunk);
       }
