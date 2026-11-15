@@ -3689,9 +3689,9 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(card).toBeVisible();
 		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
 		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('My Channel');
-		await expect(card).toHaveCSS('width', '170px');
-		// Extra bottom room keeps the last text line clear of the rounded corners.
-		await expect(card).toHaveCSS('padding', '5px 5px 8px');
+		await expect(card).toHaveCSS('width', '176px');
+		// Equal padding on every side, so the card reads symmetrical.
+		await expect(card).toHaveCSS('padding', '8px');
 		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
 		// The card follows the cursor, so it must never eat the hover under it.
 		await expect(card).toHaveCSS('pointer-events', 'none');
