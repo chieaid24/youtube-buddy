@@ -236,7 +236,7 @@
 		composer.append(head);
 
 		// Sharing does not gate Note writes (CONTEXT.md): the form always builds in a Room.
-		buildForm(composer, config, timestamp);
+		const syncDraft = buildForm(composer, config, timestamp);
 
 		// Keep interactions inside the composer: no player seeks/pauses or outside-click dismissal.
 		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'click', 'dblclick']) {
@@ -247,6 +247,7 @@
 		// Hover-scoped Controls Hold; closeComposer releases any hold still live on close.
 		holdRelease = YTB.bindHoverHold(composer);
 		positionComposer(composer, button);
+		syncDraft(); // a detached textarea measures 0, so size it once laid out
 		composer.querySelector('textarea')?.focus();
 	}
 
@@ -301,7 +302,6 @@
 			const line = parseFloat(getComputedStyle(textarea).lineHeight) || 18;
 			textarea.style.height = Math.min(textarea.scrollHeight, line * 2 + 16) + 'px';
 		}
-		syncDraft();
 
 		function setPending(value) {
 			pending = value;
@@ -377,6 +377,7 @@
 			}
 		});
 		post.addEventListener('click', () => submit({ kind: 'text', body: textarea.value.trim() }));
+		return syncDraft;
 	}
 
 	function ensureButton() {

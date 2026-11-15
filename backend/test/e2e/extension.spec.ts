@@ -3120,11 +3120,16 @@ test('past the Note limit the composer flags the field instead of showing a coun
 				{ intervals: [150] },
 			);
 
-		// No counter.
+		// No counter, and the field opens at its resting height (it used to open
+		// collapsed, measured before the composer was attached).
 		await page.locator('#ytb-note-button').click();
 		await expect(textarea).toBeFocused();
 		await expect(composer.locator('.ytb-note-meta')).toHaveCount(0);
 		await expect(composer).not.toContainText('100');
+		const restHeight = await textarea.evaluate((t: HTMLTextAreaElement) => t.offsetHeight);
+		expect(restHeight).toBeGreaterThan(30);
+		await page.keyboard.type('h');
+		expect(await textarea.evaluate((t: HTMLTextAreaElement) => t.offsetHeight)).toBe(restHeight);
 
 		const danger = await page.evaluate(() => {
 			const probe = document.createElement('i');
