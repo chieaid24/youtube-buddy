@@ -97,7 +97,7 @@
 
 		// The Buddy Color as TEXT ink on an opaque card surface: raw fills miss
 		// WCAG AA as small text, so blend toward the theme ink; over-video text,
-		// dots, markers, and swatches keep the raw buddyColor.
+		// dots, and swatches keep the raw buddyColor.
 		buddyTextColor(clientId, code = YTB._activeRoomCode) {
 			return `color-mix(in oklab, ${YTB.buddyColor(clientId, code)} 50%, var(--ytb-ink))`;
 		},

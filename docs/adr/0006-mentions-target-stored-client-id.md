@@ -7,7 +7,7 @@ The Room Feed must show a member when they are @mentioned in a Note or Reply. Th
 
 We chose **(b)**.
 
-Text matching is ambiguous and brittle: two members named "bob" both light up on `@bob`; a mention silently breaks the moment either party renames; and a blank-name member cannot be mentioned at all. Storing the Client ID makes a Mention mean exactly one person, survives renames, and works for blank-name members. The authoring experience stays natural — type `@`, fuzzy-search a roster of current Room members shown below the field, pick one — so the inline text can still render `@Bob` while the durable target is the opaque Client ID. The roster is the Room's current membership, already derivable on the client (the union of presence / progress / note / reply / event Client IDs) together with each member's latest Display Name.
+Text matching is ambiguous and brittle: two members named "bob" both light up on `@bob`; a mention silently breaks the moment either party renames; and a blank-name member cannot be mentioned at all. Storing the Client ID makes a Mention mean exactly one person, survives renames, and works for blank-name members. The authoring experience stays natural — type `@`, fuzzy-search a roster of current Room members shown below the field, pick one — so the inline text can still render `@Bob` while the durable target is the opaque Client ID. The roster is the Room's current membership, already derivable on the client (the union of presence / watched / note / reply / event Client IDs) together with each member's latest Display Name.
 
 ## Consequences
 

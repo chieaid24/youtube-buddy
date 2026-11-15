@@ -1,8 +1,8 @@
 # Note deletion requires a clientId ownership check
 
-Every other write in this app trusts the caller completely: the Room Code is the only access control, and `DELETE /member` lets anyone holding the code remove any member's presence and Progress Records, no ownership check. Deleting a Note breaks that pattern: `DELETE /notes` requires the requester's `clientId` to match the Note's stored author `clientId`, returning 403 otherwise.
+Every other write in this app trusts the caller completely: the Room Code is the only access control, and `DELETE /member` lets anyone holding the code remove any member's presence and Watch Records, no ownership check. Deleting a Note breaks that pattern: `DELETE /notes` requires the requester's `clientId` to match the Note's stored author `clientId`, returning 403 otherwise.
 
-The difference is what's being deleted. Progress Records and presence rows are ephemeral, machine-written state that gets regenerated the next time you watch or open a tab — an errant deletion by a misbehaving Buddy's client is a non-event. A Note is authored content a specific person chose to write; letting anyone in the Room silently delete anyone else's Notes turns a small annoyance (mis-set spoiler flag) into content loss with no recovery. The MVP's "author can delete, no edit" lifecycle decision (see the Notes PRD) only makes sense if delete is actually scoped to the author.
+The difference is what's being deleted. Watch Records and presence rows are ephemeral, machine-written state that gets regenerated the next time you watch or open a tab — an errant deletion by a misbehaving Buddy's client is a non-event. A Note is authored content a specific person chose to write; letting anyone in the Room silently delete anyone else's Notes turns a small annoyance (mis-set spoiler flag) into content loss with no recovery. The MVP's "author can delete, no edit" lifecycle decision (see the Notes PRD) only makes sense if delete is actually scoped to the author.
 
 ## Consequences
 

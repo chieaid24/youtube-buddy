@@ -81,10 +81,9 @@ We chose **(b)**, and we replaced the seek-and-open arrival with a **pulse**.
   command to jump. Pausing you at your own place, with the destination visibly pulsing, lets
   you choose — and preserves the Spoiler contract, which a forced seek to the Note's
   timestamp would quietly break by unlocking it.
-- Omitting `&t=` rather than seeking to your own Progress Record keeps the extension out of
-  playback positioning entirely. YouTube already owns "where was I", it is authoritative for
-  the signed-in viewer, and a Progress Record can be absent (Sharing off) or staler than
-  YouTube's own memory.
+- Omitting `&t=` keeps the extension out of playback positioning entirely. YouTube already
+  owns "where was I" and is authoritative for the signed-in viewer; the extension stores no
+  watch position at all.
 - Acknowledging on hover — even where hover reveals only a Reply _count_, or leaves a
   Spoiler masked — is deliberate. The pulse's job is to catch the eye, not to prove the
   message was read. One uniform rule on visually identical dots beats a truer rule the
