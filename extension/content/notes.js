@@ -4,8 +4,8 @@
 // (ADR-0010; CONTEXT.md). Renders/Acknowledges nothing while Notes off.
 // Class names + stylesheet in notes-style.js; notification stack in
 // notes-alerts.js; theme.js isolates Reply-textarea keys as `ytb:keydown`.
-// Pure consumer (ADR-0001): content.js owns nav/mutation, renderer.js owns
-// Room polling (`ytb:room-data`), composer.js hands posts via `ytb:note-posted`.
+// Pure consumer (ADR-0001): content.js owns nav/mutation, room-poller.js
+// owns Room polling (`ytb:room-data`), composer.js hands posts via `ytb:note-posted`.
 
 (function () {
 	'use strict';
@@ -121,7 +121,13 @@
 	document.addEventListener('ytb:room-data', (event) => {
 		const detail = (event && event.detail) || {};
 		myClientId = detail.myClientId || myClientId;
+		// A failed read is not truth: keep the same Room's last Notes (Connection Lost).
+		const failedRead = Boolean(detail.roomCode) && !detail.ok && !detail.locked && detail.roomCode === activeRoomCode;
 		activeRoomCode = detail.roomCode || '';
+		if (failedRead) {
+			syncSeenState(detail);
+			return;
+		}
 		roster = YTB.roomRoster(detail);
 
 		// Reconcile by server id: a locally inserted Note and the next Room read
@@ -1008,8 +1014,7 @@
 		if (panelHost) positionPanel(panelHost);
 	}
 
-	// The bottom of the panel: Reply composer, or the Reply-cap state. Sharing
-	// does not gate Reply writes (CONTEXT.md).
+	// The bottom of the panel: Reply composer, or the Reply-cap state.
 	function updateReplyArea(panel, note, count) {
 		const area = panel.querySelector('.ytb-panel-reply-area');
 		if (!area) return;
