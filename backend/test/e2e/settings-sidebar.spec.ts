@@ -87,7 +87,7 @@ for (const theme of ['light', 'dark']) {
 				await panel.getByRole('button', { name: 'Copy Room Code' }).click();
 				await expect(panel.getByRole('status')).toHaveText('Copied');
 				await capture('copied-code');
-				await panel.getByRole('button', { name: 'Close the Buddy Room panel' }).click();
+				await panel.getByRole('button', { name: 'Close', exact: true }).click();
 				await page.mouse.move(10, 550);
 				await page.mouse.wheel(0, 500);
 				await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
@@ -151,7 +151,7 @@ test('Room Home blocks background scrolling until every close path releases it',
 			await page.mouse.wheel(0, 500);
 			await page.waitForTimeout(200);
 			expect(await page.evaluate(() => window.scrollY), close).toBe(start);
-			if (close === 'button') await page.getByRole('button', { name: 'Close the Buddy Room panel' }).click();
+			if (close === 'button') await page.getByRole('button', { name: 'Close', exact: true }).click();
 			if (close === 'escape') await page.keyboard.press('Escape');
 			if (close === 'scrim') await page.mouse.click(10, 550);
 			if (close === 'navigation')

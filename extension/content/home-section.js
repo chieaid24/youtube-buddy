@@ -276,8 +276,8 @@
 		close.type = 'button';
 		close.className = 'ytb-hs-close';
 		close.append(YTBTheme.icon('close'));
-		close.title = 'Close the Buddy Room panel';
-		close.setAttribute('aria-label', 'Close the Buddy Room panel');
+		close.title = 'Close';
+		close.setAttribute('aria-label', 'Close');
 		close.addEventListener('click', () => setOpen(false));
 		return close;
 	}
