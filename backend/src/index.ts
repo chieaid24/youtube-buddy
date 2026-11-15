@@ -9,15 +9,15 @@ import {
 	recordRoomEvent,
 	roomHasCapacityFor,
 } from './storage';
-import type { Env, LogContext, NoteBody, PlaylistBody, PresenceBody, ProgressBody, ReplyBody } from './types';
+import type { Env, LogContext, NoteBody, PlaylistBody, PresenceBody, ReplyBody, WatchedBody } from './types';
 import {
 	isValidClientId,
 	isValidKeySegment,
 	sanitizeVideoContext,
-	validate,
 	validateNote,
 	validatePlaylist,
 	validateReply,
+	validateWatched,
 } from './validation';
 
 export default {
@@ -66,7 +66,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 400, 'validation', 'missing or invalid field: clientId');
 		}
 
-		// A presence row reserves a Room slot just like a progress row.
+		// A presence row reserves a Room slot just like any other member record.
 		if (!(await roomHasCapacityFor(env, prefix, body.clientId))) {
 			return fail(log, 409, 'room_full', 'room full');
 		}
@@ -84,7 +84,7 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ ok: true });
 	}
 
-	// Leaving a Room removes the member completely: presence, Progress Records, Notes (with conversations), and
+	// Leaving a Room removes the member completely: presence, Watch Records, Notes (with conversations), and
 	// Replies under others' Notes, across every listing page; deleting absent keys is idempotent.
 	if (req.method === 'DELETE' && path === '/member') {
 		const clientId = url.searchParams.get('clientId');
@@ -291,9 +291,11 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 		return json({ note: JSON.parse(noteRaw), replies: await listReplies(env, prefix, noteId) });
 	}
 
-	if (req.method === 'POST' && path === '/') {
-		const body = (await req.json()) as Partial<ProgressBody>;
-		const error = validate(body);
+	// Watch Record: a member started a video (`${code}:watched:${clientId}:${videoId}`) - who, which video, and
+	// when, never a position. Written once: a repeat is a no-op, so watchedAt stays the first watch until the TTL.
+	if (req.method === 'POST' && path === '/watched') {
+		const body = (await req.json()) as Partial<WatchedBody>;
+		const error = validateWatched(body);
 		if (error) {
 			return fail(log, 400, 'validation', error);
 		}
@@ -303,46 +305,36 @@ async function route(req: Request, env: Env, url: URL, log: LogContext): Promise
 			return fail(log, 409, 'room_full', 'room full');
 		}
 
-		// updatedAt is server-authoritative - never trust the client's value.
-		const key = `${prefix}${body.clientId}:${body.videoId}`;
-		const record = {
-			clientId: body.clientId,
-			name: body.name ?? '',
-			videoId: body.videoId,
-			timestamp: body.timestamp,
-			duration: body.duration,
-			updatedAt: Date.now(),
-		};
-		await env.PROGRESS.put(key, JSON.stringify(record), {
-			expirationTtl: TTL_SECONDS,
-		});
+		const key = `${prefix}watched:${body.clientId}:${body.videoId}`;
+		if ((await env.PROGRESS.get(key)) === null) {
+			// watchedAt is server-authoritative.
+			const record = { clientId: body.clientId, videoId: body.videoId, watchedAt: Date.now() };
+			await env.PROGRESS.put(key, JSON.stringify(record), { expirationTtl: TTL_SECONDS });
+		}
 		return json({ ok: true });
 	}
 
 	if (req.method === 'GET' && path === '/') {
-		// One prefix scan over every kind, partitioned by key shape: presence/note/reply/playlist/event infixes
-		// route to their bucket, everything else is a progress key (`${code}:${id}:${videoId}`). Replies ride
-		// along so the client can pair them with parent Notes and show Reply counts on Note Previews.
+		// One prefix scan over every kind, partitioned by the key's kind infix. Replies ride along so the client
+		// can pair them with parent Notes and show Reply counts on Note Previews.
 		const list = await env.PROGRESS.list({ prefix });
-		const progress: unknown[] = [];
+		const watched: unknown[] = [];
 		const presence: unknown[] = [];
 		const notes: unknown[] = [];
 		const replies: unknown[] = [];
 		const playlist: unknown[] = [];
 		const events: unknown[] = [];
-		const buckets: Record<string, unknown[]> = { presence, note: notes, reply: replies, playlist, event: events };
+		const buckets: Record<string, unknown[]> = { watched, presence, note: notes, reply: replies, playlist, event: events };
 		await Promise.all(
 			list.keys.map(async (k) => {
-				const value = await env.PROGRESS.get(k.name);
-				if (value === null) return;
 				const kind = k.name.slice(prefix.length).split(':')[0];
-				// Only the five reserved kinds have their own bucket; everything else is a progress clientId.
-				// hasOwn guards against a clientId matching an inherited Object property name (e.g. "toString").
-				const bucket = Object.hasOwn(buckets, kind) ? buckets[kind] : progress;
-				bucket.push(JSON.parse(value));
+				// hasOwn: an unknown kind must not resolve an inherited Object property (e.g. "toString").
+				if (!Object.hasOwn(buckets, kind)) return;
+				const value = await env.PROGRESS.get(k.name);
+				if (value !== null) buckets[kind].push(JSON.parse(value));
 			}),
 		);
-		return json({ progress, presence, notes, replies, playlist, events });
+		return json({ watched, presence, notes, replies, playlist, events });
 	}
 
 	return fail(log, 405, 'not_allowed', 'method not allowed');

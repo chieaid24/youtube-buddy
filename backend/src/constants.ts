@@ -22,9 +22,9 @@ export const MAX_PLAYLIST_ITEMS = 30;
 export const MAX_EVENTS = 50;
 
 // Every caller-controlled value in a colon-delimited KV key must be one bounded segment; Client IDs also can't
-// equal a record-kind infix, since progress/member ops place them in the first segment.
+// equal a record-kind infix, so a member id can never be read as a kind.
 export const KEY_SEGMENT_MAX_CHARS = 128;
-export const RESERVED_KEY_KINDS = new Set(['presence', 'note', 'reply', 'playlist', 'event']);
+export const RESERVED_KEY_KINDS = new Set(['presence', 'watched', 'note', 'reply', 'playlist', 'event']);
 
 // Video title or channel captured at write time (Playlist Item at add, Note at post); YouTube titles top out
 // ~100 chars, so this only rejects abuse.

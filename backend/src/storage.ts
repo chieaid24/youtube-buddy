@@ -2,9 +2,8 @@ import { MAX_EVENTS, MAX_MEMBERS, TTL_SECONDS } from './constants';
 import type { Env } from './types';
 
 // Whether a Client ID may write into the Room: returning members keep their slot, a brand-new one needs the
-// distinct count below MAX_MEMBERS. Member id is read from the key name alone (segments never contain ':',
-// Client IDs never equal a reserved infix); playlist/event keys carry no member id, so those few (capped)
-// values are read for addedBy/actorClientId. KV's eventual consistency (no transactions) can momentarily
+// distinct count below MAX_MEMBERS. Member id is read from the key name alone (segments never contain ':');
+// playlist/event keys carry no member id, so those few (capped) values are read for addedBy/actorClientId. KV's eventual consistency (no transactions) can momentarily
 // admit a 6th member on a race or truncated listing - acceptable for a friends-only weak-secret app.
 export async function roomHasCapacityFor(env: Env, prefix: string, clientId: string): Promise<boolean> {
 	const existing = await env.PROGRESS.list({ prefix });
@@ -16,7 +15,8 @@ export async function roomHasCapacityFor(env: Env, prefix: string, clientId: str
 			valueReads.push(k.name);
 			continue;
 		}
-		members.add(parts[0] === 'reply' ? parts[2] : parts[0] === 'presence' || parts[0] === 'note' ? parts[1] : parts[0]);
+		if (parts[0] === 'reply') members.add(parts[2]);
+		else if (parts[0] === 'presence' || parts[0] === 'watched' || parts[0] === 'note') members.add(parts[1]);
 	}
 	await Promise.all(
 		valueReads.map(async (name) => {
@@ -88,7 +88,7 @@ export async function deleteMember(env: Env, prefix: string, clientId: string): 
 		replyKeys.filter((name) => name.slice(prefix.length).split(':')[2] === clientId).map((name) => env.PROGRESS.delete(name)),
 	);
 
-	await deleteKeysWithPrefix(env, `${prefix}${clientId}:`);
+	await deleteKeysWithPrefix(env, `${prefix}watched:${clientId}:`);
 	await env.PROGRESS.delete(`${prefix}presence:${clientId}`);
 	await deleteKeysWithPrefix(env, `${prefix}note:${clientId}:`);
 }

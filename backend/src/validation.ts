@@ -1,16 +1,9 @@
 import { KEY_SEGMENT_MAX_CHARS, MAX_MEMBERS, NOTE_EMOJIS, NOTE_MAX_CHARS, RESERVED_KEY_KINDS, TITLE_MAX_CHARS } from './constants';
-import type { NoteBody, PlaylistBody, ProgressBody, ReplyBody } from './types';
+import type { NoteBody, PlaylistBody, ReplyBody, WatchedBody } from './types';
 
-// name is intentionally not required: Display Name is optional (blank still shares; consumers fall back to a
-// stable "<Adjective> Buddy" derived from clientId, see YTB.buddyName); missing/empty is coerced to "" on store.
-export function validate(body: Partial<ProgressBody>): string | null {
+export function validateWatched(body: Partial<WatchedBody>): string | null {
 	if (!isValidClientId(body.clientId)) return 'missing or invalid field: clientId';
 	if (!isValidKeySegment(body.videoId)) return 'missing or invalid field: videoId';
-	for (const field of ['timestamp', 'duration'] as const) {
-		if (typeof body[field] !== 'number' || !Number.isFinite(body[field])) {
-			return `missing or invalid field: ${field}`;
-		}
-	}
 	return null;
 }
 
