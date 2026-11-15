@@ -3542,6 +3542,20 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		// videoIds would 404 there and fail the console-error gate.
 		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		// Buddy Pick captured no channel, so its lookup is held until its card is open.
+		let releaseLookup = () => {};
+		const lookupHeld = new Promise<void>((resolve) => {
+			releaseLookup = resolve;
+		});
+		await context.route('https://www.youtube.com/oembed**', async (route) => {
+			const live = route.request().url().includes(encodeURIComponent('https://www.youtube.com/watch?v=vid-live'));
+			if (live) await lookupHeld;
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(live ? { author_name: 'Looked Up Channel' } : {}),
+			});
+		});
 		await seedPairedRoom(context);
 
 		const page = await context.newPage();
@@ -3611,12 +3625,24 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
 		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('My Channel');
 		await expect(card).toHaveCSS('width', '170px');
+		// Extra bottom room keeps the last text line clear of the rounded corners.
+		await expect(card).toHaveCSS('padding', '5px 5px 8px');
 		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
 		// The card follows the cursor, so it must never eat the hover under it.
 		await expect(card).toHaveCSS('pointer-events', 'none');
 		// Leaving the link hides it again.
 		await page.locator('#ytb-home-section .ytb-hs-title').hover();
 		await expect(card).toBeHidden();
+
+		// No captured channel: it is looked up from YouTube's oEmbed, and a lookup
+		// landing while the card is open fills the channel in.
+		await recipient.locator('a.ytb-hs-title-link').hover();
+		await expect(card).toBeVisible();
+		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('Buddy Pick');
+		await expect(card.locator('.ytb-hs-hovercard-detail')).toBeHidden();
+		releaseLookup();
+		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('Looked Up Channel');
+		await expect(card).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {

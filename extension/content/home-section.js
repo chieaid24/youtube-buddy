@@ -375,7 +375,16 @@
 	function attachVideoHover(el, videoId, title, channel) {
 		const recommendation = lastDetail?.playlist?.find((item) => item.videoId === videoId);
 		const plan = YTB.videoHoverCard(videoId, title, channel || recommendation?.channel);
-		return plan ? attachHoverCard(el, plan) : el;
+		if (!plan) return el;
+		// No captured channel: look it up up front so the card rarely grows while shown.
+		if (!plan.detail) {
+			YTB.videoChannel(videoId).then((found) => {
+				if (!found) return;
+				plan.detail = found;
+				if (hoverOwner === el) showHoverCard(el, plan);
+			});
+		}
+		return attachHoverCard(el, plan);
 	}
 
 	function attachHoverCard(el, plan) {
@@ -1756,7 +1765,7 @@
         left: 0; top: 0;
         box-sizing: border-box;
         width: 170px;
-        padding: 5px;
+        padding: 5px 5px 8px; /* extra bottom room: the text sits between the rounded corners */
         border: 1px solid var(--ytb-line);
         border-radius: var(--ytb-r-lg);
         background: var(--ytb-surface);
