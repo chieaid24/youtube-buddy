@@ -166,8 +166,8 @@
 			}
 		},
 
-		// A video's channel name from YouTube's oEmbed, for Recommendations recorded without one;
-		// '' when unknown. Cached per video; a network failure isn't cached, so a later hover retries.
+		// A video's channel name from YouTube's oEmbed, for records captured without one;
+		// '' when unknown. Cached per video; a network failure isn't cached, so a later render retries.
 		videoChannel(videoId) {
 			if (!videoId) return Promise.resolve('');
 			const cached = channelLookups.get(videoId);
