@@ -5,7 +5,7 @@
 The Shared Playlist (ADR-0005) was one communal Room-level list that any member curates
 freely. We are reframing it as directional **Recommendations**: any member recommends a
 video "to all Buddies" using the same "+ Buddy Room" control, and each viewer's
-**Recommended for you** list shows videos recommended by _others_. A member's own
+**Recommended to you** list shows videos recommended by _others_. A member's own
 recommendations are deliberately hidden from their own grid (you do not recommend to
 yourself). The existing "Watched by ..." attribution is unchanged.
 
@@ -61,7 +61,7 @@ We chose **(b)**, with a client-local dismiss layer.
 ## Consequences
 
 - This **supersedes the "Shared Playlist" framing of ADR-0005**: the Room Home Section's
-  playlist surface becomes "Recommended for you". Backend KV infixes (`playlist:`, `event:`)
+  playlist surface becomes "Recommended to you". Backend KV infixes (`playlist:`, `event:`)
   and the `YTB` API names are **retained** (no data migration); only the domain terms and
   semantics change.
 - A recommender manages and removes their own recommendations **only from the watch page**

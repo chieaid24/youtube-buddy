@@ -3413,7 +3413,7 @@ test('the Recommend Celebration honors prefers-reduced-motion: the label still s
 	}
 });
 
-test('Recommended for you grid hides own items; Dismiss is local-only and survives reload', async () => {
+test('Recommended to you grid hides own items; Dismiss is local-only and survives reload', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -3461,7 +3461,7 @@ test('Recommended for you grid hides own items; Dismiss is local-only and surviv
 		const section = page.locator('#ytb-home-section');
 		const cards = section.locator('.ytb-hs-card');
 		await nudgeUntil(page, () => expect(cards).toHaveCount(2, { timeout: 700 }));
-		await expect(section).toContainText('Recommended for you');
+		await expect(section).toContainText('Recommended to you');
 		await expect(section).not.toContainText('Shared Playlist');
 		await expect(section).not.toContainText('My Own Pick');
 
