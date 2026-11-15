@@ -2183,27 +2183,23 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 		expect(s.currentTime).toBeCloseTo(1, 1);
 		expect(s.paused).toBe(true);
 
-		// Go here is labelled without the "@time" suffix (the moment lives in its
-		// aria-label instead).
-		const goHere = panel.locator('.ytb-panel-gohere');
-		await expect(goHere).toHaveText('Go here');
-		await expect(goHere).toHaveAttribute('aria-label', /before 0:04/);
-
-		// Go here is the only seek: it jumps to ~1s before the Note (goHereTarget(4)
-		// = 3) and resumes play; the play event then closes the panel.
-		await goHere.click();
+		const timestamp = panel.getByRole('link', { name: 'Go to timestamp 0:04' });
+		await expect(panel.locator('.ytb-panel-gohere')).toHaveCount(0);
+		await expect(timestamp).toHaveText('@0:04');
+		await expect(timestamp).toHaveAttribute('title', 'Go to timestamp');
+		await timestamp.hover();
+		expect(await timestamp.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('underline');
+		await timestamp.click();
 		await expect.poll(async () => (await state()).paused).toBe(false);
 		s = await state();
 		expect(s.currentTime).toBeGreaterThanOrEqual(2.7);
 		expect(s.currentTime).toBeLessThan(4);
 		await expect(panel).toHaveCount(0);
 
-		// Go here is omitted when the paused playhead already sits within 2s of the
-		// moment: parked at t=4 (the text Note's own timestamp) there is nowhere to go.
 		await parkAt(4);
 		await page.locator('.ytb-note-dot-text').click();
 		await expect(panel).toBeVisible();
-		await expect(panel.locator('.ytb-panel-gohere')).toHaveCount(0);
+		await expect(timestamp).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -2414,7 +2410,6 @@ test('Expanded Note prose selects, while overlay-origin drags leave both overlay
 		]) {
 			expect(await userSelect(selector), selector).toBe('text');
 		}
-		expect(await userSelect('.ytb-panel-gohere')).toBe('none');
 
 		// A double-click selects the Note body as normal prose.
 		await panel.locator('.ytb-panel-body').dblclick({ position: { x: 10, y: 10 } });
@@ -3082,6 +3077,192 @@ test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native,
 		expect(notePosts()).toHaveLength(2);
 		await page.locator('#ytb-note-button').click();
 		await expect(textarea).toHaveValue('');
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('past the Note limit the composer flags the field instead of showing a counter', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, { notes: roomNotes });
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+		await seedPairedRoom(context);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+
+		const composer = page.locator('#ytb-note-composer');
+		const textarea = composer.locator('textarea');
+		const flagged = /ytb-over-limit/;
+		const style = (property: 'borderColor' | 'animationName') => textarea.evaluate((t, key) => getComputedStyle(t)[key], property);
+		// Each blocked key re-arms the hold, so the outline outlasts its own transition.
+		const settledBorder = () =>
+			expect.poll(
+				async () => {
+					await page.keyboard.press('x');
+					return style('borderColor');
+				},
+				{ intervals: [150] },
+			);
+
+		// No counter, and the field opens at its resting height (it used to open
+		// collapsed, measured before the composer was attached).
+		await page.locator('#ytb-note-button').click();
+		await expect(textarea).toBeFocused();
+		await expect(composer.locator('.ytb-note-meta')).toHaveCount(0);
+		await expect(composer).not.toContainText('100');
+		const restHeight = await textarea.evaluate((t: HTMLTextAreaElement) => t.offsetHeight);
+		expect(restHeight).toBeGreaterThan(30);
+		await page.keyboard.type('h');
+		expect(await textarea.evaluate((t: HTMLTextAreaElement) => t.offsetHeight)).toBe(restHeight);
+
+		const danger = await page.evaluate(() => {
+			const probe = document.createElement('i');
+			probe.style.color = 'var(--ytb-danger-text)';
+			document.body.append(probe);
+			const color = getComputedStyle(probe).color;
+			probe.remove();
+			return color;
+		});
+		await textarea.evaluate((t: HTMLTextAreaElement) => {
+			t.addEventListener('animationstart', (event) => {
+				if (event.animationName === 'ytb-limit-shake') t.dataset.shakes = String(Number(t.dataset.shakes ?? 0) + 1);
+			});
+		});
+
+		// Reaching the limit is not an overflow.
+		const full = 'a'.repeat(99) + 'b';
+		await textarea.fill('a'.repeat(99));
+		await page.keyboard.type('b');
+		await expect(textarea).toHaveValue(full);
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// A burst of blocked keys: nothing lands, the outline turns danger, and
+		// the field shakes once. The flag clears itself; the next attempt shakes again.
+		await page.keyboard.type('ccc');
+		await expect(textarea).toHaveClass(flagged);
+		await expect(textarea).toHaveValue(full);
+		expect(await style('animationName')).toBe('ytb-limit-shake');
+		await settledBorder().toBe(danger);
+		await expect(textarea).not.toHaveClass(flagged);
+		await expect(textarea).toHaveAttribute('data-shakes', '1');
+		await page.keyboard.press('c');
+		await expect(textarea).toHaveClass(flagged);
+		await expect(textarea).toHaveAttribute('data-shakes', '2');
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// Typing over a selection frees its room first.
+		await page.keyboard.press('ControlOrMeta+A');
+		await page.keyboard.type('z');
+		await expect(textarea).toHaveValue('z');
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// Paste: a CRLF lands as one character, so this fits exactly; the next
+		// paste is dropped whole and flags.
+		await textarea.fill('a'.repeat(97));
+		await page.evaluate(() => navigator.clipboard.writeText('1\r\n2'));
+		await page.keyboard.press('ControlOrMeta+V');
+		await expect(textarea).toHaveValue('a'.repeat(97) + '1\n2');
+		await expect(textarea).not.toHaveClass(flagged);
+		await page.keyboard.press('ControlOrMeta+V');
+		await expect(textarea).toHaveClass(flagged);
+		await expect(textarea).toHaveValue('a'.repeat(97) + '1\n2');
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// IME text may overflow while composing; only a commit that gets cut flags.
+		const cdp = await context.newCDPSession(page);
+		await textarea.fill('a'.repeat(98));
+		await cdp.send('Input.imeSetComposition', { text: 'nihon', selectionStart: 5, selectionEnd: 5 });
+		await expect(textarea).toHaveValue('a'.repeat(98) + 'nihon');
+		await expect(textarea).not.toHaveClass(flagged);
+		await cdp.send('Input.insertText', { text: 'nihon' });
+		await expect(textarea).toHaveValue('a'.repeat(98) + 'ni');
+		await expect(textarea).toHaveClass(flagged);
+		await expect(textarea).not.toHaveClass(flagged);
+		await textarea.fill('');
+		await cdp.send('Input.imeSetComposition', { text: 'ok', selectionStart: 2, selectionEnd: 2 });
+		await cdp.send('Input.insertText', { text: 'ok' });
+		await expect(textarea).toHaveValue('ok');
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// Reduced motion keeps the outline and drops the shake.
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await textarea.fill(full);
+		await page.keyboard.press('c');
+		await expect(textarea).toHaveClass(flagged);
+		expect(await style('animationName')).toBe('none');
+		await settledBorder().toBe(danger);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('an overflowing Mention is refused whole, and the Reply box flags its limit like the composer', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(context, { notes: roomNotes }, calls);
+		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		await seedPairedRoom(context);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot')).toHaveCount(3, { timeout: 700 }));
+
+		const composer = page.locator('#ytb-note-composer');
+		const textarea = composer.locator('textarea');
+		const option = page.locator('.ytb-mention-popover .ytb-mention-option');
+		const flagged = /ytb-over-limit/;
+
+		// "@Buddy " would land at 104 characters: the pick is refused, the draft
+		// stays as typed, and Enter did not fall through to posting.
+		await page.locator('#ytb-note-button').click();
+		await expect(textarea).toBeFocused();
+		const draft = 'a'.repeat(96) + ' @B';
+		await textarea.fill('a'.repeat(96) + ' ');
+		await page.keyboard.type('@B');
+		await expect(option).toHaveText('Buddy');
+		await page.keyboard.press('Enter');
+		await expect(textarea).toHaveClass(flagged);
+		await expect(textarea).toHaveValue(draft);
+		await expect(option).toHaveCount(0);
+		await expect(textarea).toBeFocused();
+		expect(calls.filter((call) => call.startsWith('POST') && call.includes('/notes'))).toEqual([]);
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// A Mention that fits still inserts.
+		await textarea.fill('hey ');
+		await page.keyboard.type('@B');
+		await expect(option).toHaveText('Buddy');
+		await page.keyboard.press('Enter');
+		await expect(textarea).toHaveValue('hey @Buddy ');
+		await expect(textarea).not.toHaveClass(flagged);
+
+		// The Reply box shares the limit and the nudge.
+		await page.keyboard.press('Escape');
+		await expect(composer).toHaveCount(0);
+		await page.locator('.ytb-note-dot-text').click();
+		const reply = page.locator('#ytb-note-panel .ytb-panel-reply-input');
+		await reply.fill('r'.repeat(100));
+		await page.keyboard.type('x');
+		await expect(reply).toHaveClass(flagged);
+		await expect(reply).toHaveValue('r'.repeat(100));
+		expect(await reply.evaluate((t) => getComputedStyle(t).animationName)).toBe('ytb-limit-shake');
+		await expect(reply).not.toHaveClass(flagged);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -3921,9 +4102,9 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await expect(card).toBeVisible();
 		await expect(card.locator('.ytb-hs-hovercard-label')).toHaveText('My Pick');
 		await expect(card.locator('.ytb-hs-hovercard-detail')).toHaveText('My Channel');
-		await expect(card).toHaveCSS('width', '170px');
-		// Extra bottom room keeps the last text line clear of the rounded corners.
-		await expect(card).toHaveCSS('padding', '5px 5px 8px');
+		await expect(card).toHaveCSS('width', '176px');
+		// Equal padding on every side, so the card reads symmetrical.
+		await expect(card).toHaveCSS('padding', '8px');
 		await expect(card.locator('.ytb-hs-hovercard-thumb')).toHaveAttribute('src', 'https://i.ytimg.com/vi/vid-own/mqdefault.jpg');
 		// The card follows the cursor, so it must never eat the hover under it.
 		await expect(card).toHaveCSS('pointer-events', 'none');

@@ -2,7 +2,8 @@
 // Injects the --ytb-* design tokens (DESIGN.md 1/2/4) and bundled Nunito
 // font, shared by popup.html and every on-video Note surface. Stamps the
 // Theme Preference (ADR-0008/0009) on <html>, isolates on-video keystrokes
-// from YouTube's capture-phase hotkeys, and exposes window.YTBTheme.icon().
+// from YouTube's capture-phase hotkeys, flags over-limit typing, and exposes
+// window.YTBTheme = { icon, nudgeLimit }.
 
 (function () {
 	'use strict';
@@ -186,6 +187,12 @@
 	opacity: 1;
 	transform: translateY(0);
 }
+/* Over-limit nudge (DESIGN.md 2): each limited field styles .ytb-over-limit. */
+@keyframes ytb-limit-shake {
+	25% { transform: translateX(-4px); }
+	50% { transform: translateX(3px); }
+	75% { transform: translateX(-2px); }
+}
 @media (prefers-reduced-motion: reduce) {
 	:root {
 		--ytb-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
@@ -314,5 +321,62 @@
 		);
 	}
 
-	window.YTBTheme = { icon };
+	// --- over-limit nudge for on-video YTB inputs ---
+	// maxLength drops overflow silently; flag the blocked attempt instead
+	// (DESIGN.md 2). The class holds until attempts pause, so a burst shakes once.
+
+	const OVER_LIMIT_CLASS = 'ytb-over-limit';
+	const OVER_LIMIT_HOLD_MS = 600;
+	const nudgeTimers = new WeakMap();
+
+	function nudgeLimit(field) {
+		clearTimeout(nudgeTimers.get(field));
+		field.classList.add(OVER_LIMIT_CLASS);
+		nudgeTimers.set(
+			field,
+			setTimeout(() => field.classList.remove(OVER_LIMIT_CLASS), OVER_LIMIT_HOLD_MS),
+		);
+	}
+
+	function limitedField(target) {
+		return target instanceof HTMLTextAreaElement && target.maxLength >= 0 && target.matches(GUARDED_INPUTS) ? target : null;
+	}
+
+	// Length left once the pending edit replaces the selection.
+	function keptLength(field) {
+		return field.value.length - (field.selectionEnd - field.selectionStart);
+	}
+
+	window.addEventListener(
+		'beforeinput',
+		(event) => {
+			const field = limitedField(event.target);
+			// IME text may overflow until it commits; compositionend judges it.
+			if (!field || event.isComposing || !event.inputType.startsWith('insert')) return;
+			// Null data is a line break; a pasted CRLF lands as one character.
+			const inserted = (event.data ?? '\n').replace(/\r\n/g, '\n').length;
+			if (keptLength(field) + inserted > field.maxLength) nudgeLimit(field);
+		},
+		true,
+	);
+
+	let imeKept = 0;
+	window.addEventListener(
+		'compositionstart',
+		(event) => {
+			const field = limitedField(event.target);
+			if (field) imeKept = keptLength(field);
+		},
+		true,
+	);
+	window.addEventListener(
+		'compositionend',
+		(event) => {
+			const field = limitedField(event.target);
+			if (field && imeKept + event.data.length > field.maxLength) nudgeLimit(field);
+		},
+		true,
+	);
+
+	window.YTBTheme = { icon, nudgeLimit };
 })();

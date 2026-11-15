@@ -313,16 +313,16 @@
          the Note Preview's corner timestamp). */
       .ytb-panel-time {
         position: absolute;
-        top: 12px;
+        top: 16px;
         right: 16px;   /* matches the panel's content inset (UA-024) */
         color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
       }
-      .ytb-panel-body { margin: 0; padding-right: 42px; font-size: 15px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+      .ytb-panel-body { margin: 4px 0 0; font-size: 15px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
       /* Locked Spoiler variant: the masked body, muted and italic like its preview. */
-      .ytb-panel-spoiler { margin: 0; padding-right: 42px; font-size: 15px; line-height: 1.4; font-weight: 600; font-style: italic; color: var(--ytb-ink-muted); }
+      .ytb-panel-spoiler { margin: 4px 0 0; font-size: 15px; line-height: 1.4; font-weight: 600; font-style: italic; color: var(--ytb-ink-muted); }
       /* Reaction variant: the large emoji with its author directly beneath. */
       .ytb-panel-emoji { font-size: 32px; line-height: 1.15; padding-right: 42px; }
       .ytb-panel-emoji-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
@@ -331,9 +331,9 @@
         align-items: baseline;
         justify-content: space-between;
         gap: 10px;
-        margin-top: 4px;
+        padding-right: 55px;
       }
-      .ytb-panel-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-panel-author { min-width: 0; overflow-wrap: anywhere; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-posted { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
       .ytb-panel-actions {
         display: flex;
@@ -342,26 +342,9 @@
         gap: 8px;
         margin-top: 12px;
       }
-      /* Go here: the one apricot primary in the panel. */
-      .ytb-panel-gohere {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 8px 12px;
-        border: 0;
-        border-radius: var(--ytb-r-pill);
-        background: var(--ytb-accent-500);
-        color: var(--ytb-on-accent);
-        font: 700 13px/1 var(--ytb-font);
-        cursor: pointer;
-        transition:
-          background var(--ytb-dur-quick) var(--ytb-ease-out),
-          transform var(--ytb-dur-quick) var(--ytb-ease-spring);
-      }
-      .ytb-panel-gohere:hover { background: var(--ytb-accent-600); }
-      .ytb-panel-gohere:active { transform: scale(0.97); }
-      .ytb-panel-gohere:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
-      .ytb-panel-gohere svg { width: 12px; height: 12px; }
+      .ytb-panel-time { text-decoration: none; cursor: pointer; }
+      .ytb-panel-time:hover { text-decoration: underline; }
+      .ytb-panel-time:focus-visible { outline: 2px solid var(--ytb-ring); outline-offset: 2px; }
       .ytb-panel-delete {
         padding: 6px 8px;
         border: 0;
@@ -384,8 +367,8 @@
       .ytb-panel-reply { padding: 8px 0 4px; }
       .ytb-panel-reply.ytb-new { animation: ytb-pop-in var(--ytb-dur-slow) var(--ytb-ease-spring); }
       .ytb-panel-reply-body { margin: 0; overflow-wrap: anywhere; }
-      .ytb-panel-reply-byline { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
-      .ytb-panel-reply-author { font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
+      .ytb-panel-reply-byline { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+      .ytb-panel-reply-author { min-width: 0; overflow-wrap: anywhere; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-reply-time { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
       .ytb-panel-reply-area { margin-top: 12px; }
       .ytb-panel-composer { position: relative; display: flex; align-items: flex-end; gap: 8px; }
@@ -407,6 +390,12 @@
       }
       .ytb-panel-reply-input::placeholder { color: var(--ytb-ink-faint); }
       .ytb-panel-reply-input:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
+      /* Over-limit nudge (theme.js); after :focus so it outranks the accent ring. */
+      .ytb-panel-reply-input.ytb-over-limit {
+        border-color: var(--ytb-danger-text);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 30%, transparent);
+        animation: ytb-limit-shake var(--ytb-dur-slow) var(--ytb-ease-out);
+      }
       /* Paper-plane send: springs in once the field is non-empty. */
       .ytb-panel-send {
         flex: 0 0 auto;
@@ -536,7 +525,7 @@
       }
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
-        .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        .ytb-panel-confirm, .ytb-panel-reply.ytb-new, .ytb-panel-reply-input.ytb-over-limit { animation: none; }
         /* The Cluster fan is a reachability affordance, not decoration - it
            still applies, just snapping instead of animating. */
         .${DOT_CLASS} { transition: none; }

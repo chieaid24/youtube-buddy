@@ -77,7 +77,15 @@
 			const label = YTB.buddyName(member.clientId, member.name, roster);
 			const text = '@' + label;
 			const value = textarea.value;
-			textarea.value = value.slice(0, token.start) + text + ' ' + value.slice(token.end);
+			const next = value.slice(0, token.start) + text + ' ' + value.slice(token.end);
+			// A Mention is never cut to fit: past the limit, refuse it whole.
+			if (textarea.maxLength >= 0 && next.length > textarea.maxLength) {
+				close();
+				textarea.focus();
+				YTBTheme.nudgeLimit(textarea);
+				return;
+			}
+			textarea.value = next;
 			const caret = token.start + text.length + 1;
 			textarea.setSelectionRange(caret, caret);
 			if (!picked.some((entry) => entry.clientId === member.clientId && entry.text === text)) {
@@ -85,7 +93,7 @@
 			}
 			close();
 			textarea.focus();
-			// Let the host recount characters / re-enable its post button.
+			// Let the host resize the field / re-enable its post button.
 			textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		}
 

@@ -130,8 +130,13 @@
       }
       #${COMPOSER_ID} textarea::placeholder { color: var(--ytb-ink-faint); }
       #${COMPOSER_ID} textarea:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
-      #${COMPOSER_ID} .ytb-note-meta { height: 18px; margin-top: 4px; text-align: right; color: var(--ytb-ink-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-      #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      /* Over-limit nudge (theme.js); after :focus so it outranks the accent ring. */
+      #${COMPOSER_ID} textarea.ytb-over-limit {
+        border-color: var(--ytb-danger-text);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 30%, transparent);
+        animation: ytb-limit-shake var(--ytb-dur-slow) var(--ytb-ease-out);
+      }
+      #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
       /* min-height keeps the Spoiler label a 24px hit target (UA-006). */
       #${COMPOSER_ID} label { display: flex; align-items: center; gap: 4px; min-height: 24px; font-size: 13px; font-weight: 600; color: var(--ytb-ink-muted); }
       #${COMPOSER_ID} input[type='checkbox'] { accent-color: var(--ytb-accent-600); }
@@ -156,11 +161,11 @@
       #${COMPOSER_ID} .ytb-note-off { margin: 0 0 8px; color: var(--ytb-ink-muted); font-size: 11px; font-weight: 600; }
       #${COMPOSER_ID}.is-notes-off .ytb-note-title { color: var(--ytb-ink-faint); }
       #${COMPOSER_ID}.is-notes-off .ytb-note-emoji:disabled { opacity: .4; filter: grayscale(1); }
-      #${COMPOSER_ID}.is-notes-off textarea, #${COMPOSER_ID}.is-notes-off .ytb-note-meta, #${COMPOSER_ID}.is-notes-off .ytb-note-foot { opacity: .5; }
+      #${COMPOSER_ID}.is-notes-off textarea, #${COMPOSER_ID}.is-notes-off .ytb-note-foot { opacity: .5; }
       /* The Recommend strip (playlist-add.js) bleeds to the card's edges as its footer band. */
       #${COMPOSER_ID} .ytb-recommend-strip { margin: 0 -16px -16px; }
       @media (prefers-reduced-motion: reduce) {
-        #${COMPOSER_ID} { animation: none; }
+        #${COMPOSER_ID}, #${COMPOSER_ID} textarea.ytb-over-limit { animation: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
@@ -247,7 +252,7 @@
 		}
 
 		// Sharing does not gate Note writes (CONTEXT.md): the form always builds in a Room.
-		const fitForm = buildForm(composer, config, timestamp, notesOff);
+		const syncDraft = buildForm(composer, config, timestamp, notesOff);
 		// The watch-page Recommend Control (playlist-add.js), live whatever Notes Visibility says.
 		if (window.YTBRecommend) composer.append(YTBRecommend.buildStrip());
 
@@ -266,10 +271,10 @@
 		}
 
 		host.append(composer);
-		fitForm(); // the textarea measures 0 until attached
 		// Hover-scoped Controls Hold; closeComposer releases any hold still live on close.
 		holdRelease = YTB.bindHoverHold(composer);
 		positionComposer(composer, button);
+		syncDraft(); // a detached textarea measures 0, so size it once laid out
 		// Notes off leaves the textarea disabled: focus the Recommend action, or Close when there is none.
 		const focusTarget = notesOff
 			? composer.querySelector('.ytb-recommend-strip button:not([hidden])') || close
@@ -307,8 +312,6 @@
 		textarea.disabled = disabled;
 		// Must attach before our keydown listener so an open popover consumes Enter/Escape first.
 		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
-		const counter = document.createElement('div');
-		counter.className = 'ytb-note-meta';
 
 		const foot = document.createElement('div');
 		foot.className = 'ytb-note-foot';
@@ -324,17 +327,15 @@
 		post.textContent = 'Post';
 		post.disabled = true;
 		foot.append(spoilerLabel, post);
-		composer.append(emojis, textarea, counter, foot, error);
+		composer.append(emojis, textarea, foot, error);
 
-		function updateMeta() {
-			counter.textContent = textarea.value.length + ' / ' + YTB.NOTE_MAX_CHARS;
+		function syncDraft() {
 			post.disabled = pending || textarea.value.trim() === '';
 			// One visual line that grows to at most two; never manually resizable.
 			textarea.style.height = 'auto';
 			const line = parseFloat(getComputedStyle(textarea).lineHeight) || 18;
 			textarea.style.height = Math.min(textarea.scrollHeight, line * 2 + 16) + 'px';
 		}
-		updateMeta();
 
 		function setPending(value) {
 			pending = value;
@@ -376,11 +377,11 @@
 			}
 			// Failure: keep the panel, the paused-state lease, and the draft.
 			setPending(false);
-			updateMeta();
+			syncDraft();
 			error.textContent = YTB.errorCopy(result.category, kind === 'emoji' ? 'reaction' : 'note');
 		}
 
-		textarea.addEventListener('input', updateMeta);
+		textarea.addEventListener('input', syncDraft);
 		// theme.js's guard swallows real keydowns (YouTube's hotkeys never see them) and
 		// re-dispatches as ytb:keydown with the original event in detail.
 		textarea.addEventListener('ytb:keydown', (event) => {
@@ -410,7 +411,7 @@
 			}
 		});
 		post.addEventListener('click', () => submit({ kind: 'text', body: textarea.value.trim() }));
-		return updateMeta;
+		return syncDraft;
 	}
 
 	function ensureButton() {

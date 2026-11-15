@@ -217,6 +217,13 @@ Never animate layout properties (width/height/top/left) for choreography — use
 - **Copy Room Code:** the icon pops into a check and a small accent chip reading
   "Copied" floats up from the button and fades (~1.2s). It never shifts layout.
   Reduced motion keeps the fade and drops the travel.
+- **Over-limit nudge** (Add Note and Reply fields): no character counter. Input the
+  100-character limit drops - typing, a paste, an IME commit, or a Mention that will not
+  fit - turns the field's border `--ytb-danger-text` with a soft 3px ring of the same
+  color and shakes it once (`ytb-limit-shake`: 4px, decaying, `--ytb-dur-slow`). The
+  outline holds about 0.6s past the last attempt, then glides back to the focus ring;
+  a burst of attempts shakes only once. Reduced motion keeps the outline and drops the
+  shake.
 - **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
   (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ytb-ease-out`),
   until the Mention or Reply is Acknowledged. The 6px dot itself never moves, resizes, or
@@ -273,7 +280,7 @@ Appearance contains the segmented Theme Preference control: Light, Dark, and Aut
 
 The Note Composer ends in a full-bleed footer band: a `--ytb-line` hairline above a 40px row whose content sits on the card's 16px inset. Idle, the whole band is one button reading **Recommend to Buddies** in 13px/700 `--ytb-accent-800`, with the `--ytb-accent-050` hover wash. Recommending fills the band `--ytb-accent-500` with `--ytb-on-accent` text and a confetti burst for 1.2s, then crossfades to the resting row: a check and **You recommended this** in `--ytb-ink-muted` on the left, a quiet pill-radius **Unrecommend** action on the right. A Buddy's Recommendation shows **Recommended to you** with no action. A failed write covers the band with its reason in 11px/600 `--ytb-danger-text` for 2s; nothing in the strip ever shifts the card's layout.
 
-With Notes Visibility off, keep the card and grey its note form (title, Reactions, text field, counter, Spoiler, Post) under an 11px/600 muted hint. The strip keeps its normal colors as the only live control.
+With Notes Visibility off, keep the card and grey its note form (title, Reactions, text field, Spoiler, Post) under an 11px/600 muted hint. The strip keeps its normal colors as the only live control.
 
 ### Confirmation dialog
 
