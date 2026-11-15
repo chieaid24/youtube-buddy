@@ -264,6 +264,18 @@ Do not move focus, scroll, or highlight a control for Room full. Trap Tab inside
 
 Both YouTube guides carry a Buddy Room toggle, so one shows at every window size: a 40px row in the full guide and a 64x76px entry in the compact mini guide. Match each to its guide's native entries, including the 400 label weight of entries off the current page. Keep the buddies icon as the only open-state color change.
 
+### Expanded Note
+
+Separate navigation from conversation metadata: put "Video timestamp" and the
+clickable @time in a header above the conversation. Keep its link color explicit
+in every state so YouTube's player styles cannot override it. Hover underlines the
+link; keyboard focus adds the shared ring. Use a 24px minimum target.
+
+Place each author above their message, with the posting time on the same byline.
+Keep the author-only "Delete note" action in a quiet, right-aligned footer below
+the Reply composer, separated by a hairline. Keep its confirmation inside that
+footer and focus Cancel first.
+
 ### Settings sections
 
 Every setting is one row: a 13px/600 label on the left and its control on the right, 40px minimum height, with a hairline between a section's rows. Section eyebrows use `--t-label`. Selected and on states share one cue: the `--ytb-accent-500` fill.

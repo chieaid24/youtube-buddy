@@ -309,42 +309,62 @@
       @keyframes ytb-pop-in {
         from { opacity: 0; transform: scale(0.96) translateY(4px); }
       }
-      /* The Note's video timestamp, pinned top-right on every variant (matching
-         the Note Preview's corner timestamp). */
-      .ytb-panel-time {
-        position: absolute;
-        top: 16px;
-        right: 16px;   /* matches the panel's content inset (UA-024) */
+      .ytb-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--ytb-line);
         color: var(--ytb-ink-muted);
         font-size: 11px;
         font-weight: 600;
-        font-variant-numeric: tabular-nums;
       }
+      /* Outrank YouTube's player link colors in every state. */
+      #${PANEL_ID} .ytb-panel-time,
+      #${PANEL_ID} .ytb-panel-time:visited,
+      #${PANEL_ID} .ytb-panel-time:hover,
+      #${PANEL_ID} .ytb-panel-time:active,
+      #${PANEL_ID} .ytb-panel-time:focus {
+        color: var(--ytb-accent-800);
+      }
+      #${PANEL_ID} .ytb-panel-time {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        font-size: 13px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      #${PANEL_ID} .ytb-panel-time:hover { text-decoration: underline; }
+      #${PANEL_ID} .ytb-panel-time:focus-visible { outline: 2px solid var(--ytb-ring); outline-offset: 2px; }
       .ytb-panel-body { margin: 4px 0 0; font-size: 15px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
       /* Locked Spoiler variant: the masked body, muted and italic like its preview. */
       .ytb-panel-spoiler { margin: 4px 0 0; font-size: 15px; line-height: 1.4; font-weight: 600; font-style: italic; color: var(--ytb-ink-muted); }
       /* Reaction variant: the large emoji with its author directly beneath. */
-      .ytb-panel-emoji { font-size: 32px; line-height: 1.15; padding-right: 42px; }
+      .ytb-panel-emoji { font-size: 32px; line-height: 1.15; }
       .ytb-panel-emoji-author { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-byline {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: 10px;
-        padding-right: 55px;
       }
       .ytb-panel-author { min-width: 0; overflow-wrap: anywhere; font-size: 11px; font-weight: 700; color: var(--ytb-ink-muted); }
       .ytb-panel-posted { color: var(--ytb-ink-muted); font-size: 11px; white-space: nowrap; }
       .ytb-panel-actions {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
+        flex-direction: column;
+        align-items: flex-end;
         gap: 8px;
         margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid var(--ytb-line);
       }
-      .ytb-panel-time { text-decoration: none; cursor: pointer; }
-      .ytb-panel-time:hover { text-decoration: underline; }
-      .ytb-panel-time:focus-visible { outline: 2px solid var(--ytb-ring); outline-offset: 2px; }
+      .ytb-panel-actions .ytb-panel-confirm { align-self: stretch; margin-top: 0; }
       .ytb-panel-delete {
         padding: 6px 8px;
         border: 0;
@@ -424,6 +444,7 @@
       .ytb-panel-send svg { width: 15px; height: 15px; }
       .ytb-panel-reply-note { margin: 4px 0 0; color: var(--ytb-ink-muted); font-size: 11px; }
       .ytb-panel-error { min-height: 16px; margin-top: 8px; color: var(--ytb-danger-text); font-size: 11px; font-weight: 600; }
+      .ytb-panel-error:empty { display: none; }
       /* Delete confirmation: cream sub-panel with the danger-button treatment. */
       .ytb-panel-confirm {
         margin-top: 12px;
