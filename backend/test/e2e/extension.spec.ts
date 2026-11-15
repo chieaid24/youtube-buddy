@@ -4904,7 +4904,7 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
 
 		// Buddy Progress off: the timeline marker disappears live; dots stay.
-		const progressToggle = homePanel.getByRole('switch', { name: 'Show Buddy Progress' });
+		const progressToggle = homePanel.getByRole('switch', { name: 'Show Buddy progress' });
 		await progressToggle.click();
 		await expect(page.locator('.ytb-watch-marker')).toHaveCount(0);
 		await expect(dots).toHaveCount(3);

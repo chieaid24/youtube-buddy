@@ -214,9 +214,11 @@ Never animate layout properties (width/height/top/left) for choreography — use
 - **View switch:** Settings replaces the normal Room Home content without resizing the shell.
 - **Switches:** the knob glides between states without bounce. Settings rebuilds its
   rows on every change, so the glide replays as a keyframe animation on the new node.
-- **Copy Room Code:** the icon pops into a check and a small accent chip reading
-  "Copied" floats up from the button and fades (~1.2s). It never shifts layout.
-  Reduced motion keeps the fade and drops the travel.
+- **Copy Room Code:** the copy icon shrinks away and a check springs up in its place,
+  reversing when the feedback clears. A small translucent accent chip reading "Copied!"
+  rises into place centered above the button, then fades (~1.2s). It rests in the gap
+  below the Room state text, which would show through it. It never shifts layout.
+  Reduced motion crossfades the icons and keeps the chip's fade without the travel.
 - **Over-limit nudge** (Add Note and Reply fields): no character counter. Input the
   100-character limit drops - typing, a paste, an IME commit, or a Mention that will not
   fit - turns the field's border `--ytb-danger-text` with a soft 3px ring of the same
@@ -284,7 +286,7 @@ Profile contains one Nickname input. Persist edits to local storage and reassert
 
 Room shows Room state and Room Code first. Room state carries a 6px status dot: success for In room, accent for Waiting, faint for Unpaired, danger for Room full. The Room Code copy control is a borderless accent icon button. Unpaired and Room full show Create and Join. Waiting and In room show the Buddy roster, a Buddy Color Swatch for each Buddy, and Leave Room. Use the eight fixed Buddy Colors, disable colors assigned to another Buddy, and mark the selected color with the focus-ring token. Leave Room is a quiet outlined button with danger text; the danger fill belongs to its confirmation.
 
-On-video contains four switches in this order: Share video progress, Show Notes (Notes Visibility), Show Buddy Progress (Buddy Progress Visibility), and Spoiler Default. Switches are 36x20px pills with a 16px light knob. Put the Notification Position picker below them: a miniature player frame with one bar per edge. Keep Stop sharing behind a confirmation.
+On-video contains four switches in this order: Show Buddy progress (Buddy Progress Visibility), Share video progress, Show Notes (Notes Visibility), and Spoiler Default. Switches are 36x20px pills with a 16px light knob inside a 24px-tall target. Only the pill toggles; the label is plain text. Spoiler Default carries an info icon beside its label whose native tooltip explains Spoilers. Put the Notification Position picker, labelled "Popup position", below them: a miniature player frame with one bar per edge. Keep Stop sharing behind a confirmation.
 
 Appearance contains the segmented Theme Preference control: Light, Dark, and Auto on one sunk track.
 

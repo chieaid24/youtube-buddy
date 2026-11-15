@@ -15,7 +15,7 @@ test('UA-020: edge-picker cells use the scale radius and shared ring', async () 
 		await openHomePanel(home);
 		await home.locator('.ytb-hs-icon').click();
 		await home.locator('.ytb-hs-edges').scrollIntoViewIfNeeded();
-		await home.locator('.ytb-hs-switch-row').last().focus();
+		await home.locator('.ytb-hs-switch').last().focus();
 		await home.keyboard.press('Tab');
 		const { radius, shadow } = await home.evaluate(() => {
 			const cell = document.activeElement as HTMLElement;
