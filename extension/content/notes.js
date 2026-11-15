@@ -32,8 +32,8 @@
 	const LAYOUT_UNITS_PER_PX = 64; // Chromium's subpixel layout grid
 	const CLUSTER_FAN_GAP = 14; // px - the Fan Gap's IDEAL; shrinks toward DOT_DIAMETER on a crowded bar
 
+	const LABEL_REFRESH_MS = 30_000;
 	const CONVERSATION_POLL_MS = 5000; // focused Expanded Note freshness
-	const LABEL_REFRESH_MS = 30_000; // "Posted 8 min ago" recomputation
 	// Steps larger than this between timeupdates are seeks, not playback.
 	const NATURAL_DELTA_SECONDS = 2;
 
@@ -476,7 +476,7 @@
 		const preview = dot.appendChild(document.createElement('div'));
 		preview.className = PREVIEW_CLASS;
 		// Never let the player read a dot press as a seek; clicking opens the
-		// Expanded Note (Go here is the only seek). Hover is swallowed too, so
+		// Expanded Note (the timestamp link seeks). Hover is swallowed too, so
 		// YouTube pops no storyboard/time pill behind the Preview.
 		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'mousemove', 'mouseover']) {
 			dot.addEventListener(type, (e) => e.stopPropagation());
@@ -719,11 +719,10 @@
 		removePanel(); // replacement: drop the old panel, keep the lease
 
 		openNote = note;
-		// The playhead is stable now (opening paused it): it fixes both the panel
-		// variant (a Spoiler's lock state) and whether Go here is near the moment.
+		// The paused playhead fixes the Spoiler's lock state.
 		const playhead = video ? Number(video.currentTime) : Infinity;
 		const variant = YTB.notePanelVariant(note, playhead);
-		const panel = buildPanel(note, playhead, variant);
+		const panel = buildPanel(note, variant);
 		host.appendChild(panel);
 		// Hover-scope the Controls Hold: awake only while the pointer hovers the
 		// panel, not for its whole lifetime or on auto-focus.
@@ -743,14 +742,18 @@
 		// Only a text Note has a conversation to poll; read-only variants just
 		// refresh their posted-time label.
 		if (variant === 'text') startConversationPoll(panel);
-		labelTimer = setInterval(() => refreshTimeLabels(panel), LABEL_REFRESH_MS);
+		labelTimer = setInterval(() => {
+			for (const label of panel.querySelectorAll('[data-ytb-created-at]')) {
+				label.textContent = formatPostedTime(Number(label.dataset.ytbCreatedAt));
+			}
+		}, LABEL_REFRESH_MS);
 	}
 
 	// Build the Expanded Note per `variant` (YTB.notePanelVariant): 'text' gets
 	// the full conversation (Replies, composer, author-only delete); 'reaction'
 	// and 'spoiler' are read-only. Every variant pins the corner timestamp and
-	// offers Go here unless the paused playhead already sits near the moment.
-	function buildPanel(note, playhead, variant) {
+	// offers a timestamp link for seeking.
+	function buildPanel(note, variant) {
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const panel = document.createElement('section');
 		panel.id = PANEL_ID;
@@ -761,8 +764,15 @@
 		);
 		panel.tabIndex = -1;
 
-		const time = document.createElement('div');
+		const time = document.createElement('a');
 		time.className = 'ytb-panel-time';
+		time.href = '#t=' + note.timestamp;
+		time.title = 'Go to timestamp';
+		time.setAttribute('aria-label', 'Go to timestamp ' + YTB.formatTime(note.timestamp));
+		time.addEventListener('click', (event) => {
+			event.preventDefault();
+			goHere(note);
+		});
 		time.textContent = '@' + YTB.formatTime(note.timestamp);
 		panel.append(time);
 
@@ -784,19 +794,17 @@
 			const body = document.createElement('p');
 			body.className = 'ytb-panel-spoiler';
 			body.textContent = 'Spoiler';
-			panel.append(body, buildByline(note, who, true));
+			panel.append(buildByline(note, who, true), body);
 		} else {
 			const body = document.createElement('p');
 			body.className = 'ytb-panel-body';
 			body.textContent = note.body;
-			panel.append(body, buildByline(note, who, true));
+			panel.append(buildByline(note, who, true), body);
 		}
 
-		// Actions: Go here (omitted near the moment) plus the author-only delete
-		// on a text Note; the row is appended only if non-empty.
+		// Only an authored text Note has a delete action.
 		const actions = document.createElement('div');
 		actions.className = 'ytb-panel-actions';
-		if (!YTB.nearNoteMoment(note.timestamp, playhead)) actions.append(buildGoHere(note));
 		let confirm = null;
 		if (variant === 'text' && note.clientId === myClientId) {
 			confirm = buildDeleteConfirm(panel, note, actions); // appends the "Delete" trigger into actions
@@ -848,26 +856,27 @@
 			byline.append(author);
 		}
 		const posted = document.createElement('span');
-		posted.className = 'ytb-rel ytb-panel-posted';
+		posted.className = 'ytb-panel-posted';
 		posted.dataset.ytbCreatedAt = String(note.createdAt || Date.now());
-		posted.dataset.ytbPrefix = 'Posted ';
-		posted.textContent = 'Posted ' + YTB.relativeTime(Number(posted.dataset.ytbCreatedAt));
+		posted.textContent = formatPostedTime(Number(posted.dataset.ytbCreatedAt));
 		byline.append(posted);
 		return byline;
 	}
 
-	// Go here: the panel's one seek control (the aria-label speaks the moment).
-	function buildGoHere(note) {
-		const atLabel = YTB.formatTime(note.timestamp);
-		const goHereButton = document.createElement('button');
-		goHereButton.type = 'button';
-		goHereButton.className = 'ytb-panel-gohere';
-		goHereButton.setAttribute('aria-label', `Go here: play from just before ${atLabel}`);
-		const goHereText = document.createElement('span');
-		goHereText.textContent = 'Go here';
-		goHereButton.append(YTBTheme.icon('play'), goHereText);
-		goHereButton.addEventListener('click', () => goHere(note));
-		return goHereButton;
+	function formatPostedTime(createdAt) {
+		const date = new Date(createdAt);
+		if (date.toDateString() !== new Date().toDateString()) {
+			return date.toLocaleDateString('en-US', {
+				month: 'short',
+				day: 'numeric',
+				year: 'numeric',
+			});
+		}
+		return date.toLocaleTimeString('en-US', {
+			hour: 'numeric',
+			minute: '2-digit',
+			hour12: true,
+		});
 	}
 
 	// Keep panel interactions inside the panel (no player seeks/toggles), and
@@ -983,12 +992,11 @@
 				author.dataset.ytbColorCid = reply.clientId; // live repaint hook (#115)
 			}
 			const when = document.createElement('span');
-			when.className = 'ytb-rel ytb-panel-reply-time';
+			when.className = 'ytb-panel-reply-time';
 			when.dataset.ytbCreatedAt = String(reply.createdAt || Date.now());
-			when.dataset.ytbPrefix = '';
-			when.textContent = YTB.relativeTime(Number(when.dataset.ytbCreatedAt));
+			when.textContent = formatPostedTime(Number(when.dataset.ytbCreatedAt));
 			byline.append(author, when);
-			row.append(body, byline);
+			row.append(byline, body);
 			wrap.append(row);
 		}
 		if (pinned) wrap.scrollTop = wrap.scrollHeight;
@@ -1160,12 +1168,6 @@
 			if (area) area.replaceChildren();
 		}
 		// Transient failures: keep the panel as-is; the next tick retries.
-	}
-
-	function refreshTimeLabels(panel) {
-		for (const label of panel.querySelectorAll('.ytb-rel')) {
-			label.textContent = (label.dataset.ytbPrefix || '') + YTB.relativeTime(Number(label.dataset.ytbCreatedAt));
-		}
 	}
 
 	/** Anchor above the Note's dot, clamped fully inside the player. */

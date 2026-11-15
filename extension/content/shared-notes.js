@@ -198,14 +198,6 @@
 			return 'text';
 		},
 
-		// Whether the paused playhead sits within GO_HERE_NEAR_SECONDS of the
-		// Note's moment (Go here is then omitted). A non-finite playhead is never near.
-		nearNoteMoment(timestamp, playhead) {
-			const head = Number(playhead);
-			if (!Number.isFinite(head)) return false;
-			return Math.abs(head - Number(timestamp)) <= YTB.GO_HERE_NEAR_SECONDS;
-		},
-
 		// Notes whose timestamps forward playback just crossed
 		// (previousTime < t <= currentTime), timestamp-sorted; the caller decides
 		// whether the step was natural, so a replay after rewinding triggers again.

@@ -9,7 +9,7 @@ const SIZES = new Set([11, 13, 15, 16]);
 
 const SELECTORS = [
 	'.ytb-note-dot[data-ytb-note-id="n-text"] .ytb-note-preview',
-	'#ytb-note-panel .ytb-panel-gohere',
+	'#ytb-note-panel .ytb-panel-time',
 	'#ytb-note-panel .ytb-panel-delete',
 	'#ytb-note-panel .ytb-panel-error',
 	'#ytb-note-panel .ytb-panel-reply-body',

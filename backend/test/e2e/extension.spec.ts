@@ -2185,27 +2185,23 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 		expect(s.currentTime).toBeCloseTo(1, 1);
 		expect(s.paused).toBe(true);
 
-		// Go here is labelled without the "@time" suffix (the moment lives in its
-		// aria-label instead).
-		const goHere = panel.locator('.ytb-panel-gohere');
-		await expect(goHere).toHaveText('Go here');
-		await expect(goHere).toHaveAttribute('aria-label', /before 0:04/);
-
-		// Go here is the only seek: it jumps to ~1s before the Note (goHereTarget(4)
-		// = 3) and resumes play; the play event then closes the panel.
-		await goHere.click();
+		const timestamp = panel.getByRole('link', { name: 'Go to timestamp 0:04' });
+		await expect(panel.locator('.ytb-panel-gohere')).toHaveCount(0);
+		await expect(timestamp).toHaveText('@0:04');
+		await expect(timestamp).toHaveAttribute('title', 'Go to timestamp');
+		await timestamp.hover();
+		expect(await timestamp.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('underline');
+		await timestamp.click();
 		await expect.poll(async () => (await state()).paused).toBe(false);
 		s = await state();
 		expect(s.currentTime).toBeGreaterThanOrEqual(2.7);
 		expect(s.currentTime).toBeLessThan(4);
 		await expect(panel).toHaveCount(0);
 
-		// Go here is omitted when the paused playhead already sits within 2s of the
-		// moment: parked at t=4 (the text Note's own timestamp) there is nowhere to go.
 		await parkAt(4);
 		await page.locator('.ytb-note-dot-text').click();
 		await expect(panel).toBeVisible();
-		await expect(panel.locator('.ytb-panel-gohere')).toHaveCount(0);
+		await expect(timestamp).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -2416,7 +2412,6 @@ test('Expanded Note prose selects, while overlay-origin drags leave both overlay
 		]) {
 			expect(await userSelect(selector), selector).toBe('text');
 		}
-		expect(await userSelect('.ytb-panel-gohere')).toBe('none');
 
 		// A double-click selects the Note body as normal prose.
 		await panel.locator('.ytb-panel-body').dblclick({ position: { x: 10, y: 10 } });
