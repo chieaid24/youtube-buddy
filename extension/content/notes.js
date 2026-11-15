@@ -749,10 +749,7 @@
 		}, LABEL_REFRESH_MS);
 	}
 
-	// Build the Expanded Note per `variant` (YTB.notePanelVariant): 'text' gets
-	// the full conversation (Replies, composer, author-only delete); 'reaction'
-	// and 'spoiler' are read-only. Every variant pins the corner timestamp and
-	// offers a timestamp link for seeking.
+	// Only text Notes expose Replies and author actions.
 	function buildPanel(note, variant) {
 		const who = note.clientId === myClientId ? 'You' : YTB.buddyName(note.clientId, note.name, roster);
 		const panel = document.createElement('section');
@@ -764,6 +761,10 @@
 		);
 		panel.tabIndex = -1;
 
+		const header = document.createElement('header');
+		header.className = 'ytb-panel-header';
+		const timeLabel = document.createElement('span');
+		timeLabel.textContent = 'Video timestamp';
 		const time = document.createElement('a');
 		time.className = 'ytb-panel-time';
 		time.href = '#t=' + note.timestamp;
@@ -774,7 +775,8 @@
 			goHere(note);
 		});
 		time.textContent = '@' + YTB.formatTime(note.timestamp);
-		panel.append(time);
+		header.append(timeLabel, time);
+		panel.append(header);
 
 		// Body area: emoji + author for a Reaction, masked placeholder for a
 		// locked Spoiler, otherwise the text Note itself.
@@ -803,13 +805,12 @@
 		}
 
 		// Only an authored text Note has a delete action.
-		const actions = document.createElement('div');
+		const actions = document.createElement('footer');
 		actions.className = 'ytb-panel-actions';
 		let confirm = null;
 		if (variant === 'text' && note.clientId === myClientId) {
-			confirm = buildDeleteConfirm(panel, note, actions); // appends the "Delete" trigger into actions
+			confirm = buildDeleteConfirm(panel, note, actions);
 		}
-		if (actions.childElementCount > 0) panel.append(actions);
 
 		// Read-only variants stop here: no conversation, composer, delete, or poll.
 		if (variant !== 'text') {
@@ -829,7 +830,10 @@
 		error.setAttribute('role', 'status');
 
 		panel.append(replies, replyArea, error);
-		if (confirm) panel.append(confirm);
+		if (confirm) {
+			actions.append(confirm);
+			panel.append(actions);
+		}
 
 		wirePanelContainment(panel);
 
@@ -899,7 +903,7 @@
 		const remove = document.createElement('button');
 		remove.type = 'button';
 		remove.className = 'ytb-panel-delete';
-		remove.textContent = 'Delete';
+		remove.textContent = 'Delete note';
 		actions.append(remove);
 
 		const confirm = document.createElement('div');
@@ -927,7 +931,7 @@
 			confirm.hidden = false;
 			remove.hidden = true;
 			positionPanel(panel); // the confirm grows the panel: re-clamp
-			yes.focus();
+			cancel.focus();
 		});
 		cancel.addEventListener('click', () => {
 			confirm.hidden = true;
