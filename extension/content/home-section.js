@@ -125,9 +125,8 @@
 	function dockOverlay() {
 		const root = document.getElementById(OVERLAY_ID);
 		if (!root) return;
-		const toggleRight = document.getElementById('ytb-home-toggle')?.getBoundingClientRect().right || 0;
-		let x = toggleRight < window.innerWidth / 2 ? toggleRight : 0;
-		for (const el of document.querySelectorAll('ytd-guide-renderer, ytd-mini-guide-renderer')) {
+		let x = 0;
+		for (const el of document.querySelectorAll('#ytb-home-toggle, #ytb-home-toggle-mini, ytd-guide-renderer, ytd-mini-guide-renderer')) {
 			const rect = el.getBoundingClientRect();
 			if (rect.width > 0 && rect.width < window.innerWidth / 2 && rect.height > 0) x = Math.max(x, rect.right);
 		}

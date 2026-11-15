@@ -147,7 +147,7 @@ The complete in-page hub the extension overlays on YouTube Home: a fixed, left-d
 _Avoid_: home widget, dashboard, feed (alone)
 
 **Room Home Toggle**:
-An on/off control injected as a row into YouTube's full or compact left guide on the home route, letting the viewer open or close the Room Home Panel. It matches the active guide's native row geometry with a buddies icon and "Buddy Room" label. The icon is apricot while the panel is open and native guide grey while closed. The row persists nothing: it dispatches an open or close request and mirrors the panel's live state through an in-page CustomEvent. Toggling affects only the panel; on-video markers, Notes, presence, and the watch-page Recommend Control keep running.
+An on/off control injected as a row into both of YouTube's left guides, full and compact, on the home route, so it shows in whichever guide YouTube displays at the current window size. It lets the viewer open or close the Room Home Panel. Each row matches its guide's native row geometry with a buddies icon and "Buddy Room" label. The icon is apricot while the panel is open and native guide grey while closed. The rows persist nothing: each dispatches an open or close request and mirrors the panel's live state through an in-page CustomEvent. Toggling affects only the panel; on-video markers, Notes, presence, and the watch-page Recommend Control keep running.
 _Avoid_: sidebar widget, hide button, disable
 
 **Recommendation**:

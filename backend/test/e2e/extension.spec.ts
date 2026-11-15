@@ -161,7 +161,8 @@ async function nudgeUntil(page: Page, assertion: () => Promise<void>) {
 
 /** Open the ephemeral Room Home Panel via the guide toggle; waits for the panel to mount (ADR-0005). */
 async function openHomePanel(page: Page) {
-	const toggle = page.locator('#ytb-home-toggle');
+	// Each guide carries its own row; click whichever one YouTube is showing.
+	const toggle = page.locator('#ytb-home-toggle, #ytb-home-toggle-mini').filter({ visible: true });
 	await nudgeUntil(page, () => expect(toggle).toHaveCount(1, { timeout: 700 }));
 	if ((await page.locator('#ytb-home-section').count()) === 0) await toggle.click();
 	await expect(page.locator('#ytb-home-section')).toHaveCount(1);
@@ -1077,13 +1078,77 @@ test('Room Home Toggle matches the compact YouTube mini guide', async () => {
 		);
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/');
-		const toggle = page.locator('ytd-mini-guide-renderer #ytb-home-toggle');
+		const toggle = page.locator('ytd-mini-guide-renderer #ytb-home-toggle-mini');
 		await nudgeUntil(page, () => expect(toggle).toBeVisible());
 		await expect(toggle).toHaveCSS('width', '64px');
 		await expect(toggle).toHaveCSS('height', '76px');
 		await expect(toggle).toHaveCSS('font-size', '10px');
 		await toggle.click();
 		await expect(page.locator('#ytb-home-section')).toBeVisible();
+	} finally {
+		await context.close();
+	}
+});
+
+// Real YouTube keeps the full guide mounted in a closed drawer while the mini guide shows.
+const collapsedGuideHomeFixture = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>YouTube collapsed guide home fixture</title></head>
+  <body style="margin: 0">
+    <div id="guide" hidden>
+      <ytd-guide-renderer>
+        <div id="sections">
+          <ytd-guide-section-renderer><div id="items"></div></ytd-guide-section-renderer>
+        </div>
+      </ytd-guide-renderer>
+    </div>
+    <ytd-mini-guide-renderer style="display: block; width: 72px"><div id="items"></div></ytd-mini-guide-renderer>
+    <ytd-browse page-subtype="home"><div id="grid-container"><ytd-rich-grid-renderer></ytd-rich-grid-renderer></div></ytd-browse>
+  </body>
+</html>`;
+
+test('Room Home Toggle keeps a row in both YouTube guides at once', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+	try {
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: collapsedGuideHomeFixture }),
+		);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		const full = page.locator('ytd-guide-renderer #items #ytb-home-toggle');
+		const mini = page.locator('ytd-mini-guide-renderer #items #ytb-home-toggle-mini');
+		await nudgeUntil(page, () => expect(mini).toBeVisible());
+		await expect(full).toHaveCount(1);
+		await expect(full).toBeHidden();
+		await expect(mini).toHaveCSS('height', '76px');
+
+		// Either row drives the one panel, both mirror it, and it docks past the guide on show.
+		await mini.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+		await expect(mini).toHaveAttribute('aria-checked', 'true');
+		await expect(full).toHaveAttribute('aria-checked', 'true');
+		const dock = () => page.locator('#ytb-home-overlay').evaluate((el) => el.style.getPropertyValue('--ytb-hs-dock'));
+		expect(await dock()).toBe('72px');
+
+		// Expanding the guide swaps which row shows without re-injecting either.
+		await page.evaluate(() => {
+			document.getElementById('guide')!.hidden = false;
+			document.querySelector<HTMLElement>('ytd-guide-renderer')!.style.cssText = 'display: block; width: 240px';
+			document.querySelector<HTMLElement>('ytd-mini-guide-renderer')!.style.display = 'none';
+			window.dispatchEvent(new Event('resize'));
+		});
+		await expect(full).toBeVisible();
+		await expect(full).toHaveCSS('height', '40px');
+		await expect(mini).toBeHidden();
+		expect(await dock()).toBe('240px');
+		await page.keyboard.press('Escape');
+		await expect(full).toHaveAttribute('aria-checked', 'false');
+		await expect(mini).toHaveAttribute('aria-checked', 'false');
+		await full.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+		await expect(mini).toHaveAttribute('aria-checked', 'true');
+		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
 	}
@@ -4607,6 +4672,33 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 			error.includes("Blocked script execution in 'about:blank'");
 		const lifecycleErrors = errors.filter((error) => !isYouTubeNoise(error));
 		expect(lifecycleErrors, lifecycleErrors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('@live keeps a Buddy Room row in whichever YouTube guide is showing', async ({}, testInfo) => {
+	test.skip(!process.env.YTB_LIVE_YOUTUBE, 'Set YTB_LIVE_YOUTUBE=1 to run the live smoke test.');
+	test.setTimeout(90_000);
+	const context = await launchExtension();
+
+	try {
+		const page = await context.newPage();
+		await page.setViewportSize({ width: 1600, height: 900 });
+		await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });
+		const full = page.locator('ytd-guide-renderer #ytb-home-toggle');
+		const mini = page.locator('ytd-mini-guide-renderer #ytb-home-toggle-mini');
+		await expect(full).toBeInViewport({ timeout: 20_000 });
+
+		// Narrowing swaps in the mini guide while the full one stays mounted off-screen.
+		await page.setViewportSize({ width: 1100, height: 900 });
+		await expect(mini).toBeInViewport({ timeout: 20_000 });
+		await expect(full).not.toBeInViewport();
+		await mini.click();
+		await expect(page.locator('#ytb-home-section')).toBeVisible();
+		const shot = testInfo.outputPath('live-mini-guide-toggle.png');
+		await page.screenshot({ path: shot });
+		await testInfo.attach('Buddy Room row in the mini guide', { path: shot, contentType: 'image/png' });
 	} finally {
 		await context.close();
 	}

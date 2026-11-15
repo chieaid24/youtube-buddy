@@ -1,17 +1,19 @@
 // extension/home-toggle.js
 //
-// The Room Home Toggle: a "Buddy Room" row injected into YouTube's left
-// guide on the home route, pixel-matched to native entries. It OPENS the
-// floating Room Home Panel (ADR-0005); open state is ephemeral, owned by
-// home-section.js and mirrored here via ytb:home-panel-state CustomEvents
-// (no storage). Guide-DOM targeting is deliberately fragile, contained to
-// this module (ADR-0001 pure consumer): retried on content.js's throttled
-// ytb:mutation until the guide exists.
+// The Room Home Toggle: a "Buddy Room" row injected into each of YouTube's
+// left guides (full and mini) on the home route, pixel-matched to native
+// entries. It OPENS the floating Room Home Panel (ADR-0005); open state is
+// ephemeral, owned by home-section.js and mirrored here via
+// ytb:home-panel-state CustomEvents (no storage). Guide-DOM targeting is
+// deliberately fragile, contained to this module (ADR-0001 pure consumer):
+// retried on content.js's throttled ytb:mutation until each guide exists.
 
 (function () {
 	'use strict';
 
 	const ROW_ID = 'ytb-home-toggle';
+	const MINI_ROW_ID = 'ytb-home-toggle-mini';
+	const ANY_ROW = `:is(#${ROW_ID}, #${MINI_ROW_ID})`; // keeps id specificity over YouTube's styles
 	const STYLE_ID = 'ytb-home-toggle-style';
 	const SVG_NS = 'http://www.w3.org/2000/svg';
 	// A two-person "buddies" glyph (Material "people"): hidden, it inherits the
@@ -24,49 +26,62 @@
 	let onHome = false;
 	let panelOpen = false; // mirrors home-section.js's ephemeral open state
 
+	// YouTube keeps both guides mounted and shows either one, or the full guide
+	// as a drawer over the mini one, so each carries its own row.
+	const ROWS = [
+		{ id: ROW_ID, slot: fullGuideSlot },
+		{ id: MINI_ROW_ID, slot: miniGuideSlot },
+	];
+
 	injectStyle();
-	ensureRow();
+	ensureRows();
 
 	// home-section.js owns the panel's open state and broadcasts every change;
-	// the row's ON/OFF simply mirrors "panel open" (our own request lands here too).
+	// the rows' ON/OFF simply mirrors "panel open" (our own request lands here too).
 	document.addEventListener('ytb:home-panel-state', (event) => {
 		if (!YTB.isContextActive()) return;
 		panelOpen = Boolean(event.detail && event.detail.open);
-		const row = document.getElementById(ROW_ID);
-		if (row) syncRow(row);
+		for (const { id } of ROWS) {
+			const row = document.getElementById(id);
+			if (row) syncRow(row);
+		}
 	});
 
 	function isHomePath() {
 		return location.pathname === '/';
 	}
 
-	/** The guide slot the row lives in, with fallbacks for shifted markup; null
-	 * while the guide isn't built yet (retried on mutation). */
-	function guideSlot() {
+	/** Each guide's slot for its row, with fallbacks for shifted markup; null
+	 * while that guide isn't built yet (retried on mutation). */
+	function fullGuideSlot() {
 		const guide = document.querySelector('ytd-guide-renderer');
-		if (guide) return guide.querySelector('#sections ytd-guide-section-renderer #items') || guide.querySelector('#sections') || guide;
+		return guide && (guide.querySelector('#sections ytd-guide-section-renderer #items') || guide.querySelector('#sections') || guide);
+	}
+
+	function miniGuideSlot() {
 		const miniGuide = document.querySelector('ytd-mini-guide-renderer');
 		return miniGuide && (miniGuide.querySelector('#items') || miniGuide);
 	}
 
-	function ensureRow() {
+	function ensureRows() {
 		if (!YTB.isContextActive()) return;
-		// Off the home route the row has no business here; the panel module gates
+		// Off the home route the rows have no business here; the panel module gates
 		// itself the same way.
 		if (!onHome) {
 			removeHomeControls();
 			return;
 		}
-		const slot = guideSlot();
-		if (!slot) return; // guide not built yet - a later ytb:mutation retries
-		let row = document.getElementById(ROW_ID);
-		if (row && row.isConnected) {
-			if (row.parentElement !== slot) slot.append(row);
-			return;
+		for (const { id, slot } of ROWS) {
+			const parent = slot();
+			if (!parent) continue; // guide not built yet - a later ytb:mutation retries
+			const row = document.getElementById(id) || buildRow(id);
+			if (row.parentElement !== parent) parent.append(row);
 		}
+	}
 
-		row = document.createElement('button');
-		row.id = ROW_ID;
+	function buildRow(id) {
+		const row = document.createElement('button');
+		row.id = id;
 		row.type = 'button';
 		row.setAttribute('role', 'switch');
 		row.title = 'Open or close the Buddy Room panel';
@@ -87,7 +102,7 @@
 		});
 
 		syncRow(row);
-		slot.append(row);
+		return row;
 	}
 
 	/** aria-checked mirrors "panel open"; the is-on class tints the buddies
@@ -98,7 +113,7 @@
 	}
 
 	function removeHomeControls() {
-		document.getElementById(ROW_ID)?.remove();
+		for (const { id } of ROWS) document.getElementById(id)?.remove();
 	}
 
 	// --- wiring: pure consumer, registered before content.js's first ytb:navigate ---
@@ -106,13 +121,13 @@
 	document.addEventListener('ytb:navigate', () => {
 		if (!YTB.isContextActive()) return;
 		onHome = isHomePath();
-		ensureRow();
+		ensureRows();
 	});
 
 	document.addEventListener('ytb:mutation', () => {
 		if (!YTB.isContextActive()) return;
-		// YouTube rebuilds the guide lazily; keep the row present without churn.
-		ensureRow();
+		// YouTube rebuilds the guides lazily; keep the rows present without churn.
+		ensureRows();
 	});
 
 	YTB.onContextInvalidated(() => {
@@ -142,7 +157,7 @@
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
-      #${ROW_ID} {
+      ${ANY_ROW} {
         /* The icon color is the row's only ON/OFF signal (UA-015): deep
            apricot reads at 3:1+ on the white light guide; html[dark] lifts
            it back to the bright apricot, which reads on the dark guide. */
@@ -159,18 +174,18 @@
         background: transparent;
         color: #0f0f0f;              /* native guide text color */
         font-family: 'Roboto', 'Arial', sans-serif;
-        font-size: 14px;             /* native guide typography: 14px/20px, weight 500 */
-        font-weight: 500;
+        font-size: 14px;             /* native guide typography: 14px/20px, weight 400 off the current page */
+        font-weight: 400;
         line-height: 20px;
         text-align: left;
         cursor: pointer;
         -webkit-font-smoothing: antialiased;
       }
-      html[dark] #${ROW_ID} { color: #f1f1f1; --ytbht-accent: #f6a96b; }
-      #${ROW_ID}:hover { background: rgba(0, 0, 0, 0.05); }              /* native hover */
-      html[dark] #${ROW_ID}:hover { background: rgba(255, 255, 255, 0.1); }
-      #${ROW_ID}:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytbht-accent); }
-      #${ROW_ID} .ytb-ht-icon {
+      html[dark] ${ANY_ROW} { color: #f1f1f1; --ytbht-accent: #f6a96b; }
+      ${ANY_ROW}:hover { background: rgba(0, 0, 0, 0.05); }              /* native hover */
+      html[dark] ${ANY_ROW}:hover { background: rgba(255, 255, 255, 0.1); }
+      ${ANY_ROW}:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ytbht-accent); }
+      ${ANY_ROW} .ytb-ht-icon {
         flex: none;
         display: inline-flex;
         width: 24px; height: 24px;
@@ -178,9 +193,9 @@
         color: inherit;              /* OFF: the native guide-icon color (= text color) */
         transition: color 140ms;
       }
-      #${ROW_ID}.is-on .ytb-ht-icon { color: var(--ytbht-accent); }   /* ON: apricot */
-      #${ROW_ID} .ytb-ht-icon svg { display: block; width: 24px; height: 24px; }
-      #${ROW_ID} .ytb-ht-label {
+      ${ANY_ROW}.is-on .ytb-ht-icon { color: var(--ytbht-accent); }   /* ON: apricot */
+      ${ANY_ROW} .ytb-ht-icon svg { display: block; width: 24px; height: 24px; }
+      ${ANY_ROW} .ytb-ht-label {
         flex: 0 1 auto;
         min-width: 0;
         overflow: hidden;
@@ -188,7 +203,7 @@
         white-space: nowrap;
         color: inherit;
       }
-      ytd-mini-guide-renderer #${ROW_ID} {
+      #${MINI_ROW_ID} {
         width: 64px;
         height: 76px;
         flex-direction: column;
@@ -197,12 +212,13 @@
         font-size: 10px;
         line-height: 16px;
         text-align: center;
+        -webkit-font-smoothing: auto;   /* native mini labels skip the antialiasing */
       }
-      ytd-mini-guide-renderer #${ROW_ID} .ytb-ht-icon {
+      #${MINI_ROW_ID} .ytb-ht-icon {
         margin: 0 0 6px;
       }
       @media (prefers-reduced-motion: reduce) {
-		#${ROW_ID} .ytb-ht-icon { transition: none; }
+		${ANY_ROW} .ytb-ht-icon { transition: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
