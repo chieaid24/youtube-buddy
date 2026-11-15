@@ -221,10 +221,11 @@ Never animate layout properties (width/height/top/left) for choreography — use
   Reduced motion crossfades the icons and keeps the chip's fade without the travel.
 - **Over-limit nudge** (Add Note and Reply fields): no character counter. Input the
   100-character limit drops - typing, a paste, an IME commit, or a Mention that will not
-  fit - turns the field's border `--ytb-danger-text` with a soft 3px ring of the same
-  color and shakes it once (`ytb-limit-shake`: 4px, decaying, `--ytb-dur-slow`). The
-  outline holds about 0.6s past the last attempt, then glides back to the focus ring;
-  a burst of attempts shakes only once. Reduced motion keeps the outline and drops the
+  fit - swaps the accent focus look for danger: the border turns `--ytb-danger-text` and
+  the 3px ring becomes the same color at the focus ring's 55% strength. Every dropped
+  attempt replays the shake (`ytb-limit-shake`: 4px, decaying, `--ytb-dur-slow`) with no
+  debounce, so a held key buzzes. The outline holds about 0.6s past the last attempt,
+  then glides back to the focus ring. Reduced motion keeps the outline and drops the
   shake.
 - **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
   (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ytb-ease-out`),

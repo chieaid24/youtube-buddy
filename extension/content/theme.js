@@ -324,7 +324,7 @@
 
 	// --- over-limit nudge for on-video YTB inputs ---
 	// maxLength drops overflow silently; flag the blocked attempt instead
-	// (DESIGN.md 2). The class holds until attempts pause, so a burst shakes once.
+	// (DESIGN.md 2). Every attempt replays the shake; the outline holds until they pause.
 
 	const OVER_LIMIT_CLASS = 'ytb-over-limit';
 	const OVER_LIMIT_HOLD_MS = 600;
@@ -333,6 +333,10 @@
 	function nudgeLimit(field) {
 		clearTimeout(nudgeTimers.get(field));
 		field.classList.add(OVER_LIMIT_CLASS);
+		// Clearing the animation across a reflow restarts the shake.
+		field.style.animation = 'none';
+		void field.offsetWidth;
+		field.style.animation = '';
 		nudgeTimers.set(
 			field,
 			setTimeout(() => field.classList.remove(OVER_LIMIT_CLASS), OVER_LIMIT_HOLD_MS),
