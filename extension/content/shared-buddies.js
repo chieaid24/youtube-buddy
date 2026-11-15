@@ -22,7 +22,7 @@
 
 		// Whether a Room has ever had at least one member record.
 		roomExists(records) {
-			return (records?.progress?.length || 0) + (records?.presence?.length || 0) > 0;
+			return (records?.watched?.length || 0) + (records?.presence?.length || 0) > 0;
 		},
 
 		// Fixed colors for contrast on light popup/feed surfaces and YouTube's
@@ -141,82 +141,23 @@
 		},
 
 		// Reduce a Room read for the status surfaces: a Buddy is any FOREIGN
-		// clientId, preferring their latest Progress Record over a presence-only
-		// row; `locked` means the Room is full of OTHERS with me the rejected 6th.
+		// clientId, last seen (`updatedAt`) at their newest presence row, Watch
+		// Record, or Note; `locked` means the Room is full of OTHERS with me the
+		// rejected 6th.
 		roomView(records, myClientId) {
-			const progress = (records && records.progress) || [];
-			const presence = (records && records.presence) || [];
-			const notes = (records && records.notes) || [];
-
-			const latestByBuddy = new Map(); // clientId -> latest progress record
-			const presenceByBuddy = new Map(); // clientId -> presence row
-			const noteByBuddy = new Map(); // clientId -> latest Note
-			const memberIds = new Set(); // distinct clientIds across all sets (for the cap)
+			const lastSeen = new Map(); // foreign clientId -> newest activity (ms)
 			let iAmMember = false;
+			const consider = (clientId, at) => {
+				if (!clientId) return;
+				if (clientId === myClientId) iAmMember = true;
+				else lastSeen.set(clientId, Math.max(lastSeen.get(clientId) || 0, Number(at) || 0));
+			};
+			for (const p of (records && records.presence) || []) if (p) consider(p.clientId, p.updatedAt);
+			for (const w of (records && records.watched) || []) if (w) consider(w.clientId, w.watchedAt);
+			for (const n of (records && records.notes) || []) if (n) consider(n.clientId, n.createdAt);
 
-			for (const r of progress) {
-				if (!r || !r.clientId) continue;
-				memberIds.add(r.clientId);
-				if (r.clientId === myClientId) {
-					iAmMember = true;
-					continue;
-				}
-				const prev = latestByBuddy.get(r.clientId);
-				if (!prev || r.updatedAt > prev.updatedAt) latestByBuddy.set(r.clientId, r);
-			}
-			for (const p of presence) {
-				if (!p || !p.clientId) continue;
-				memberIds.add(p.clientId);
-				if (p.clientId === myClientId) {
-					iAmMember = true;
-					continue;
-				}
-				presenceByBuddy.set(p.clientId, p);
-			}
-			for (const note of notes) {
-				if (!note || !note.clientId) continue;
-				memberIds.add(note.clientId);
-				if (note.clientId === myClientId) {
-					iAmMember = true;
-					continue;
-				}
-				const prev = noteByBuddy.get(note.clientId);
-				if (!prev || note.createdAt > prev.createdAt) noteByBuddy.set(note.clientId, note);
-			}
-
-			// One entry per foreign Buddy: prefer their progress record (has a
-			// position), else a presence-only row (joined, no videoId/timestamp).
-			const buddyIds = new Set([...latestByBuddy.keys(), ...presenceByBuddy.keys(), ...noteByBuddy.keys()]);
-			const buddies = [];
-			for (const cid of buddyIds) {
-				const prog = latestByBuddy.get(cid);
-				if (prog) {
-					buddies.push(prog);
-				} else if (presenceByBuddy.has(cid)) {
-					const p = presenceByBuddy.get(cid);
-					buddies.push({
-						clientId: p.clientId,
-						name: p.name,
-						updatedAt: p.updatedAt,
-					});
-				} else {
-					const note = noteByBuddy.get(cid);
-					buddies.push({
-						clientId: note.clientId,
-						name: note.name,
-						updatedAt: note.createdAt,
-					});
-				}
-			}
-			buddies.sort((a, b) => b.updatedAt - a.updatedAt);
-
-			// Distinct OTHERS; 5 with no membership of my own = a full Room I'd be
-			// the locked-out 6th of.
-			let foreignCount = 0;
-			for (const id of memberIds) if (id !== myClientId) foreignCount++;
-			const locked = !iAmMember && foreignCount >= YTB.MAX_MEMBERS;
-
-			return { buddies, iAmMember, locked };
+			const buddies = [...lastSeen].map(([clientId, updatedAt]) => ({ clientId, updatedAt })).sort((a, b) => b.updatedAt - a.updatedAt);
+			return { buddies, iAmMember, locked: !iAmMember && lastSeen.size >= YTB.MAX_MEMBERS };
 		},
 	});
 

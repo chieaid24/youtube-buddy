@@ -1,130 +1,83 @@
-// extension/reporter.js
-// POSTs this user's own Progress Records from /watch pages, skipping ads, live streams, Shorts, and embeds.
-// Loaded 2nd (after shared.js, before content.js); talks only via window.YTB and content.js's ytb:navigate event (ADR-0001) - registered synchronously at top level so it catches content.js's initial ytb:navigate.
+// extension/content/reporter.js
+// POSTs this member's Watch Record once a /watch video has really started playing, then nothing more for that video.
+// Playback is counted locally and never sent; ads and live streams don't count (Shorts and embeds are not /watch).
+// Loaded before content.js; talks only via window.YTB and the ytb:* events (ADR-0001).
 
 (() => {
 	'use strict';
 
-	const POST_INTERVAL_MS = 60_000; // post every ~60s while playing
-	const MIN_TIMESTAMP_SECONDS = 5; // below this is noise - skip
+	const STARTED_AFTER_SECONDS = 5; // playback before a video counts as watched
+	const MAX_STEP_SECONDS = 2; // a bigger jump between samples is a seek, not playback
+	const RETRY_MS = 60_000; // after an unsent mark (Unpaired, or a failed POST)
 
-	let intervalId = null;
-	let boundVideo = null;
-	let pauseHandler = null;
-	let timeupdateHandler = null;
+	let currentVideoId = null; // from the latest ytb:navigate; null off a watch page
+	let played = 0; // seconds of currentVideoId played so far
+	let lastTime = null; // previous currentTime sample; null restarts the chain
+	let marked = false; // roomCode holds my Watch Record for currentVideoId
+	let sending = false;
+	let retryAt = 0;
+	let roomCode = '';
+	let myWatched = new Set(); // videoIds of my Watch Records in roomCode, as of the last successful read
 
-	// videoId we're reporting for, from the latest ytb:navigate - not re-read from the URL at post time, since SPA nav may already point at the next video.
-	let currentVideoId = null;
-
-	// Last valid { timestamp, duration } for currentVideoId, kept fresh via timeupdate, so SPA nav can flush the outgoing video's real final position.
-	let lastPosition = null;
-
-	// --- guards ------------------------------------------------------------
-
-	// An embedded player is an iframe or a top-level /embed/ page - never report from either.
-	function isEmbed() {
-		return window.top !== window.self || location.pathname.startsWith('/embed/');
-	}
-
-	// During an ad the player carries `ad-showing` and `video.currentTime` is the ad's clock, not ours.
+	// During an ad the player carries `ad-showing` and the video runs on the ad's clock, not ours.
 	function isAdShowing() {
 		return !!document.querySelector('.html5-video-player.ad-showing');
 	}
 
-	function mainVideo() {
-		return document.querySelector('video');
-	}
-
-	// The live { timestamp, duration } of the main player, or null when it can't/shouldn't be read (no element, or an ad).
-	function readPosition() {
-		if (isAdShowing()) return null;
-		const v = mainVideo();
-		if (!v) return null;
-		return { timestamp: v.currentTime, duration: v.duration };
-	}
-
-	// --- posting -----------------------------------------------------------
-
-	async function post(videoId, position) {
-		if (!videoId || !position) return;
-		if (!Number.isFinite(position.duration)) return; // live stream / not loaded
-		if (position.timestamp < MIN_TIMESTAMP_SECONDS) return; // noise
-		if (isEmbed()) return;
-
-		const config = await YTB.getConfig();
-		if (!config.sharing || !config.code) return; // Sharing off, or unpaired.
-
-		const clientId = await YTB.ensureClientId();
-		// postProgress reads the Room Code itself; a failed POST resolves falsy and is swallowed.
-		await YTB.postProgress({
-			clientId,
-			name: config.name,
-			videoId,
-			timestamp: position.timestamp,
-			duration: position.duration,
-		});
-	}
-
-	// Post the live position of the current video (interval tick + pause).
-	function postCurrent() {
-		post(currentVideoId, readPosition());
-	}
-
-	// --- binding to the active <video> -------------------------------------
-
-	function unbind() {
-		if (intervalId !== null) {
-			clearInterval(intervalId);
-			intervalId = null;
+	async function mark(videoId) {
+		if (sending || Date.now() < retryAt) return;
+		if (myWatched.has(videoId)) {
+			marked = true; // the Room already knows
+			return;
 		}
-		if (boundVideo) {
-			if (pauseHandler) boundVideo.removeEventListener('pause', pauseHandler);
-			if (timeupdateHandler) boundVideo.removeEventListener('timeupdate', timeupdateHandler);
+		sending = true;
+		const sent = await YTB.postWatched(videoId);
+		sending = false;
+		if (sent) myWatched.add(videoId);
+		if (videoId !== currentVideoId) return; // navigated away mid-flight
+		if (sent) marked = true;
+		else retryAt = Date.now() + RETRY_MS;
+	}
+
+	function onTimeUpdate(e) {
+		if (marked || !currentVideoId || !YTB.isContextActive()) return;
+		const video = e.target;
+		if (video !== document.querySelector('video')) return; // only the main player
+		if (isAdShowing() || !Number.isFinite(video.duration)) {
+			lastTime = null; // ad, live stream, or not loaded
+			return;
 		}
-		boundVideo = null;
-		pauseHandler = null;
-		timeupdateHandler = null;
+		const step = lastTime === null ? 0 : video.currentTime - lastTime;
+		lastTime = video.currentTime;
+		if (step > 0 && step <= MAX_STEP_SECONDS) played += step;
+		if (played >= STARTED_AFTER_SECONDS) mark(currentVideoId);
 	}
 
-	function bind() {
-		if (!YTB.isContextActive()) return;
-		unbind();
-		const v = mainVideo();
-		if (!v) return;
-		boundVideo = v;
-
-		pauseHandler = () => postCurrent();
-		v.addEventListener('pause', pauseHandler);
-
-		// Cheap: just keeps the latest valid position for navigate-away to flush; POST cadence is interval/pause/nav, not this snapshot.
-		timeupdateHandler = () => {
-			const pos = readPosition();
-			if (pos && Number.isFinite(pos.duration)) lastPosition = pos;
-		};
-		v.addEventListener('timeupdate', timeupdateHandler);
-
-		intervalId = setInterval(() => {
-			if (boundVideo && !boundVideo.paused) postCurrent();
-		}, POST_INTERVAL_MS);
-	}
-
-	// --- navigation (Contract C) -------------------------------------------
+	// timeupdate doesn't bubble; capturing at the document needs no binding to YouTube's player element.
+	document.addEventListener('timeupdate', onTimeUpdate, true);
 
 	document.addEventListener('ytb:navigate', (e) => {
-		if (!YTB.isContextActive()) return;
 		const nextVideoId = (e.detail && e.detail.videoId) || null;
-
-		// Leaving the current video: flush its final position first, preferring the snapshot since the new video clobbers the shared <video> element.
-		if (currentVideoId && currentVideoId !== nextVideoId) {
-			post(currentVideoId, lastPosition || readPosition());
-		}
-
+		if (nextVideoId === currentVideoId) return; // same-video nudge, not a new viewing
 		currentVideoId = nextVideoId;
-		lastPosition = null;
-
-		if (currentVideoId) bind();
-		else unbind();
+		played = 0;
+		lastTime = null;
+		marked = false;
+		retryAt = 0;
 	});
 
-	YTB.onContextInvalidated(unbind);
+	document.addEventListener('ytb:room-data', (e) => {
+		const detail = e.detail || {};
+		if (detail.roomCode !== roomCode) {
+			// A different Room (or none) holds none of my marks yet.
+			roomCode = detail.roomCode;
+			myWatched = new Set();
+			marked = false;
+			retryAt = 0;
+		}
+		if (!detail.ok) return; // a failed read is not truth
+		myWatched = new Set((detail.watched || []).filter((w) => w && w.clientId === detail.myClientId).map((w) => w.videoId));
+	});
+
+	YTB.onContextInvalidated(() => document.removeEventListener('timeupdate', onTimeUpdate, true));
 })();

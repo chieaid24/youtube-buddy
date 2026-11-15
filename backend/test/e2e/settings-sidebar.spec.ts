@@ -46,9 +46,6 @@ for (const theme of ['light', 'dark']) {
 				await panel.getByRole('button', { name: 'Leave Room', exact: true }).click();
 				await capture('leave-confirm');
 				await page.keyboard.press('Escape');
-				await panel.getByRole('switch', { name: 'Share video progress' }).click();
-				await capture('sharing-confirm');
-				await page.keyboard.press('Escape');
 				await panel.getByRole('radiogroup', { name: 'Theme Preference' }).scrollIntoViewIfNeeded();
 				await capture('settings-bottom');
 				const measurements = await panel.locator('button, [role="radio"]').evaluateAll((els) =>
@@ -133,12 +130,9 @@ for (const theme of ['light', 'dark']) {
 				await routeBackend(context, {
 					down: false,
 					read: () => ({
-						progress: Array.from({ length: 5 }, (_, i) => ({
+						presence: Array.from({ length: 5 }, (_, i) => ({
 							clientId: `full-${i}`,
 							name: `Buddy ${i}`,
-							videoId: 'fixture-video',
-							timestamp: i,
-							duration: 20,
 							updatedAt: 1800000000000,
 						})),
 					}),
@@ -172,8 +166,6 @@ test('On-video rows keep their order, toggle only from the pill, and explain Spo
 		await panel.getByRole('button', { name: 'Settings', exact: true }).click();
 		const group = panel.locator('.ytb-hs-set-group', { hasText: 'On-video' });
 		await expect(group.locator('.ytb-hs-row > span:first-child')).toHaveText([
-			'Show Buddy progress',
-			'Share video progress',
 			'Show Notes',
 			'Spoiler Default',
 			'Popup position',

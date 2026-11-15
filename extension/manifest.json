@@ -2,7 +2,7 @@
 	"manifest_version": 3,
 	"name": "YouTube Buddy",
 	"version": "0.1.0",
-	"description": "Passively share YouTube watch progress with a Buddy via a Room Code.",
+	"description": "Share Notes and Recommendations on YouTube with your Buddies via a Room Code.",
 	"icons": {
 		"16": "icons/icon-16.png",
 		"32": "icons/icon-32.png",
@@ -34,7 +34,7 @@
 				"content/room-code.js",
 				"content/mentions.js",
 				"content/reporter.js",
-				"content/renderer.js",
+				"content/room-poller.js",
 				"content/notes-style.js",
 				"content/notes-alerts.js",
 				"content/notes.js",

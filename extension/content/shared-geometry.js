@@ -1,6 +1,6 @@
 // extension/content/shared-geometry.js
-// Progress-bar and Note Band geometry on window.YTB, plus the #174 ownership
-// predicates - pure math, tested at the shared.js seam.
+// Progress-bar and Note Band geometry on window.YTB, plus the #174 own-churn
+// predicate - pure math, tested at the shared.js seam.
 
 (() => {
 	const YTB = window.YTB;
@@ -218,19 +218,6 @@
 				if (churn.length === 0 || !churn.every(isOwned)) return false;
 			}
 			return any;
-		},
-
-		// Whether YouTube's hover-autoplay preview host covers a tile's thumbnail
-		// box (#174; caller already matched videoIds). The host overflows its tile
-		// on every side, so requiring the intersection to cover at least half the
-		// tile's area keeps a duplicate elsewhere in the feed owning its own dots.
-		previewOwnsTile(previewRect, tileRect) {
-			if (!previewRect || !tileRect) return false;
-			const width = Math.min(previewRect.right, tileRect.right) - Math.max(previewRect.left, tileRect.left);
-			const height = Math.min(previewRect.bottom, tileRect.bottom) - Math.max(previewRect.top, tileRect.top);
-			if (width <= 0 || height <= 0) return false;
-			const tileArea = (tileRect.right - tileRect.left) * (tileRect.bottom - tileRect.top);
-			return tileArea > 0 && width * height >= tileArea / 2;
 		},
 	});
 })();

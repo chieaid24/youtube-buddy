@@ -251,7 +251,6 @@
 			composer.append(off);
 		}
 
-		// Sharing does not gate Note writes (CONTEXT.md): the form always builds in a Room.
 		const syncDraft = buildForm(composer, config, timestamp, notesOff);
 		// The watch-page Recommend Control (playlist-add.js), live whatever Notes Visibility says.
 		if (window.YTBRecommend) composer.append(YTBRecommend.buildStrip());

@@ -1,16 +1,6 @@
 // UA-011: UI copy is printable ASCII; user-authored content may contain emoji.
 import { expect, test } from '@playwright/test';
-import {
-	launchExtension,
-	makeData,
-	nudgeUntil,
-	openHomePanel,
-	homeFixture,
-	playbackFixture,
-	PIXEL_PNG,
-	routeBackend,
-	seedPaired,
-} from './harness';
+import { launchExtension, makeData, nudgeUntil, openHomePanel, homeFixture, PIXEL_PNG, routeBackend, seedPaired } from './harness';
 
 const nonAscii = (text: string) => [...text].filter((c) => c.charCodeAt(0) > 0x7e);
 
@@ -21,23 +11,10 @@ test('UA-011: rendered UI copy is printable ASCII', async () => {
 		const state = { down: false, read: () => d };
 		routeBackend(context, state);
 		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({
-				status: 200,
-				contentType: 'text/html',
-				body: new URL(route.request().url()).pathname === '/watch' ? playbackFixture : homeFixture,
-			}),
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
 		);
 		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL_PNG }));
 		const popup = await seedPaired(context);
-
-		// Watch page: Buddy marker tooltips.
-		const watch = await context.newPage();
-		await watch.goto('https://www.youtube.com/watch?v=fixture-video');
-		await nudgeUntil(watch, () => document.querySelectorAll('.ytb-watch-marker').length >= 2);
-		const markerText = await watch.evaluate(() =>
-			[...document.querySelectorAll('.ytb-watch-marker')].map((m) => m.textContent || '').join('\n'),
-		);
-		expect.soft(nonAscii(markerText), `marker tooltips: ${markerText}`).toEqual([]);
 
 		// Home section, paired + Connection Lost states (the feed here carries no
 		// user-authored emoji, so every non-ASCII hit is OUR copy).

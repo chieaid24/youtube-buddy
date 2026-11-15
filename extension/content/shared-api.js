@@ -8,22 +8,18 @@
 	const channelLookups = new Map(); // videoId -> Promise<string>
 
 	Object.assign(YTB, {
-		// POST this user's current Progress Record (server sets updatedAt);
-		// tolerates failure silently per the PRD.
-		async postProgress({ clientId, name, videoId, timestamp, duration }) {
+		// POST this member's Watch Record for a video (server sets watchedAt; a
+		// repeat is a server no-op); fails silently.
+		async postWatched(videoId) {
 			const { code } = await YTB.getConfig();
-			if (!code) return false; // Unpaired - nothing to share.
+			if (!code || !videoId) return false; // Unpaired - nobody to tell.
+			const clientId = await YTB.ensureClientId();
+			if (!YTB.isContextActive()) return false;
 			try {
-				const res = await fetch(YTB.BACKEND_URL + '/?code=' + encodeURIComponent(code), {
+				const res = await fetch(YTB.BACKEND_URL + '/watched?code=' + encodeURIComponent(code), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						clientId,
-						name,
-						videoId,
-						timestamp,
-						duration,
-					}),
+					body: JSON.stringify({ clientId, videoId }),
 				});
 				return res.ok ? { ok: true } : false;
 			} catch {
@@ -36,7 +32,7 @@
 		// ok:false on any failure so callers never null-check.
 		async getRecords(code) {
 			const empty = {
-				progress: [],
+				watched: [],
 				presence: [],
 				notes: [],
 				replies: [],
@@ -53,7 +49,7 @@
 				}
 				const data = await res.json();
 				return {
-					progress: Array.isArray(data && data.progress) ? data.progress : [],
+					watched: Array.isArray(data && data.watched) ? data.watched : [],
 					presence: Array.isArray(data && data.presence) ? data.presence : [],
 					notes: Array.isArray(data && data.notes) ? data.notes : [],
 					replies: Array.isArray(data && data.replies) ? data.replies : [],
@@ -100,8 +96,7 @@
 		},
 
 		// Post a text Note or curated-emoji Reaction. Requires a Room Code;
-		// Sharing does NOT gate Note writes (CONTEXT.md). videoTitle is captured
-		// at post time (watchTitle) and never required.
+		// videoTitle is captured at post time (watchTitle) and never required.
 		async postNote({ clientId, name, videoId, videoTitle, videoChannel, timestamp, kind, body, spoiler, mentions }) {
 			const { code } = await YTB.getConfig();
 			if (!code) return { ok: false, category: 'unpaired' };
@@ -135,7 +130,7 @@
 		},
 
 		// Recommend a video to the Room (ADR-0007; API keeps the playlist name).
-		// NOT gated by Sharing; re-adding is a server no-op returning the item.
+		// Re-adding is a server no-op returning the item.
 		async postPlaylistAdd({ clientId, name, videoId, title, channel }) {
 			const { code } = await YTB.getConfig();
 			if (!code) return { ok: false, category: 'unpaired' };
@@ -207,8 +202,8 @@
 			}
 		},
 
-		// Announce "I'm here" under `code`, independent of watching/Sharing;
-		// idempotent upsert doubling as a keep-alive.
+		// Announce "I'm here" under `code`, independent of watching; idempotent
+		// upsert doubling as a keep-alive.
 		async assertPresence(code, joining = false) {
 			if (!code) return false; // Unpaired - nobody to appear to.
 			const { name } = await YTB.getConfig();

@@ -1,4 +1,4 @@
-// Presence asserter: announces "I'm here" under the active Room Code, independent of watching/Sharing.
+// Presence asserter: announces "I'm here" under the active Room Code, independent of watching.
 // Loaded after shared.js, before content.js; a pure consumer of its ytb:navigate events (ADR-0001).
 
 (() => {
@@ -8,7 +8,7 @@
 
 	let lastAssert = 0;
 
-	// Reasserts if the throttle has elapsed; independent of Sharing, not gated to /watch.
+	// Reasserts if the throttle has elapsed; not gated to /watch.
 	async function maybeAssert() {
 		if (!YTB.isContextActive()) return;
 		if (Date.now() - lastAssert < ASSERT_INTERVAL_MS) return;

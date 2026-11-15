@@ -78,21 +78,6 @@ export const homeFixture = `<!doctype html>
   </body>
 </html>`;
 
-export const watchedByDotsFixture = `<!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>YouTube watched-by-dots fixture</title>
-    <style>body { margin: 0; padding: 24px; } ytd-rich-item-renderer, yt-lockup-view-model, yt-thumbnail-view-model { display: block; }</style>
-  </head>
-  <body>
-    <a id="classic-anchor" href="/watch?v=vid-classic" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
-      <img alt="" style="display: block; width: 100%; height: 100%">
-    </a>
-    <a id="classic-two" href="/watch?v=vid-two" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
-      <img alt="" style="display: block; width: 100%; height: 100%">
-    </a>
-  </body>
-</html>`;
-
 export const PIXEL_PNG = Buffer.from(
 	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
 	'base64',
@@ -102,7 +87,7 @@ export const SEED_COLORS = { 'silly-otters': { 'buddy-1': '#00a6d6', 'buddy-2': 
 export const VIEWER = 'viewer-ua';
 
 export type RoomRead = {
-	progress?: object[];
+	watched?: object[];
 	presence?: object[];
 	notes?: object[];
 	replies?: object[];
@@ -127,7 +112,7 @@ export function routeBackend(context: BrowserContext, state: BackendState) {
 							replies: (data.replies || []).filter((r: any) => r.noteId === url.searchParams.get('noteId')),
 						}
 					: {
-							progress: data.progress || [],
+							watched: data.watched || [],
 							presence: data.presence || [],
 							notes: data.notes || [],
 							replies: data.replies || [],
@@ -149,9 +134,9 @@ export function makeData(now: number) {
 		{ clientId: 'buddy-1', name: 'Sam', updatedAt: now - 5.5 * MIN },
 		{ clientId: 'buddy-2', name: 'Kim', updatedAt: now - 2.5 * HOUR },
 	];
-	const progress = [
-		{ clientId: 'buddy-1', name: 'Sam', videoId: 'fixture-video', timestamp: 6, duration: 20, updatedAt: now - 5.5 * MIN },
-		{ clientId: 'buddy-2', name: 'Kim', videoId: 'fixture-video', timestamp: 14, duration: 20, updatedAt: now - 2.5 * HOUR },
+	const watched = [
+		{ clientId: 'buddy-1', videoId: 'fixture-video', watchedAt: now - 5.5 * MIN },
+		{ clientId: 'buddy-2', videoId: 'fixture-video', watchedAt: now - 2.5 * HOUR },
 	];
 	const notes = [
 		{
@@ -233,7 +218,7 @@ export function makeData(now: number) {
 		{ id: 'e2', type: 'added', videoId: 'vid-own', title: 'My Pick', actorClientId: VIEWER, at: now - 25 * HOUR },
 		{ id: 'e3', type: 'added', videoId: 'vid-gone', title: 'Gone Pick', actorClientId: 'buddy-1', at: now - 24.5 * HOUR },
 	];
-	return { presence, progress, notes, replies, playlist, events };
+	return { presence, watched, notes, replies, playlist, events };
 }
 
 /** Seed the paired-Room config through the popup page; returns the popup. */
@@ -249,7 +234,6 @@ export async function seedPaired(context: BrowserContext, storage: Record<string
 		code: 'silly-otters',
 		clientId: VIEWER,
 		name: 'Alex',
-		sharing: true,
 		buddyColors: SEED_COLORS,
 		...storage,
 	});
