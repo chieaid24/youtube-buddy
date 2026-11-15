@@ -280,7 +280,7 @@
 		// pending Recommend Intent overlaid (CONTEXT.md). A Buddy's addedBy
 		// outranks a pending 'mine' (a no-op recommend settles to "Recommended to
 		// you" as a correction, not a flicker).
-		recommendPillState({ addedBy, myClientId, pending }) {
+		recommendControlState({ addedBy, myClientId, pending }) {
 			const effective = pending === 'mine' ? (addedBy === undefined ? myClientId : addedBy) : pending === 'absent' ? undefined : addedBy;
 			if (effective === undefined) return 'idle';
 			return myClientId && effective === myClientId ? 'recommended' : 'added';

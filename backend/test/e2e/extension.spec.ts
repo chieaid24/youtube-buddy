@@ -1747,9 +1747,6 @@ function playbackFixture(mediaSrc: string) {
         <div class="ytp-left-controls"></div>
       </div>
     </main>
-    <ytd-watch-metadata>
-      <div id="actions"><div id="top-level-buttons-computed"></div></div>
-    </ytd-watch-metadata>
   </body>
 </html>`;
 }
@@ -1859,29 +1856,30 @@ test('foreground write failures distinguish an unreachable backend from server r
 		const noteComposer = page.locator('#ytb-note-composer');
 		const noteError = noteComposer.locator('.ytb-note-error');
 		const panel = page.locator('#ytb-note-panel');
-		const pill = page.locator('#ytb-playlist-add-button');
+		const recommend = page.locator('#ytb-playlist-add-button');
+		const feedback = page.locator('.ytb-recommend-strip #ytb-playlist-feedback');
 
 		await nudgeUntil(page, () => expect(page.locator('.ytb-note-dot-text')).toHaveCount(1, { timeout: 700 }));
-		await expect(pill).toHaveText('Recommend to Buddies');
 
 		// One failed attempt surfaces connectivity immediately on each explicit-write
 		// surface. The draft stays in place for a direct retry.
 		await page.locator('#ytb-note-button').click();
+		await expect(recommend).toHaveText('Recommend to Buddies');
 		await noteComposer.locator('textarea').fill('network note');
 		await page.keyboard.press('Enter');
 		await expect(noteError).toHaveText(networkCopy);
+
+		await recommend.click();
+		// Optimistic strip: the label flips at once, then the failed write rolls it
+		// back with the reason in the feedback line - never in the label itself.
+		await expect(feedback).toHaveText(networkCopy);
+		await expect(recommend).toHaveText('Recommend to Buddies');
 
 		await page.keyboard.press('Escape');
 		await page.locator('.ytb-note-dot-text').click();
 		await panel.locator('.ytb-panel-reply-input').fill('network reply');
 		await page.keyboard.press('Enter');
 		await expect(panel.locator('.ytb-panel-error')).toHaveText(networkCopy);
-
-		await pill.click();
-		// Optimistic pill: the label flips at once, then the failed write rolls it
-		// back with the reason in the popover — never in the label itself.
-		await expect(page.locator('#ytb-playlist-feedback')).toHaveText(networkCopy);
-		await expect(pill).toHaveText('Recommend to Buddies');
 		expect(errors).toHaveLength(3);
 		expect(errors.every((error) => error.includes('ERR_CONNECTION_REFUSED'))).toBe(true);
 		errors.length = 0;
@@ -1895,20 +1893,20 @@ test('foreground write failures distinguish an unreachable backend from server r
 		await page.keyboard.press('Enter');
 		await expect(noteError).toHaveText("This Room is full, so you can't post here.");
 
+		await expect(recommend).toHaveAttribute('data-ytb-state', 'idle', { timeout: 2500 });
+		// Playwright can reach this click inside the strip's 1s cooldown from the
+		// network-phase click above; a swallowed click is by design, so wait it out.
+		await page.waitForTimeout(1100);
+		await recommend.click();
+		// The category copy goes to the feedback line; the reverted label never carries it.
+		await expect(feedback).toHaveText('Room list full');
+		await expect(recommend).toHaveText('Recommend to Buddies');
+
 		await page.keyboard.press('Escape');
 		await page.locator('.ytb-note-dot-text').click();
 		await panel.locator('.ytb-panel-reply-input').fill('eleventh reply');
 		await page.keyboard.press('Enter');
 		await expect(panel.locator('.ytb-panel-error')).toHaveText('This note already has 10 replies.');
-
-		await expect(pill).toHaveAttribute('data-ytb-state', 'idle', { timeout: 2500 });
-		// Playwright reaches this click well inside the pill's 1s cooldown from the
-		// network-phase click above; a swallowed click is by design, so wait it out.
-		await page.waitForTimeout(1100);
-		await pill.click();
-		// The category copy goes to the popover; the reverted label never carries it.
-		await expect(page.locator('#ytb-playlist-feedback')).toHaveText('Room list full');
-		await expect(pill).toHaveText('Recommend to Buddies');
 		expect(errors).toHaveLength(3);
 		expect(errors.every((error) => error.includes('409 (Conflict)'))).toBe(true);
 	} finally {
@@ -2884,7 +2882,7 @@ test("a Post Echo fires the author's own Playback Notification on posting — pa
 
 		// 5. Notes Visibility off renders nothing, the echo included.
 		await popup.evaluate(() => chrome.storage.local.set({ notesHidden: true }));
-		await expect(page.locator('#ytb-note-button')).toHaveCount(0); // no + button: the guard's path is unreachable
+		await expect(page.locator('.ytb-note-dot')).toHaveCount(0); // the + stays, but its note form is disabled
 		await page.evaluate(() =>
 			document.dispatchEvent(
 				new CustomEvent('ytb:note-posted', {
@@ -3176,9 +3174,9 @@ test('a hovered Reaction preview renders at natural height with its corner times
 	}
 });
 
-// A watch page with the Like/Share/Save actions row, where playlist-add.js
-// injects the "Recommend to Buddies" pill.
-const watchActionsFixture = `<!doctype html>
+// A watch page with a titled video and the player control bar: the + button
+// there opens the Note Composer, whose footer is the Recommend strip.
+const watchFixture = `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>YouTube watch fixture</title></head>
   <body>
@@ -3191,12 +3189,19 @@ const watchActionsFixture = `<!doctype html>
     </main>
     <ytd-watch-metadata>
       <h1>Fixture Video</h1>
-      <div id="actions"><div id="top-level-buttons-computed"></div></div>
     </ytd-watch-metadata>
   </body>
 </html>`;
 
-test('watch pill offers Unrecommend on an own Recommendation and un-recommends for everyone', async () => {
+/** Open the Note Composer (the Recommend strip's host) once the + button mounts. */
+async function openComposer(page: Page) {
+	const button = page.locator('#ytb-note-button');
+	await nudgeUntil(page, () => expect(button).toHaveCount(1, { timeout: 700 }));
+	await button.click();
+	await expect(page.locator('#ytb-note-composer')).toBeVisible();
+}
+
+test('the Recommend strip offers Unrecommend on an own Recommendation and un-recommends for everyone', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -3208,22 +3213,26 @@ test('watch pill offers Unrecommend on an own Recommendation and un-recommends f
 			calls,
 		);
 		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
 		);
 		await seedPairedRoom(context);
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await openComposer(page);
 
-		// The pill lands as "Recommend to Buddies" and flips to the "Unrecommend"
-		// toggle state once the Room read shows this viewer recommended the video.
-		const pill = page.locator('#ytb-playlist-add-button');
-		await nudgeUntil(page, () => expect(pill).toHaveText('Unrecommend', { timeout: 700 }));
+		// Once the Room read shows this viewer recommended the video, the strip
+		// reports it and offers the "Unrecommend" action beside the status.
+		const recommend = page.locator('#ytb-playlist-add-button');
+		const status = page.locator('.ytb-recommend-strip .ytb-recommend-status');
+		await expect(recommend).toHaveText('Unrecommend');
+		await expect(status).toHaveText('You recommended this');
 
-		// Clicking un-recommends: the label flips optimistically (before the wire
+		// Clicking un-recommends: the strip flips optimistically (before the wire
 		// write), then exactly one DELETE /playlist goes out, attributed to the viewer.
-		await pill.click();
-		await expect(pill).toHaveText('Recommend to Buddies');
+		await recommend.click();
+		await expect(recommend).toHaveText('Recommend to Buddies');
+		await expect(status).toBeHidden();
 		await expect.poll(() => calls.filter((call) => call.startsWith('DELETE ')).length).toBe(1);
 		const deletes = calls.filter((call) => call.startsWith('DELETE '));
 		expect(deletes[0]).toContain('/playlist?code=roome2e&clientId=viewer-e2e&videoId=fixture-video');
@@ -3234,7 +3243,37 @@ test('watch pill offers Unrecommend on an own Recommendation and un-recommends f
 	}
 });
 
-test('the Recommend pill is optimistic: flips before the write lands, absorbs the cooldown, coalesces a mid-flight toggle', async () => {
+test('the Recommend strip reports a Buddy Recommendation as "Recommended to you" with nothing to toggle', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(
+			context,
+			{ playlist: [{ videoId: 'fixture-video', title: 'Fixture Video', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 1000 }] },
+			calls,
+		);
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await openComposer(page);
+
+		await expect(page.locator('.ytb-recommend-strip .ytb-recommend-status')).toHaveText('Recommended to you');
+		await expect(page.locator('#ytb-playlist-add-button')).toBeHidden();
+		expect(calls.filter((call) => !call.startsWith('GET ') && call.includes('/playlist'))).toEqual([]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('the Recommend strip is optimistic: flips before the write lands, absorbs the cooldown, coalesces a mid-flight toggle', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
@@ -3256,7 +3295,7 @@ test('the Recommend pill is optimistic: flips before the write lands, absorbs th
 				});
 			}
 			if (request.method() === 'POST' && url.pathname === '/playlist') {
-				// Hold the add open until the test releases it: everything the pill
+				// Hold the add open until the test releases it: everything the strip
 				// does before then happens with the response still in flight.
 				await new Promise<void>((resolve) => {
 					releaseAdd = resolve;
@@ -3275,49 +3314,51 @@ test('the Recommend pill is optimistic: flips before the write lands, absorbs th
 			return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ ok: true }) });
 		});
 		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
 		);
 		await seedPairedRoom(context);
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		const pill = page.locator('#ytb-playlist-add-button');
-		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
+		await openComposer(page);
+		const recommend = page.locator('#ytb-playlist-add-button');
+		await expect(recommend).toHaveText('Recommend to Buddies');
 
-		// The click flips the pill's state immediately — the POST is still in
-		// flight — with no "Recommending..." label and no disabled lockout. The own
+		// The click flips the strip's state immediately - the POST is still in
+		// flight - with no "Recommending..." label and no disabled lockout. The own
 		// idle -> recommend click also plays the Recommend Celebration, so the label
 		// reads "Recommended!" through the beat before it settles to "Unrecommend".
-		await pill.click();
-		await expect(pill).toHaveAttribute('data-ytb-state', 'recommended');
-		await expect(pill).toHaveText('Recommended!');
+		await recommend.click();
+		await expect(recommend).toHaveAttribute('data-ytb-state', 'recommended');
+		await expect(recommend).toHaveText('Recommended!');
 		expect(addSettled).toBe(false);
-		await expect(pill).not.toBeDisabled();
+		await expect(recommend).not.toBeDisabled();
 
 		// A second click inside the 1s cooldown is silently ignored: the state
 		// holds, with no visual sign of the cooldown.
-		await pill.click();
-		await expect(pill).toHaveAttribute('data-ytb-state', 'recommended');
-		await expect(pill).not.toBeDisabled();
-		expect(await pill.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
+		await recommend.click();
+		await expect(recommend).toHaveAttribute('data-ytb-state', 'recommended');
+		await expect(recommend).not.toBeDisabled();
+		expect(await recommend.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
 
-		// Past the cooldown, a genuine toggle while the add is still in flight is
-		// accepted — optimistically, again...
-		await page.waitForTimeout(1100);
-		await pill.click();
-		await expect(pill).toHaveText('Recommend to Buddies');
+		// Past the cooldown (the 1.2s beat outlasts it, and settling moves the
+		// button), a genuine toggle while the add is still in flight is accepted -
+		// optimistically, again...
+		await expect(recommend).toHaveText('Unrecommend', { timeout: 3000 });
+		await recommend.click();
+		await expect(recommend).toHaveText('Recommend to Buddies');
 		expect(addSettled).toBe(false);
 		// ...but at most one write per video flies: still one POST, no DELETE yet.
 		expect(calls.filter((c) => c.startsWith('POST /playlist'))).toHaveLength(1);
 		expect(calls.filter((c) => c.startsWith('DELETE '))).toHaveLength(0);
 
 		// Release the add: the moved intent goes out as a single delta DELETE and
-		// the pill keeps the newest intent's state — the late response never wins.
+		// the strip keeps the newest intent's state - the late response never wins.
 		await expect.poll(() => releaseAdd !== null).toBe(true);
 		releaseAdd!();
 		await expect.poll(() => calls.filter((c) => c.startsWith('DELETE /playlist')).length).toBe(1);
 		expect(calls.filter((c) => c.startsWith('POST /playlist'))).toHaveLength(1);
-		await expect(pill).toHaveText('Recommend to Buddies');
+		await expect(recommend).toHaveText('Recommend to Buddies');
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -3325,32 +3366,41 @@ test('the Recommend pill is optimistic: flips before the write lands, absorbs th
 	}
 });
 
-test('idle -> recommend celebrates: "Recommended!" beat + apricot confetti, then settles to Unrecommend; un-recommend stays plain', async () => {
+test('idle -> recommend celebrates in the open composer: "Recommended!" beat + apricot confetti, then settles; un-recommend stays plain', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
 	try {
 		await stubRoomBackend(context, {});
 		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
 		);
 		await seedPairedRoom(context);
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		const pill = page.locator('#ytb-playlist-add-button');
-		const confetti = page.locator('.ytb-recommend-confetti');
-		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
-		const idleFill = await pill.evaluate((b) => getComputedStyle(b).backgroundColor);
+		await openComposer(page);
+		const strip = page.locator('.ytb-recommend-strip');
+		const recommend = page.locator('#ytb-playlist-add-button');
+		const confetti = strip.locator('.ytb-recommend-confetti'); // inside the player, so fullscreen keeps it
+		await expect(recommend).toHaveText('Recommend to Buddies');
+		const accentFill = await page.evaluate(() => {
+			const probe = document.createElement('div');
+			probe.style.background = 'var(--ytb-accent-500)';
+			document.body.append(probe);
+			const fill = getComputedStyle(probe).backgroundColor;
+			probe.remove();
+			return fill;
+		});
 
 		// The local idle -> recommend click celebrates: the label swaps to
 		// "Recommended!" with a one-shot apricot confetti burst.
-		await pill.click();
-		await expect(pill).toHaveText('Recommended!');
-		// The celebrating pill fills apricot for a readable label — the same fill as
-		// the idle pill — even though the click leaves the pointer hovering it (the
-		// resting mine-state's :hover must not win over the celebration).
-		expect(await pill.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(idleFill);
+		await recommend.click();
+		await expect(recommend).toHaveText('Recommended!');
+		// The celebrating band fills apricot for a readable label even though the
+		// click leaves the pointer hovering it (the hover wash must not win over
+		// the celebration).
+		await expect.poll(() => recommend.evaluate((b) => getComputedStyle(b).backgroundColor)).toBe(accentFill);
 		await expect(confetti).toHaveCount(1);
 		expect(await confetti.locator('span').count()).toBeGreaterThan(0);
 		// The burst is non-interactive and tinted from an --ytb-* accent token, so
@@ -3362,18 +3412,21 @@ test('idle -> recommend celebrates: "Recommended!" beat + apricot confetti, then
 				.first()
 				.evaluate((el) => getComputedStyle(el).backgroundColor),
 		).not.toBe('rgba(0, 0, 0, 0)');
-		// The beat lives on the label and the burst layer; the button's own opacity
-		// is never touched (it is not a loading or disabled state).
-		expect(await pill.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
+		// The beat lives on the label, the fill, and the burst layer; the button's
+		// own opacity is never touched (it is not a loading or disabled state).
+		expect(await recommend.evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
 
-		// It settles to the resting "Unrecommend" and the confetti is fully removed.
-		await expect(pill).toHaveText('Unrecommend', { timeout: 3000 });
+		// It settles to the resting status with the "Unrecommend" action, the
+		// confetti is fully removed, and the composer stays open throughout.
+		await expect(recommend).toHaveText('Unrecommend', { timeout: 3000 });
+		await expect(strip.locator('.ytb-recommend-status')).toHaveText('You recommended this');
 		await expect(confetti).toHaveCount(0, { timeout: 3000 });
+		await expect(page.locator('#ytb-note-composer')).toBeVisible();
 
 		// Un-recommend (mine -> idle) is plain: no "Recommended!", no burst.
 		await page.waitForTimeout(1100); // clear the 1s click cooldown
-		await pill.click();
-		await expect(pill).toHaveText('Recommend to Buddies');
+		await recommend.click();
+		await expect(recommend).toHaveText('Recommend to Buddies');
 		await expect(confetti).toHaveCount(0);
 
 		expect(errors, errors.join('\n')).toEqual([]);
@@ -3389,23 +3442,107 @@ test('the Recommend Celebration honors prefers-reduced-motion: the label still s
 	try {
 		await stubRoomBackend(context, {});
 		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: watchActionsFixture }),
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
 		);
 		await seedPairedRoom(context);
 
 		const page = await context.newPage();
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
-		const pill = page.locator('#ytb-playlist-add-button');
-		await nudgeUntil(page, () => expect(pill).toHaveText('Recommend to Buddies', { timeout: 700 }));
+		await openComposer(page);
+		const recommend = page.locator('#ytb-playlist-add-button');
+		await expect(recommend).toHaveText('Recommend to Buddies');
 
-		await pill.click();
+		await recommend.click();
 		// The label still celebrates "Recommended!"...
-		await expect(pill).toHaveText('Recommended!');
+		await expect(recommend).toHaveText('Recommended!');
 		// ...but no particle burst is ever spawned...
 		await expect(page.locator('.ytb-recommend-confetti')).toHaveCount(0);
 		// ...and it still settles to the resting label.
-		await expect(pill).toHaveText('Unrecommend', { timeout: 3000 });
+		await expect(recommend).toHaveText('Unrecommend', { timeout: 3000 });
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('Notes Visibility off keeps the + button: the note form is disabled under a hint and the Recommend strip still works', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		await stubRoomBackend(context, {}, calls);
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.evaluate(() => chrome.storage.local.set({ notesHidden: true }));
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await openComposer(page);
+		const composer = page.locator('#ytb-note-composer');
+		const recommend = page.locator('#ytb-playlist-add-button');
+
+		// Every note control is disabled under the hint; nothing can post.
+		await expect(composer.locator('.ytb-note-off')).toHaveText('Notes are off. Turn on Show Notes in Settings.');
+		await expect(composer.locator('textarea')).toBeDisabled();
+		await expect(composer.locator('input[type="checkbox"]')).toBeDisabled();
+		await expect(composer.locator('.ytb-note-post')).toBeDisabled();
+		await expect(composer.locator('.ytb-note-emoji')).toHaveCount(6);
+		await expect(composer.locator('.ytb-note-emoji:not(:disabled)')).toHaveCount(0);
+
+		// The Recommend strip is the live action, so it takes the opening focus.
+		await expect(recommend).toBeFocused();
+		await recommend.click();
+		await expect(recommend).toHaveText('Recommended!');
+		await expect.poll(() => calls.filter((call) => call.startsWith('POST ') && call.includes('/playlist')).length).toBe(1);
+		expect(calls.filter((call) => call.startsWith('POST ') && call.includes('/notes'))).toEqual([]);
+
+		// Turning Show Notes back on closes the stale panel; the next open has a live form.
+		await popup.evaluate(() => chrome.storage.local.set({ notesHidden: false }));
+		await expect(composer).toHaveCount(0);
+		await page.locator('#ytb-note-button').click();
+		await expect(composer.locator('textarea')).toBeFocused();
+		await expect(composer.locator('.ytb-note-off')).toHaveCount(0);
+		await expect(composer.locator('.ytb-note-emoji:disabled')).toHaveCount(0);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
+test('composer buttons keep their keys from the page: Space activates the focused Recommend strip, Escape closes', async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: watchFixture }),
+		);
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await openComposer(page);
+		// Stand-in for YouTube's capture-phase hotkeys: every key the page sees.
+		await page.evaluate(() => {
+			const seen: string[] = [];
+			(window as unknown as { pageKeys: string[] }).pageKeys = seen;
+			document.addEventListener('keydown', (event) => seen.push(event.key), true);
+		});
+
+		const recommend = page.locator('#ytb-playlist-add-button');
+		await recommend.focus();
+		await page.keyboard.press('Space');
+		await expect(recommend).toHaveText('Recommended!');
+		await page.keyboard.press('Escape');
+		await expect(page.locator('#ytb-note-composer')).toHaveCount(0);
+		expect(await page.evaluate(() => (window as unknown as { pageKeys: string[] }).pageKeys)).toEqual([]);
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -4387,12 +4524,13 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		await expect(popup.evaluate(() => document.documentElement.hasAttribute('data-theme'))).resolves.toBe(false);
 
-		// Notes off: zero Note UI on the player, live — dots AND the + button —
-		// while the Buddy marker (independent setting) survives. Back on restores.
+		// Notes off: the dots leave the player, live, while the Buddy marker
+		// (independent setting) survives and the + button stays for the Recommend
+		// strip. Back on restores.
 		const notesToggle = homePanel.getByRole('switch', { name: 'Show Notes' });
 		await notesToggle.click();
 		await expect(dots).toHaveCount(0);
-		await expect(page.locator('#ytb-note-button')).toHaveCount(0);
+		await expect(page.locator('#ytb-note-button')).toBeVisible();
 		await expect(page.locator('.ytb-watch-marker')).toHaveCount(1);
 		await notesToggle.click();
 		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));

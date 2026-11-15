@@ -1859,7 +1859,7 @@ describe('recommended to you helpers (ADR-0007)', () => {
 describe('the optimistic Recommend Control (Recommend Intent overlay)', () => {
 	const me = 'me111111';
 	const buddy = 'bob22222';
-	const state = (args: object) => window.YTB.recommendPillState(args);
+	const state = (args: object) => window.YTB.recommendControlState(args);
 	const settled = (args: object) => window.YTB.recommendIntentSettled(args);
 
 	it('renders the three Room-driven states with no pending intent', () => {
@@ -1870,7 +1870,7 @@ describe('the optimistic Recommend Control (Recommend Intent overlay)', () => {
 		expect(state({ addedBy: buddy, myClientId: null })).toBe('added');
 	});
 
-	it("overlays a pending 'mine' so a stale Room read cannot flip the pill back", () => {
+	it("overlays a pending 'mine' so a stale Room read cannot flip the strip back", () => {
 		// The just-clicked recommend shows Unrecommend before any response...
 		expect(state({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe('recommended');
 		// ...and a Room read that already carries my item changes nothing.
@@ -1878,7 +1878,7 @@ describe('the optimistic Recommend Control (Recommend Intent overlay)', () => {
 	});
 
 	it("overlays a pending 'absent' so a stale Room read still shows the un-recommend", () => {
-		// The Room read that raced the DELETE still carries my item; the pill
+		// The Room read that raced the DELETE still carries my item; the strip
 		// must keep offering to recommend again, not flash back to Unrecommend.
 		expect(state({ addedBy: me, myClientId: me, pending: 'absent' })).toBe('idle');
 		expect(state({ addedBy: undefined, myClientId: me, pending: 'absent' })).toBe('idle');
@@ -1886,7 +1886,7 @@ describe('the optimistic Recommend Control (Recommend Intent overlay)', () => {
 
 	it("lets the server's addedBy win the Buddy-already-recommended reconcile", () => {
 		// My add was a no-op onto the Buddy's item: their addedBy outranks the
-		// optimistic guess — the pill corrects to "Recommended to you".
+		// optimistic guess - the strip corrects to "Recommended to you".
 		expect(state({ addedBy: buddy, myClientId: me, pending: 'mine' })).toBe('added');
 	});
 
@@ -1908,8 +1908,8 @@ describe('the optimistic Recommend Control (Recommend Intent overlay)', () => {
 		expect(settled({ addedBy: undefined, myClientId: me, pending: undefined })).toBe(true);
 	});
 
-	it('Feed-mirror no-drift: after a settle the pill is driven purely by Room data', () => {
-		// The exact sequence the pill lives through: optimistic flip, stale read
+	it('Feed-mirror no-drift: after a settle the strip is driven purely by Room data', () => {
+		// The exact sequence the strip lives through: optimistic flip, stale read
 		// (overlay holds), fresh read (settle), then Room data alone.
 		expect(state({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe('recommended');
 		expect(settled({ addedBy: undefined, myClientId: me, pending: 'mine' })).toBe(false);
@@ -2460,7 +2460,7 @@ declare global {
 				rowTooltip: string | null;
 				srSuffix: string | null;
 			};
-			recommendPillState(args: object): 'idle' | 'recommended' | 'added';
+			recommendControlState(args: object): 'idle' | 'recommended' | 'added';
 			recommendIntentSettled(args: object): boolean;
 		};
 	}

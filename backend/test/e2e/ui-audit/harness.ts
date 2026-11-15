@@ -58,9 +58,6 @@ export const playbackFixture = `<!doctype html>
         <div class="ytp-left-controls"></div>
       </div>
     </main>
-    <ytd-watch-metadata>
-      <div id="actions"><div id="top-level-buttons-computed"></div></div>
-    </ytd-watch-metadata>
   </body>
 </html>`;
 

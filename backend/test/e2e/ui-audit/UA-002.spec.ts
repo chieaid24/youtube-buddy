@@ -1,10 +1,24 @@
-// UA-002: the Buddy Room pill's outline states (is-added / is-recommended)
-// must meet AA against the page behind them - label >= 4.5:1, border >= 3:1 -
-// in both themes. Red while both render hardcoded #f6a96b on the page (1.94:1).
+// UA-002: Recommend strip text must meet AA (>= 4.5:1) against the Note
+// Composer surface in every state, in both themes.
 import { expect, test } from '@playwright/test';
-import { contrastRatio, launchExtension, makeData, nudgeUntil, playbackFixture, resolveColor, routeBackend, seedPaired } from './harness';
+import {
+	contrastRatio,
+	launchExtension,
+	makeData,
+	nudgeUntil,
+	playbackFixture,
+	routeBackend,
+	seedPaired,
+	textAndBackground,
+} from './harness';
 
-test('UA-002: pill outline states pass AA against the page in both themes', async () => {
+const STATES: [videoId: string, strip: string, texts: string[]][] = [
+	['fixture-video2', '.ytb-recommend-strip:not(.is-added):not(.is-recommended)', ['#ytb-playlist-add-button']],
+	['vid-inroom', '.ytb-recommend-strip.is-added', ['.ytb-recommend-status']],
+	['vid-own', '.ytb-recommend-strip.is-recommended', ['.ytb-recommend-status', '#ytb-playlist-add-button']],
+];
+
+test('UA-002: Recommend strip text passes AA on the composer in both themes', async () => {
 	const context = await launchExtension();
 	try {
 		const d = makeData(Date.now());
@@ -17,30 +31,17 @@ test('UA-002: pill outline states pass AA against the page in both themes', asyn
 
 		for (const theme of ['light', 'dark'] as const) {
 			await popup.evaluate((t) => chrome.storage.local.set({ theme: t }), theme);
-			// The fixture page stands in for YouTube, whose page background follows
-			// the theme; stamp it so contrast is measured against the real ground.
-			const pageBg = theme === 'dark' ? 'rgb(15, 15, 15)' : 'rgb(255, 255, 255)';
-			for (const [videoId, state] of [
-				['vid-inroom', 'is-added'],
-				['vid-own', 'is-recommended'],
-			] as const) {
+			for (const [videoId, strip, texts] of STATES) {
 				await page.goto(`https://www.youtube.com/watch?v=${videoId}`);
-				await page.evaluate((bg) => (document.body.style.background = bg), pageBg);
-				await nudgeUntil(page, () => {
-					const b = document.getElementById('ytb-playlist-add-button');
-					return Boolean(b && b.offsetParent !== null);
-				});
-				await expect(page.locator(`#ytb-playlist-add-button.${state}`)).toBeVisible();
-				const { color, borderColor } = await page.evaluate(() => {
-					const b = document.getElementById('ytb-playlist-add-button')!;
-					const s = getComputedStyle(b);
-					return { color: s.color, borderColor: s.borderTopColor };
-				});
-				const bg = [...(await resolveColor(page, pageBg))];
-				const label = contrastRatio([...(await resolveColor(page, color))], bg);
-				const border = contrastRatio([...(await resolveColor(page, borderColor))], bg);
-				expect.soft(label, `${state} label in ${theme}: ${label.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
-				expect.soft(border, `${state} border in ${theme}: ${border.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
+				await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+				await nudgeUntil(page, () => Boolean(document.getElementById('ytb-note-button')));
+				await page.click('#ytb-note-button');
+				await expect(page.locator(strip)).toBeVisible();
+				for (const text of texts) {
+					const { fg, bg } = await textAndBackground(page, `${strip} ${text}`);
+					const ratio = contrastRatio(fg, bg);
+					expect.soft(ratio, `${videoId} ${text} in ${theme}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+				}
 			}
 		}
 	} finally {

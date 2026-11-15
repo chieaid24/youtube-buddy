@@ -1,5 +1,5 @@
 // UA-016: on-video card spacing sits on the declared 4/8/12/16/20/24 scale
-// (DESIGN.md 1.3). Red while the notes/composer/mentions/pill stylesheets
+// (DESIGN.md 1.3). Red while the notes/composer/mentions/recommend stylesheets
 // hardcode 14, 10, 9, 11, 7, 6, 3, 2px values.
 import { expect, test } from '@playwright/test';
 import { launchExtension, makeData, nudgeUntil, playbackFixture, routeBackend, seedPaired } from './harness';

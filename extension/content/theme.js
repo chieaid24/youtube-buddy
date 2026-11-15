@@ -294,7 +294,9 @@
 	// event name is what hides it). Typing and the checkbox default stay
 	// native since the real event's default action is left alone.
 
-	const GUARDED_INPUTS = '#ytb-note-panel textarea, #ytb-note-composer textarea, #ytb-note-composer input[type="checkbox"]';
+	// Composer buttons too: YouTube eats Space on a focused one (it plays the video instead of activating it).
+	const GUARDED_INPUTS =
+		'#ytb-note-panel textarea, #ytb-note-composer textarea, #ytb-note-composer input[type="checkbox"], #ytb-note-composer button';
 
 	for (const type of ['keydown', 'keyup', 'keypress']) {
 		window.addEventListener(

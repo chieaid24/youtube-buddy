@@ -27,9 +27,9 @@ We chose **(b)**, with a client-local dismiss layer.
 
 - **Two distinct removal acts:**
   1. **Un-recommend (author only).** The recommender deletes their own Room item via the
-     watch-page "+ Buddy Room" pill toggle (which shows an "Unrecommend" action on videos
-     they recommended). This removes it for _everyone_ and emits **no** Room Feed
-     notification.
+     Recommend strip in the watch page's Note Composer (which shows an "Unrecommend"
+     action on videos they recommended). This removes it for _everyone_ and emits **no**
+     Room Feed notification.
   2. **Dismiss (recipient, local).** A recipient hides a recommendation from just their
      own grid. Dismissals are stored in `chrome.storage.local`, Room-scoped, mirroring
      Buddy Color storage; they never leave the browser and never hit the backend.
@@ -64,8 +64,9 @@ We chose **(b)**, with a client-local dismiss layer.
   playlist surface becomes "Recommended to you". Backend KV infixes (`playlist:`, `event:`)
   and the `YTB` API names are **retained** (no data migration); only the domain terms and
   semantics change.
-- A recommender manages and removes their own recommendations **only from the watch page**
-  (they are hidden from their own grid); there is no in-section "You recommended" strip.
+- A recommender manages and removes their own recommendations **only from the watch page**,
+  in the Note Composer's Recommend strip (they are hidden from their own grid); the Room
+  Home Panel has no "You recommended" list.
 - Two removal semantics coexist and can confuse: un-recommend is global and permanent;
   dismiss is local. There is no un-dismiss UI initially (a dismissed video stays hidden in
   that Room for that install). Dismiss is keyed by videoId, so a later re-recommend does

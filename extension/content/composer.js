@@ -14,8 +14,8 @@
 	// panel, not on focus (auto-focus would pin the chrome for as long as it's open).
 	let holdRelease = null;
 
-	// Spoiler Default seeds the checkbox on each open; the + button is removed while
-	// Notes Visibility is off or Unpaired (need a Room to read Notes, so to write them).
+	// Spoiler Default seeds the checkbox on each open. Notes Visibility off keeps the + button
+	// but disables the note form, so the Recommend strip stays reachable; Unpaired removes it.
 	let spoilerDefault = false;
 	let notesHidden = false;
 	let hasRoomCode = false; // Room membership gates the + button (Unpaired hides it)
@@ -36,8 +36,7 @@
 		if (changes.spoilerDefault) spoilerDefault = changes.spoilerDefault.newValue === true;
 		if (changes.notesHidden) {
 			notesHidden = changes.notesHidden.newValue === true;
-			if (notesHidden) closeComposer(); // dismissal semantics: lease-aware resume
-			ensureButton();
+			closeComposer(); // the form's enabled state is fixed at open; lease-aware resume
 		}
 		if (changes.code) {
 			hasRoomCode = Boolean(changes.code.newValue);
@@ -97,7 +96,9 @@
       #${COMPOSER_ID} .ytb-note-emojis { display: flex; gap: 8px; margin: 0 0 8px; }
       #${COMPOSER_ID} .ytb-note-emoji {
         flex: 1 1 0;
+        min-width: 0;
         height: 42px;
+        padding: 0;
         border: 1px solid var(--ytb-line-strong);
         border-radius: var(--ytb-r-md);
         background: var(--ytb-surface-tint);
@@ -151,6 +152,13 @@
       #${COMPOSER_ID} .ytb-note-post:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${COMPOSER_ID} .ytb-note-post:disabled { background: var(--ytb-surface-sunk); color: var(--ytb-ink-faint); cursor: default; }
       #${COMPOSER_ID} .ytb-note-error { min-height: 18px; margin-top: 8px; color: var(--ytb-danger-text); font-size: 11px; font-weight: 600; }
+      /* Notes Visibility off: the note form greys out under a hint; the Recommend strip stays live. */
+      #${COMPOSER_ID} .ytb-note-off { margin: 0 0 8px; color: var(--ytb-ink-muted); font-size: 11px; font-weight: 600; }
+      #${COMPOSER_ID}.is-notes-off .ytb-note-title { color: var(--ytb-ink-faint); }
+      #${COMPOSER_ID}.is-notes-off .ytb-note-emoji:disabled { opacity: .4; filter: grayscale(1); }
+      #${COMPOSER_ID}.is-notes-off textarea, #${COMPOSER_ID}.is-notes-off .ytb-note-meta, #${COMPOSER_ID}.is-notes-off .ytb-note-foot { opacity: .5; }
+      /* The Recommend strip (playlist-add.js) bleeds to the card's edges as its footer band. */
+      #${COMPOSER_ID} .ytb-recommend-strip { margin: 0 -16px -16px; }
       @media (prefers-reduced-motion: reduce) {
         #${COMPOSER_ID} { animation: none; }
       }
@@ -208,8 +216,10 @@
 		const config = await YTB.getConfig();
 		if (!YTB.isContextActive() || token !== openToken || !button.isConnected) return;
 
+		const notesOff = notesHidden;
 		const composer = document.createElement('section');
 		composer.id = COMPOSER_ID;
+		composer.classList.toggle('is-notes-off', notesOff);
 		composer.setAttribute('role', 'dialog');
 		composer.setAttribute('aria-label', 'Add a Note');
 
@@ -229,9 +239,26 @@
 		close.addEventListener('click', () => closeComposer());
 		head.append(title, time, close);
 		composer.append(head);
+		if (notesOff) {
+			const off = document.createElement('div');
+			off.className = 'ytb-note-off';
+			off.textContent = 'Notes are off. Turn on Show Notes in Settings.';
+			composer.append(off);
+		}
 
 		// Sharing does not gate Note writes (CONTEXT.md): the form always builds in a Room.
-		buildForm(composer, config, timestamp);
+		const fitForm = buildForm(composer, config, timestamp, notesOff);
+		// The watch-page Recommend Control (playlist-add.js), live whatever Notes Visibility says.
+		if (window.YTBRecommend) composer.append(YTBRecommend.buildStrip());
+
+		// Guarded button keys (theme.js) never reach the document Escape listener; capture sees the non-bubbling replay.
+		composer.addEventListener(
+			'ytb:keydown',
+			(event) => {
+				if (event.target instanceof HTMLButtonElement && event.detail.original.key === 'Escape') closeComposer();
+			},
+			true,
+		);
 
 		// Keep interactions inside the composer: no player seeks/pauses or outside-click dismissal.
 		for (const type of ['mousedown', 'touchstart', 'pointerdown', 'click', 'dblclick']) {
@@ -239,13 +266,18 @@
 		}
 
 		host.append(composer);
+		fitForm(); // the textarea measures 0 until attached
 		// Hover-scoped Controls Hold; closeComposer releases any hold still live on close.
 		holdRelease = YTB.bindHoverHold(composer);
 		positionComposer(composer, button);
-		composer.querySelector('textarea')?.focus();
+		// Notes off leaves the textarea disabled: focus the Recommend action, or Close when there is none.
+		const focusTarget = notesOff
+			? composer.querySelector('.ytb-recommend-strip button:not([hidden])') || close
+			: composer.querySelector('textarea');
+		focusTarget?.focus();
 	}
 
-	function buildForm(composer, config, timestamp) {
+	function buildForm(composer, config, timestamp, disabled) {
 		let pending = false;
 		const error = document.createElement('div');
 		error.className = 'ytb-note-error';
@@ -262,6 +294,7 @@
 			option.className = 'ytb-note-emoji';
 			option.textContent = emoji;
 			option.setAttribute('aria-label', 'React ' + emoji);
+			option.disabled = disabled;
 			option.addEventListener('click', () => submit({ kind: 'emoji', body: emoji }));
 			emojis.append(option);
 		}
@@ -271,6 +304,7 @@
 		textarea.rows = 1;
 		textarea.placeholder = 'Write a Note...';
 		textarea.setAttribute('aria-label', 'Note text');
+		textarea.disabled = disabled;
 		// Must attach before our keydown listener so an open popover consumes Enter/Escape first.
 		const mentionCtl = window.YTBMentions ? YTBMentions.attach(textarea) : null;
 		const counter = document.createElement('div');
@@ -281,6 +315,7 @@
 		const spoiler = document.createElement('input');
 		spoiler.type = 'checkbox';
 		spoiler.checked = spoilerDefault;
+		spoiler.disabled = disabled;
 		const spoilerLabel = document.createElement('label');
 		spoilerLabel.append(spoiler, document.createTextNode('Spoiler'));
 		const post = document.createElement('button');
@@ -310,7 +345,7 @@
 		}
 
 		async function submit({ kind, body }) {
-			if (pending) return;
+			if (pending || disabled) return;
 			if (kind === 'text' && !body) return;
 			if (kind === 'emoji') {
 				textarea.value = ''; // a Reaction discards the typed draft
@@ -375,12 +410,13 @@
 			}
 		});
 		post.addEventListener('click', () => submit({ kind: 'text', body: textarea.value.trim() }));
+		return updateMeta;
 	}
 
 	function ensureButton() {
 		if (!YTB.isContextActive()) return;
 		ensureStyles();
-		if (!currentVideoId || notesHidden || !hasRoomCode) {
+		if (!currentVideoId || !hasRoomCode) {
 			closeComposer({ resume: false });
 			document.getElementById(BUTTON_ID)?.remove();
 			return;
