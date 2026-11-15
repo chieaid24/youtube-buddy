@@ -143,7 +143,7 @@
 			};
 		},
 
-		// Native tooltip for a Recommended for you card: the full title, then the channel when known.
+		// Native tooltip for a Recommended to you card: the full title, then the channel when known.
 		recommendationTooltip(title, channel) {
 			const t = typeof title === 'string' ? title.trim() : '';
 			const c = typeof channel === 'string' ? channel.trim() : '';
@@ -266,7 +266,7 @@
 			return 'Watched by ' + rows.map((r) => (r.status ? `${r.name} ${r.status}` : r.name)).join(', ');
 		},
 
-		// "Recommended for you" (ADR-0007): items not added by the viewer, minus
+		// "Recommended to you" (ADR-0007): items not added by the viewer, minus
 		// Dismissed instances, newest first. Dismiss keys on the item's
 		// server-minted id, so a re-recommend (new id) resurfaces a Dismissed video.
 		recommendedForYou(playlist, myClientId, dismissedIds) {

@@ -1,6 +1,6 @@
 // extension/home-section.js
 // Room Home Panel (ADR-0005): a floating, left-docked, ephemeral overlay over a
-// dim scrim holding the Room Feed + Recommended for you (ADR-0007), or Create/Join
+// dim scrim holding the Room Feed + Recommended to you (ADR-0007), or Create/Join
 // when Unpaired. Opened by the Room Home Toggle; closed by its close control, a
 // scrim click, Esc, or SPA navigation. Owns the ephemeral open state and mirrors
 // it to the toggle via ytb:home-panel-state. Connection Lost retains stale content
@@ -595,16 +595,16 @@
 		return row;
 	}
 
-	// --- Recommended for you (right column, ADR-0007) ---
+	// --- Recommended to you (right column, ADR-0007) ---
 
 	function buildRecommendedColumn(detail) {
 		const column = document.createElement('section');
 		column.className = 'ytb-hs-playlist';
-		column.setAttribute('aria-label', 'Recommended for you');
+		column.setAttribute('aria-label', 'Recommended to you');
 
 		const head = document.createElement('div');
 		head.className = 'ytb-hs-col-head';
-		head.textContent = 'Recommended for you';
+		head.textContent = 'Recommended to you';
 		column.append(head);
 
 		// Buddies' Recommendations only (own are hidden, managed from the watch page) minus local Dismissals.
@@ -613,7 +613,7 @@
 		if (items.length === 0) {
 			const empty = document.createElement('p');
 			empty.className = 'ytb-hs-empty';
-			empty.textContent = 'Nothing recommended for you yet. When a Buddy recommends a video, it shows up here.';
+			empty.textContent = 'Nothing recommended to you yet. When a Buddy recommends a video, it shows up here.';
 			column.append(empty);
 			return column;
 		}
@@ -646,7 +646,7 @@
 		dismiss.className = 'ytb-hs-remove';
 		dismiss.append(YTBTheme.icon('close'));
 		dismiss.title = 'Dismiss';
-		dismiss.setAttribute('aria-label', 'Dismiss "' + item.title + '" from your Recommended for you');
+		dismiss.setAttribute('aria-label', 'Dismiss "' + item.title + '" from your Recommended to you');
 		dismiss.addEventListener('click', (event) => {
 			event.preventDefault();
 			event.stopPropagation();

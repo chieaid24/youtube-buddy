@@ -1764,7 +1764,7 @@ describe('settings (per install)', () => {
 	});
 });
 
-describe('recommended for you helpers (ADR-0007)', () => {
+describe('recommended to you helpers (ADR-0007)', () => {
 	const playlist = [
 		{ id: 'i1', videoId: 'v1', title: 'Mine', addedBy: 'me111111', addedAt: 1000 },
 		{ id: 'i2', videoId: 'v2', title: 'Bob 1', addedBy: 'bob22222', addedAt: 2000 },
