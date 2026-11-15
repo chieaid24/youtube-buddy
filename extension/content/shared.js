@@ -105,10 +105,6 @@ const YTB = {
 	MAX_REPLIES: 10,
 	MAX_PLAYLIST_ITEMS: 30,
 
-	// The Expanded Note omits "Go here" within this many seconds of the Note's
-	// moment; independent of the natural-crossing delta in notes.js.
-	GO_HERE_NEAR_SECONDS: 2,
-
 	// clientId is "" until ensureClientId() mints one.
 	async getConfig() {
 		const stored = await YTB._storageGet(['name', 'code', 'clientId', 'sharing']);

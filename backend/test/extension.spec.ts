@@ -369,19 +369,6 @@ describe('note presentation helpers', () => {
 		expect(window.YTB.notePanelVariant({ kind: 'emoji', timestamp: 42 }, Infinity)).toBe('reaction');
 	});
 
-	it('hides Go here only when the playhead sits within 2s of the moment', () => {
-		// Within the 2s window (inclusive of the boundary) there is nowhere to go.
-		expect(window.YTB.nearNoteMoment(42, 42)).toBe(true);
-		expect(window.YTB.nearNoteMoment(42, 40)).toBe(true);
-		expect(window.YTB.nearNoteMoment(42, 44)).toBe(true);
-		// Just outside the window Go here shows again.
-		expect(window.YTB.nearNoteMoment(42, 39.9)).toBe(false);
-		expect(window.YTB.nearNoteMoment(42, 44.1)).toBe(false);
-		// No player (non-finite playhead) is never near, so Go here shows.
-		expect(window.YTB.nearNoteMoment(42, Infinity)).toBe(false);
-		expect(window.YTB.nearNoteMoment(42, Number.NaN)).toBe(false);
-	});
-
 	it('detects natural playback crossings repeatedly, as a pure filter', () => {
 		const notes = [{ timestamp: 10 }, { timestamp: 12 }, { timestamp: 30 }];
 		expect(window.YTB.crossedNotes(notes, 9, 12.5).map((n: { timestamp: number }) => n.timestamp)).toEqual([10, 12]);
@@ -2434,7 +2421,6 @@ declare global {
 			REACTION_BURST_MS: number;
 			notificationLifetime(kind: string, trigger: 'crossing' | 'echo'): number;
 			notePanelVariant(note: { kind?: string; spoiler?: boolean; timestamp?: number }, playhead: number): 'text' | 'reaction' | 'spoiler';
-			nearNoteMoment(timestamp: number, playhead: number): boolean;
 			deleteConfirmCopy(replyCount: number): string;
 			goHereTarget(timestamp: number): number;
 			timeToX(segments: Array<{ left: number; width: number }>, timestamp: number, duration: number): number;

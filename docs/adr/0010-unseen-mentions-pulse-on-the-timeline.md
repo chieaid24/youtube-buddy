@@ -94,9 +94,8 @@ We chose **(b)**, and we replaced the seek-and-open arrival with a **pulse**.
 
 - `pendingNoteOpen` / `PENDING_NOTE_OPEN_TTL_MS` and the auto-open branch of the panel load
   grace are removed. `PANEL_LOAD_GRACE_MS` survives, repurposed to hold the arrival pause.
-- Reaching a Note's conversation from the Feed is now two acts: click the row, then click the
-  pulsing dot. Accepted — the second click is the one that seeks (via **Go here**) and it is
-  now the viewer's choice.
+- Reaching a Note's conversation from the Feed takes two clicks: the row, then the
+  pulsing dot. Seeking remains an explicit choice through the timestamp link.
 - Seen state does not follow a viewer to another browser, and a member who clears
   `chrome.storage.local` sees up to 14 days of Mentions pulse again. Both are accepted, and
   mirror Dismiss.
