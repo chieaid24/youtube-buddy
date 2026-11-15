@@ -249,7 +249,7 @@ Show a gear in the normal header. Show Back in the Settings header. Keep Close a
 
 Do not move focus, scroll, or highlight a control for Room full. Trap Tab inside the open panel. If a confirmation is open, Escape dismisses it before a later Escape can close Room Home.
 
-The Buddy Room toggle matches whichever YouTube guide is active: a 40px row in the full guide or a 64x76px entry in the compact mini guide. Keep the buddies icon as the only open-state color change.
+Both YouTube guides carry a Buddy Room toggle, so one shows at every window size: a 40px row in the full guide and a 64x76px entry in the compact mini guide. Match each to its guide's native entries, including the 400 label weight of entries off the current page. Keep the buddies icon as the only open-state color change.
 
 ### Settings sections
 
@@ -295,12 +295,12 @@ A forced Light or Dark Theme Preference stamps the same marker on the popup and 
 
 ## 6. Decisions locked (2026-09-05)
 
-| Decision  | Choice                                                |
-| --------- | ----------------------------------------------------- |
-| Accent    | Soft apricot and warm neutrals                        |
-| Typeface  | Bundled Nunito with rounded system fallbacks          |
-| Popup     | 280px with branding and one Check out your room! button  |
-| Room Home | 480px portrait shell with normal and Settings views   |
-| Settings  | Four visible sections in one scroll                   |
-| Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens |
-| Motion    | Gentle ease-out with reduced-motion fallbacks         |
+| Decision  | Choice                                                  |
+| --------- | ------------------------------------------------------- |
+| Accent    | Soft apricot and warm neutrals                          |
+| Typeface  | Bundled Nunito with rounded system fallbacks            |
+| Popup     | 280px with branding and one Check out your room! button |
+| Room Home | 480px portrait shell with normal and Settings views     |
+| Settings  | Four visible sections in one scroll                     |
+| Theme     | Light, Dark, and Auto through shared `--ytb-*` tokens   |
+| Motion    | Gentle ease-out with reduced-motion fallbacks           |
