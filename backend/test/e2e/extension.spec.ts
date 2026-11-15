@@ -3573,6 +3573,101 @@ test('Recommended to you grid hides own items; Dismiss is local-only and survive
 	}
 });
 
+test("a Recommended to you card's hover wash grows in on YouTube's hover curve; reduced motion only fades", async () => {
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		await stubRoomBackend(context, {
+			playlist: [
+				{
+					id: 'rec-grow',
+					videoId: 'vid-grow',
+					title: 'Buddy Pick',
+					channel: 'Pick Channel',
+					addedBy: 'buddy-1',
+					addedByName: 'Buddy',
+					addedAt: 1000,
+				},
+			],
+		});
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: homeFixture }),
+		);
+		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
+		await seedPairedRoom(context);
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
+		const card = page.locator('#ytb-home-section .ytb-hs-card');
+		await nudgeUntil(page, () => expect(card).toHaveCount(1, { timeout: 700 }));
+
+		// Record every transition that actually runs on a card's wash, with its resolved timing.
+		await page.evaluate(() => {
+			const runs: object[] = [];
+			(window as any).__washRuns = runs;
+			document.addEventListener('transitionrun', (event) => {
+				const target = event.target as Element;
+				if (!target.matches('.ytb-hs-card') || event.pseudoElement !== '::before') return;
+				for (const animation of document.getAnimations()) {
+					const effect = animation.effect as KeyframeEffect;
+					if (!(animation instanceof CSSTransition) || animation.transitionProperty !== event.propertyName) continue;
+					if (effect.target !== target || effect.pseudoElement !== '::before') continue;
+					const timing = effect.getComputedTiming();
+					const [from, to] = effect.getKeyframes().map((frame) => String(frame[event.propertyName]));
+					runs.push({ property: event.propertyName, from, to, duration: timing.duration, delay: timing.delay, easing: timing.easing });
+				}
+			});
+		});
+		const takeRuns = () =>
+			page.evaluate(() => {
+				const runs = (window as any).__washRuns as { property: string }[];
+				return runs.splice(0).sort((a, b) => a.property.localeCompare(b.property));
+			});
+		const wash = () =>
+			card.evaluate((el) => {
+				const style = getComputedStyle(el, '::before');
+				return { opacity: style.opacity, transform: style.transform };
+			});
+		const leave = () => page.mouse.move(2, 2);
+
+		// At rest the wash is invisible and shrunk to 90%, like YouTube's own card hover highlight.
+		expect(await wash()).toEqual({ opacity: '0', transform: 'matrix(0.9, 0, 0, 0.9, 0, 0)' });
+
+		// Hover grows it to full size while fading in: 300ms on YouTube's curve, no delay.
+		const youtube = { duration: 300, delay: 0, easing: 'cubic-bezier(0.05, 0, 0, 1)' };
+		await card.locator('.ytb-hs-thumb').hover();
+		await expect.poll(wash).toEqual({ opacity: '1', transform: 'matrix(1, 0, 0, 1, 0, 0)' });
+		expect(await takeRuns()).toEqual([
+			{ property: 'opacity', from: '0', to: '1', ...youtube },
+			{ property: 'transform', from: 'scale(0.9)', to: 'scale(1)', ...youtube },
+		]);
+
+		// Leaving shrinks it back out the same way.
+		await leave();
+		await expect.poll(wash).toEqual({ opacity: '0', transform: 'matrix(0.9, 0, 0, 0.9, 0, 0)' });
+		expect(await takeRuns()).toEqual([
+			{ property: 'opacity', from: '1', to: '0', ...youtube },
+			{ property: 'transform', from: 'scale(1)', to: 'scale(0.9)', ...youtube },
+		]);
+
+		// Reduced motion (DESIGN.md): no transform at all, just the short fade.
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		expect(await wash()).toEqual({ opacity: '0', transform: 'none' });
+		await card.locator('.ytb-hs-thumb').hover();
+		await expect.poll(wash).toEqual({ opacity: '1', transform: 'none' });
+		expect(await takeRuns()).toEqual([
+			{ property: 'opacity', from: '0', to: '1', duration: 140, delay: 0, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+		]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('recommend Feed lines: own "You recommended", recipient copy, title-only links, strikethrough on un-recommend', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
