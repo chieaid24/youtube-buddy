@@ -407,6 +407,12 @@
       }
       .ytb-panel-reply-input::placeholder { color: var(--ytb-ink-faint); }
       .ytb-panel-reply-input:focus { border-color: var(--ytb-accent-500); box-shadow: 0 0 0 3px var(--ytb-ring); outline: none; }
+      /* Over-limit nudge (theme.js); after :focus so it outranks the accent ring. */
+      .ytb-panel-reply-input.ytb-over-limit {
+        border-color: var(--ytb-danger-text);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 30%, transparent);
+        animation: ytb-limit-shake var(--ytb-dur-slow) var(--ytb-ease-out);
+      }
       /* Paper-plane send: springs in once the field is non-empty. */
       .ytb-panel-send {
         flex: 0 0 auto;
@@ -536,7 +542,7 @@
       }
       /* Springs -> ease-out and transforms -> none; short opacity fades stay. */
       @media (prefers-reduced-motion: reduce) {
-        .ytb-panel-confirm, .ytb-panel-reply.ytb-new { animation: none; }
+        .ytb-panel-confirm, .ytb-panel-reply.ytb-new, .ytb-panel-reply-input.ytb-over-limit { animation: none; }
         /* The Cluster fan is a reachability affordance, not decoration - it
            still applies, just snapping instead of animating. */
         .${DOT_CLASS} { transition: none; }

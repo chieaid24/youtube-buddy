@@ -216,6 +216,13 @@ Never animate layout properties (width/height/top/left) for choreography — use
 - **Copy Room Code:** the icon pops into a check and a small accent chip reading
   "Copied" floats up from the button and fades (~1.2s). It never shifts layout.
   Reduced motion keeps the fade and drops the travel.
+- **Over-limit nudge** (Add Note and Reply fields): no character counter. Input the
+  100-character limit drops - typing, a paste, an IME commit, or a Mention that will not
+  fit - turns the field's border `--ytb-danger-text` with a soft 3px ring of the same
+  color and shakes it once (`ytb-limit-shake`: 4px, decaying, `--ytb-dur-slow`). The
+  outline holds about 0.6s past the last attempt, then glides back to the focus ring;
+  a burst of attempts shakes only once. Reduced motion keeps the outline and drops the
+  shake.
 - **Unseen Note Dot** (on-video): an expanding apricot halo pulses outward from the dot
   (`box-shadow: 0 0 0 Npx` with N 0 -> 6px, opacity 0.75 -> 0; ~1.6s loop, `--ytb-ease-out`),
   until the Mention or Reply is Acknowledged. The 6px dot itself never moves, resizes, or
