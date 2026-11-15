@@ -1,11 +1,12 @@
-// Both Recommend Controls (ADR-0007): the watch-page pill (optimistic Recommend Intent) and the thumbnail
-// kebab-menu row (YouTube-menu DOM fragility deliberately accepted, #56/ADR-0005); the grid renders in home-section.js.
-// Pure consumer per ADR-0001; needs a Room Code; adding is NOT gated by Sharing.
+// Both Recommend Controls (ADR-0007): the watch-page Recommend strip the Note Composer mounts (optimistic Recommend Intent) and the
+// thumbnail kebab-menu row (YouTube-menu DOM fragility deliberately accepted, #56/ADR-0005); the grid renders in home-section.js.
+// Pure consumer per ADR-0001; needs a Room Code; adding is NOT gated by Sharing or Notes Visibility.
 
 (function () {
 	'use strict';
 
 	const BUTTON_ID = 'ytb-playlist-add-button';
+	const STRIP_CLASS = 'ytb-recommend-strip';
 	const KEBAB_ITEM_CLASS = 'ytb-kebab-add';
 	const STYLE_ID = 'ytb-playlist-add-style';
 	const FEEDBACK_ID = 'ytb-playlist-feedback';
@@ -21,10 +22,10 @@
 	let currentVideoId = null;
 	// videoId -> addedBy clientId, from ok ytb:room-data reads; a failed read never rewrites it -- emptiness is not truth.
 	let recommenderByVideoId = new Map();
-	// videoId -> { intent: 'mine'|'absent', title, channel }: not-yet-confirmed Recommend Intents, overlaid on every Room read so a racing read can't flip the pill back.
+	// videoId -> { intent: 'mine'|'absent', title, channel }: not-yet-confirmed Recommend Intents, overlaid on every Room read so a racing read can't flip the strip back.
 	const recommendIntents = new Map();
-	// videoId -> epoch ms of the last accepted pill click (the cooldown gate).
-	let lastPillClickAt = new Map();
+	// videoId -> epoch ms of the last accepted strip click (the cooldown gate).
+	let lastClickAt = new Map();
 	// at most one write in flight per video; a mid-flight toggle goes out as one delta once it settles.
 	const writesInFlight = new Set();
 	let activeRoomCode = null; // a Room change orphans the old Room's intents
@@ -49,92 +50,94 @@
 		if (!YTB.isContextActive()) return { ok: false, category: 'unexpected' };
 		myClientId = myClientId || clientId;
 		const result = await YTB.postPlaylistAdd({ clientId, name, videoId, title, channel });
-		// Re-recommending a Buddy's item is a no-op returning THEIR item; the pill must not claim it as ours.
+		// Re-recommending a Buddy's item is a no-op returning THEIR item; the strip must not claim it as ours.
 		if (result.ok) recommenderByVideoId.set(videoId, (result.item && result.item.addedBy) || clientId);
 		return result;
 	}
 
-	// --- Watch page: the "Recommend to Buddies" pill in the actions row. ---
-
-	function ensureWatchButton() {
-		if (!YTB.isContextActive()) return;
-		if (!currentVideoId || !hasRoomCode) {
-			document.getElementById(BUTTON_ID)?.remove();
-			return;
-		}
-		// Row holding Like/Share/Save; pill stays here even when Save hides under "..." overflow (accepted open tuning point).
-		const actions = document.querySelector('ytd-watch-metadata #actions #top-level-buttons-computed');
-		if (!actions) return; // metadata not built yet - a later ytb:mutation retries
-
-		let button = document.getElementById(BUTTON_ID);
-		if (!button) {
-			button = document.createElement('button');
-			button.id = BUTTON_ID;
-			button.type = 'button';
-			button.addEventListener('click', (event) => {
-				event.stopPropagation();
-				const state = button.dataset.ytbState;
-				const videoId = currentVideoId;
-				if (!videoId || (state !== 'idle' && state !== 'recommended')) return;
-				const now = Date.now();
-				if (now - (lastPillClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent - no visual lockout
-				lastPillClickAt.set(videoId, now);
-				// Optimistic: flip the pill NOW, write goes out underneath (ADR-0007 un-recommend is the author-only point delete).
-				recommendIntents.set(videoId, {
-					intent: state === 'idle' ? 'mine' : 'absent',
-					title: YTB.watchTitle(document),
-					channel: YTB.watchChannel(document),
-				});
-				if (state === 'idle') startCelebration(button, videoId); // only idle -> recommend celebrates (CONTEXT.md "Recommend Celebration")
-				syncWatchButton(button);
-				pumpWrites(videoId);
-			});
-		}
-		if (button.parentElement !== actions) actions.appendChild(button);
-		syncWatchButton(button);
-	}
+	// --- Watch page: the Recommend strip at the foot of the Note Composer (composer.js mounts it via YTBRecommend). ---
 
 	const STATE_LABELS = {
 		idle: 'Recommend to Buddies',
+		recommended: 'Unrecommend', // mine - the action offered beside the status
+	};
+	const STATE_STATUS = {
 		added: 'Recommended to you', // a Buddy's Recommendation - nothing to toggle
-		recommended: 'Unrecommend', // mine - the action offered, click to un-recommend
+		recommended: 'You recommended this',
 	};
 
-	// Pill text lives in its own span so the Recommend Celebration can crossfade the label without touching the button's own opacity.
-	function pillLabel(button) {
-		let label = button.querySelector('.ytb-pill-label');
-		if (!label) {
-			label = document.createElement('span');
-			label.className = 'ytb-pill-label';
-			button.appendChild(label);
-		}
-		return label;
+	function mountedStrip() {
+		return document.querySelector('.' + STRIP_CLASS);
 	}
 
-	function setButtonState(button, state, celebrating) {
+	function buildStrip() {
+		const strip = document.createElement('div');
+		strip.className = STRIP_CLASS;
+		const status = document.createElement('span');
+		status.className = 'ytb-recommend-status';
+		const button = document.createElement('button');
+		button.id = BUTTON_ID;
+		button.type = 'button';
+		// Own span so the celebration swaps the label without rebuilding the button.
+		const label = document.createElement('span');
+		label.className = 'ytb-recommend-label';
+		button.append(label);
+		button.addEventListener('click', () => {
+			const state = button.dataset.ytbState;
+			const videoId = currentVideoId;
+			if (!videoId || (state !== 'idle' && state !== 'recommended')) return;
+			const now = Date.now();
+			if (now - (lastClickAt.get(videoId) || 0) < CLICK_COOLDOWN_MS) return; // silent - no visual lockout
+			lastClickAt.set(videoId, now);
+			// Optimistic: flip the strip NOW, write goes out underneath (ADR-0007 un-recommend is the author-only point delete).
+			recommendIntents.set(videoId, {
+				intent: state === 'idle' ? 'mine' : 'absent',
+				title: YTB.watchTitle(document),
+				channel: YTB.watchChannel(document),
+			});
+			// Only idle -> recommend celebrates (CONTEXT.md "Recommend Celebration").
+			if (state === 'idle') startCelebration(strip, videoId);
+			else syncStrip(strip);
+			pumpWrites(videoId);
+		});
+		strip.append(status, button);
+		syncStrip(strip);
+		return strip;
+	}
+
+	function setStripState(strip, state, celebrating) {
+		const button = strip.querySelector('#' + BUTTON_ID);
 		button.dataset.ytbState = state;
-		pillLabel(button).textContent = celebrating ? CELEBRATION_LABEL : STATE_LABELS[state] || STATE_LABELS.idle;
-		button.classList.toggle('is-added', state === 'added');
-		button.classList.toggle('is-recommended', state === 'recommended');
-		button.classList.toggle('is-celebrating', Boolean(celebrating));
+		button.querySelector('.ytb-recommend-label').textContent = celebrating ? CELEBRATION_LABEL : STATE_LABELS[state] || '';
+		button.hidden = state === 'added';
 		button.title = state === 'recommended' && !celebrating ? 'You recommended this to your Buddies. Click to remove it for everyone.' : '';
+		const status = strip.querySelector('.ytb-recommend-status');
+		const statusText = celebrating ? '' : STATE_STATUS[state] || '';
+		status.replaceChildren();
+		if (statusText) {
+			if (state === 'recommended') status.append(YTBTheme.icon('check'));
+			status.append(statusText);
+		}
+		strip.classList.toggle('is-added', state === 'added');
+		strip.classList.toggle('is-recommended', state === 'recommended');
+		strip.classList.toggle('is-celebrating', Boolean(celebrating));
 	}
 
-	function pillState() {
+	function controlState() {
 		const held = recommendIntents.get(currentVideoId);
-		return YTB.recommendPillState({
+		return YTB.recommendControlState({
 			addedBy: recommenderByVideoId.get(currentVideoId),
 			myClientId,
 			pending: held && held.intent,
 		});
 	}
 
-	function syncWatchButton(button) {
-		const state = pillState();
+	function syncStrip(strip) {
+		const state = controlState();
 		// Celebration overlays the mine-state ONLY; any exit from 'recommended' cuts it cleanly here.
 		const celebrating = Boolean(celebration) && celebration.videoId === currentVideoId && state === 'recommended';
 		if (celebration && !celebrating) endCelebration();
-		setButtonState(button, state, celebrating);
+		setStripState(strip, state, celebrating);
 	}
 
 	// --- Recommend Celebration (CONTEXT.md): purely cosmetic overlay on the local idle -> recommend click; the optimistic flip happens regardless. ---
@@ -143,12 +146,14 @@
 		return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 	}
 
-	function startCelebration(button, videoId) {
+	function startCelebration(strip, videoId) {
 		endCelebration(); // a fresh click supersedes any running beat
 		const c = { videoId, timer: null, confetti: null };
 		celebration = c;
-		if (!prefersReducedMotion()) c.confetti = spawnConfetti(button);
-		c.timer = setTimeout(() => crossfadeToResting(button, c), CELEBRATION_MS);
+		syncStrip(strip); // the burst centres on the celebrating label, so that renders first
+		if (celebration !== c) return;
+		if (!prefersReducedMotion()) c.confetti = spawnConfetti(strip);
+		c.timer = setTimeout(() => crossfadeToResting(c), CELEBRATION_MS);
 	}
 
 	function endCelebration() {
@@ -158,36 +163,41 @@
 		celebration = null;
 	}
 
-	// End of the beat: fade "Recommended!" out, swap to resting "Unrecommend", fade back in. Reduced motion (or no WAAPI) swaps instantly.
-	function crossfadeToResting(button, c) {
+	// End of the beat: fade the celebrating fill out, swap to the resting status + "Unrecommend", fade back in. Reduced motion (or no WAAPI) swaps instantly.
+	function crossfadeToResting(c) {
 		if (celebration !== c) return; // superseded or already cut
 		removeConfetti(c);
 		const finish = () => {
 			if (celebration === c) celebration = null;
-			const b = document.getElementById(BUTTON_ID);
-			if (b) syncWatchButton(b);
+			const s = mountedStrip();
+			if (s) syncStrip(s);
 		};
-		const label = button && button.isConnected && button.querySelector('.ytb-pill-label');
-		if (!label || prefersReducedMotion() || typeof label.animate !== 'function') {
+		const strip = mountedStrip();
+		const button = strip && strip.querySelector('#' + BUTTON_ID);
+		if (!button || prefersReducedMotion() || typeof button.animate !== 'function') {
 			finish();
 			return;
 		}
-		label
+		button
 			.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, easing: 'ease' })
 			.finished.then(() => {
 				finish();
-				if (label.isConnected) label.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'ease' });
+				if (!strip.isConnected) return;
+				for (const el of [strip.querySelector('.ytb-recommend-status'), button]) {
+					el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'ease' });
+				}
 			})
-			.catch(() => finish()); // a cancelled fade still lands on the resting label
+			.catch(() => finish()); // a cancelled fade still lands on the resting state
 	}
 
-	// One-shot apricot burst from the pill: fixed-positioned at its centre, pointer-events none, transform/opacity only, self-removing.
-	function spawnConfetti(button) {
-		const rect = button.getBoundingClientRect();
+	// One-shot apricot burst from the celebrating label: inside the strip so it survives fullscreen, pointer-events none, transform/opacity only, self-removing.
+	function spawnConfetti(strip) {
+		const origin = strip.getBoundingClientRect();
+		const rect = strip.querySelector('.ytb-recommend-label').getBoundingClientRect();
 		const box = document.createElement('div');
 		box.className = 'ytb-recommend-confetti';
-		box.style.left = rect.left + rect.width / 2 + 'px';
-		box.style.top = rect.top + rect.height / 2 + 'px';
+		box.style.left = rect.left - origin.left + rect.width / 2 + 'px';
+		box.style.top = rect.top - origin.top + rect.height / 2 + 'px';
 		for (let i = 0; i < CONFETTI_COUNT; i++) {
 			const p = document.createElement('span');
 			const angle = (i / CONFETTI_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
@@ -199,7 +209,7 @@
 			p.style.animationDuration = Math.round(720 + Math.random() * 260) + 'ms';
 			box.appendChild(p);
 		}
-		(document.body || document.documentElement).appendChild(box);
+		strip.appendChild(box);
 		return { box, timer: setTimeout(() => box.remove(), 1100) };
 	}
 
@@ -211,7 +221,7 @@
 	}
 
 	// Drive one video's pending Recommend Intent to the backend: at most one write in flight per videoId, re-examined when it settles so a
-	// mid-flight toggle goes out as a single delta. A failed write drops the intent (pill reverts) and puts the reason in the feedback popover.
+	// mid-flight toggle goes out as a single delta. A failed write drops the intent (strip reverts) and puts the reason in the feedback line.
 	async function pumpWrites(videoId) {
 		if (writesInFlight.has(videoId)) return;
 		const held = recommendIntents.get(videoId);
@@ -238,39 +248,33 @@
 			recommendIntents.delete(videoId);
 			showWriteFailure(videoId, held.intent, result.category);
 		}
-		const button = document.getElementById(BUTTON_ID);
-		if (button) syncWatchButton(button);
+		const strip = mountedStrip();
+		if (strip) syncStrip(strip);
 	}
 
 	function showWriteFailure(videoId, intent, category) {
 		if (videoId !== currentVideoId) return; // navigated away - the revert lands silently
-		const button = document.getElementById(BUTTON_ID);
-		if (!button) return;
+		const strip = mountedStrip();
+		if (!strip) return; // composer closed - likewise silent
 		const message = intent === 'absent' && category !== 'network' ? "Couldn't unrecommend" : errorLabel(category);
-		showFeedback(button, message);
+		showFeedback(strip, message);
 	}
 
-	// Transient feedback popover - the ONLY failure surface the pill owns; the label itself is a state, never a message.
-	function showFeedback(button, message) {
+	// Transient feedback line over the strip - the ONLY failure surface the control owns; the label itself is a state, never a message.
+	function showFeedback(strip, message) {
 		document.getElementById(FEEDBACK_ID)?.remove();
+		const button = strip.querySelector('#' + BUTTON_ID);
 		const feedback = document.createElement('span');
 		feedback.id = FEEDBACK_ID;
-		feedback.className = 'ytb-playlist-feedback';
 		feedback.setAttribute('role', 'status');
 		feedback.textContent = message;
-		(document.body || document.documentElement).append(feedback);
+		strip.append(feedback);
 		button.setAttribute('aria-describedby', FEEDBACK_ID);
-		const anchor = button.getBoundingClientRect();
-		const width = feedback.offsetWidth;
-		const height = feedback.offsetHeight;
-		feedback.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, anchor.right - width)) + 'px';
-		const below = anchor.bottom + 8;
-		feedback.style.top = (below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 8)) + 'px';
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = setTimeout(() => {
 			feedbackTimer = null;
-			document.getElementById(FEEDBACK_ID)?.remove();
-			if (button.isConnected) button.removeAttribute('aria-describedby');
+			feedback.remove();
+			button.removeAttribute('aria-describedby');
 		}, FEEDBACK_MS);
 	}
 
@@ -432,19 +436,16 @@
 		if (!YTB.isContextActive()) return;
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = null;
-		document.getElementById(FEEDBACK_ID)?.remove();
 		endCelebration(); // navigating away mid-beat cleans up
 		currentVideoId = (event.detail && event.detail.videoId) || null;
 		pendingKebab = null;
-		lastPillClickAt = new Map(); // the click cooldown resets on navigation
+		lastClickAt = new Map(); // the click cooldown resets on navigation
 		const { code } = await YTB.getConfig();
 		hasRoomCode = Boolean(code);
-		ensureWatchButton();
 	});
 
 	document.addEventListener('ytb:mutation', () => {
 		if (!YTB.isContextActive()) return;
-		ensureWatchButton();
 		syncKebabMenu();
 	});
 
@@ -457,7 +458,7 @@
 			// A Room change orphans the previous Room's optimistic state.
 			activeRoomCode = detail.roomCode;
 			recommendIntents.clear();
-			lastPillClickAt = new Map();
+			lastClickAt = new Map();
 		}
 		if (detail.ok) {
 			recommenderByVideoId = new Map((detail.playlist || []).map((item) => [item.videoId, item.addedBy]));
@@ -473,53 +474,84 @@
 			recommendIntents.clear();
 		}
 		// A plain failed read (ok: false) rewrites nothing - emptiness is not truth.
-		const button = document.getElementById(BUTTON_ID);
-		if (button) syncWatchButton(button);
-		if (!hasRoomCode) document.getElementById(BUTTON_ID)?.remove();
+		const strip = mountedStrip();
+		if (strip) syncStrip(strip);
 	});
 
 	YTB.onContextInvalidated(() => {
 		if (feedbackTimer) clearTimeout(feedbackTimer);
 		feedbackTimer = null;
 		endCelebration();
-		document.getElementById(FEEDBACK_ID)?.remove();
-		document.getElementById(BUTTON_ID)?.remove();
 		for (const item of document.querySelectorAll('.' + KEBAB_ITEM_CLASS)) item.remove();
 	});
 
-	// Inject the styles once: apricot pill + menu row, quirky on purpose.
+	// Inject the styles once: the Recommend strip + the apricot menu row.
 	function injectStyle() {
 		if (document.getElementById(STYLE_ID)) return;
 		const style = document.createElement('style');
 		style.id = STYLE_ID;
 		style.textContent = `
-      /* Shared --ytb-* tokens like every sibling YTB surface (UA-010); transparent border keeps the label inset identical across states. */
-      #${BUTTON_ID} {
-        margin-left: 8px;
-        padding: 0 16px;
-        height: 36px;
-        border: 1px solid transparent;
-        border-radius: var(--ytb-r-pill, 999px);
-        background: var(--ytb-accent-500, #f6a96b);
-        color: var(--ytb-on-accent, #3a2e28);
-        font: 500 14px/34px var(--ytb-font, ui-rounded, Roboto, Arial, sans-serif);
-        cursor: pointer;
-        white-space: nowrap;
-        transition: transform var(--ytb-dur-quick, 140ms) var(--ytb-ease-spring, cubic-bezier(0.34, 1.3, 0.64, 1)), background var(--ytb-dur-quick, 140ms);
+      /* Footer band of the Note Composer (composer.js owns the bleed); shared --ytb-* tokens like every sibling YTB surface (UA-010). */
+      .${STRIP_CLASS} {
+        position: relative;
+        display: flex;
+        align-items: center;
+        min-height: 40px;
+        border-top: 1px solid var(--ytb-line);
+        border-radius: 0 0 calc(var(--ytb-r-lg) - 1px) calc(var(--ytb-r-lg) - 1px);
       }
-      #${BUTTON_ID}:hover { background: var(--ytb-accent-600, #e88b45); }
-      #${BUTTON_ID}:active { transform: scale(0.97); }
-      #${BUTTON_ID}:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring, rgba(246, 169, 107, 0.55)); }
-      /* Outline states use accent-800 text: raw apricot fill misses AA on the page (1.94:1), and accent-800 flips bright on dark theme (UA-002). */
-      #${BUTTON_ID}.is-added { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); cursor: default; line-height: 34px; }
-      #${BUTTON_ID}.is-recommended { background: transparent; border: 1px solid var(--ytb-accent-800, #9e551f); color: var(--ytb-accent-800, #9e551f); line-height: 34px; }
-      #${BUTTON_ID}.is-recommended:hover { background: rgba(246, 169, 107, 0.14); }
-      #${BUTTON_ID} .ytb-pill-label { display: inline-block; }
-      /* :hover variant is load-bearing: .is-recommended:hover otherwise outranks single-class .is-celebrating and hides the celebration label. */
-      #${BUTTON_ID}.is-celebrating,
-      #${BUTTON_ID}.is-celebrating:hover { background: var(--ytb-accent-500, #f6a96b); border-color: transparent; color: var(--ytb-on-accent, #3a2e28); }
-      /* Apricot burst: fixed, non-interactive, transform/opacity only, tinted from --ytb-* tokens, removed when the beat ends. */
-      .ytb-recommend-confetti { position: fixed; z-index: 2147483646; width: 0; height: 0; pointer-events: none; }
+      .${STRIP_CLASS} .ytb-recommend-status {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding-left: 16px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--ytb-ink-muted);
+        font: 600 13px/1.3 var(--ytb-font);
+      }
+      .${STRIP_CLASS} .ytb-recommend-status:empty { display: none; }
+      .${STRIP_CLASS} .ytb-recommend-status svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; color: var(--ytb-accent-800); }
+      /* Idle: the whole band is the button. */
+      #${BUTTON_ID} {
+        flex: 1 1 auto;
+        align-self: stretch;
+        padding: 0 16px;
+        border: 0;
+        border-radius: inherit;
+        background: transparent;
+        color: var(--ytb-accent-800);
+        font: 700 13px/1.3 var(--ytb-font);
+        text-align: left;
+        white-space: nowrap;
+        cursor: pointer;
+        transition:
+          background var(--ytb-dur-quick) var(--ytb-ease-out),
+          color var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${BUTTON_ID}[hidden] { display: none; }
+      #${BUTTON_ID}:hover { background: var(--ytb-accent-050); }
+      #${BUTTON_ID}:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--ytb-ring); }
+      #${BUTTON_ID} .ytb-recommend-label { display: inline-block; transform-origin: left center; transition: transform var(--ytb-dur-quick) var(--ytb-ease-spring); }
+      #${BUTTON_ID}:active .ytb-recommend-label { transform: scale(0.97); }
+      /* Resting mine-state: status on the left, a compact "Unrecommend" action on the right. */
+      .${STRIP_CLASS}.is-recommended:not(.is-celebrating) > #${BUTTON_ID} {
+        flex: 0 0 auto;
+        align-self: center;
+        min-height: 24px;
+        margin-right: 8px;
+        padding: 4px 8px;
+        border-radius: var(--ytb-r-pill);
+        color: var(--ytb-ink-muted);
+        font-weight: 600;
+      }
+      .${STRIP_CLASS}.is-recommended:not(.is-celebrating) > #${BUTTON_ID}:hover { color: var(--ytb-ink); }
+      .${STRIP_CLASS}.is-recommended:not(.is-celebrating) > #${BUTTON_ID}:focus-visible { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      /* :hover variant is load-bearing: the click leaves the pointer on the band, and the hover wash must not replace the celebration fill. */
+      .${STRIP_CLASS}.is-celebrating > #${BUTTON_ID},
+      .${STRIP_CLASS}.is-celebrating > #${BUTTON_ID}:hover { background: var(--ytb-accent-500); color: var(--ytb-on-accent); }
+      /* Apricot burst: non-interactive, transform/opacity only, tinted from --ytb-* tokens, removed when the beat ends. */
+      .ytb-recommend-confetti { position: absolute; z-index: 1; width: 0; height: 0; pointer-events: none; }
       .ytb-recommend-confetti > span {
         position: absolute;
         left: 0;
@@ -540,21 +572,24 @@
         100% { transform: translate(var(--ytb-cf-dx, 0), var(--ytb-cf-dy, -30px)) scale(1) rotate(var(--ytb-cf-rot, 180deg)); opacity: 0; }
       }
       @media (prefers-reduced-motion: reduce) { .ytb-recommend-confetti { display: none; } }
-	  #${FEEDBACK_ID} {
-		position: fixed;
-		z-index: 2147483647;
-		box-sizing: border-box;
-		width: 280px;
-		padding: 8px 12px;
-		border: 1px solid var(--ytb-line-strong, rgba(58, 46, 40, 0.2));
-		border-radius: var(--ytb-r-sm, 8px);
-		background: var(--ytb-surface, #fffaf6);
-		box-shadow: var(--ytb-e-pop, 0 8px 24px rgba(30, 20, 14, 0.2));
-		color: var(--ytb-danger-text, #a53b20);
-		font: 600 12px/1.35 var(--ytb-font, Nunito, ui-rounded, Roboto, Arial, sans-serif);
-		white-space: normal;
-		pointer-events: none;
-	  }
+      /* Covers the band (and its hairline) while a failure shows; grows upward if the copy wraps. */
+      #${FEEDBACK_ID} {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
+        min-height: calc(100% + 1px);
+        padding: 4px 16px;
+        border-top: 1px solid var(--ytb-line);
+        border-radius: inherit;
+        background: var(--ytb-surface);
+        color: var(--ytb-danger-text);
+        font: 600 11px/1.35 var(--ytb-font);
+        pointer-events: none;
+      }
       .${KEBAB_ITEM_CLASS} {
         display: flex;
         align-items: center;
@@ -585,9 +620,12 @@
         font-weight: 700;
       }
       @media (prefers-reduced-motion: reduce) {
-        #${BUTTON_ID} { transition: none; }
+        #${BUTTON_ID}, #${BUTTON_ID} .ytb-recommend-label { transition: none; }
+        #${BUTTON_ID}:active .ytb-recommend-label { transform: none; }
       }
     `;
 		(document.head || document.documentElement).appendChild(style);
 	}
+
+	window.YTBRecommend = { buildStrip };
 })();

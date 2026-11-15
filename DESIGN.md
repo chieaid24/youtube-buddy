@@ -175,8 +175,9 @@ Surface-specific rules:
   "hover = accent-050 wash" and "errors = danger-text" read correctly in both
   themes. `--ytb-on-accent` / `--ytb-on-fill` match the popup's fill-text contract.
 - theme.js also owns **keystroke isolation** for on-video YTB inputs (a
-  window-capture guard that replays keydowns on the Add Note / Reply textareas as
-  non-bubbling clones, so YouTube player hotkeys never fire while typing) and the
+  window-capture guard that replays keydowns on the Add Note / Reply textareas and
+  the Note Composer's checkbox and buttons as non-bubbling clones, so YouTube player
+  hotkeys never fire while typing or activating a control) and the
   inline SVG icon factory (`YTBTheme.icon`) honoring the no-emoji-as-icon rule.
 
 ---
@@ -274,6 +275,12 @@ Room shows Room state and Room Code first. Room state carries a 6px status dot: 
 On-video contains four switches in this order: Share video progress, Show Notes (Notes Visibility), Show Buddy Progress (Buddy Progress Visibility), and Spoiler Default. Switches are 36x20px pills with a 16px light knob. Put the Notification Position picker below them: a miniature player frame with one bar per edge. Keep Stop sharing behind a confirmation.
 
 Appearance contains the segmented Theme Preference control: Light, Dark, and Auto on one sunk track.
+
+### Recommend strip
+
+The Note Composer ends in a full-bleed footer band: a `--ytb-line` hairline above a 40px row whose content sits on the card's 16px inset. Idle, the whole band is one button reading **Recommend to Buddies** in 13px/700 `--ytb-accent-800`, with the `--ytb-accent-050` hover wash. Recommending fills the band `--ytb-accent-500` with `--ytb-on-accent` text and a confetti burst for 1.2s, then crossfades to the resting row: a check and **You recommended this** in `--ytb-ink-muted` on the left, a quiet pill-radius **Unrecommend** action on the right. A Buddy's Recommendation shows **Recommended to you** with no action. A failed write covers the band with its reason in 11px/600 `--ytb-danger-text` for 2s; nothing in the strip ever shifts the card's layout.
+
+With Notes Visibility off, keep the card and grey its note form (title, Reactions, text field, Spoiler, Post) under an 11px/600 muted hint. The strip keeps its normal colors as the only live control.
 
 ### Confirmation dialog
 
