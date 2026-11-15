@@ -195,6 +195,7 @@ Never animate layout properties (width/height/top/left) for choreography — use
 	--ytb-dur-slow: 300ms;
 	--ytb-ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quint, default */
 	--ytb-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1); /* mild overshoot, "settle" */
+	--ytb-ease-yt: cubic-bezier(0.05, 0, 0, 1); /* YouTube's card-hover curve, only where we mirror it */
 }
 @media (prefers-reduced-motion: reduce) {
 	/* springs -> ease-out, transforms -> none, keep short opacity fades */
@@ -205,6 +206,10 @@ Never animate layout properties (width/height/top/left) for choreography — use
 
 - **Buttons:** press = scale 0.97 (`--ytb-dur-quick`); release settles back with
   `--ytb-ease-spring`. Hover = background/color glide only.
+- **Recommendation card hover:** the `--ytb-accent-050` wash grows in from scale 0.9 while
+  fading in, over `--ytb-dur-slow` on `--ytb-ease-yt`, and leaves the same way. These are
+  YouTube's own card-hover values, so a card answers the pointer like the thumbnails behind
+  the panel. Reduced motion keeps a `--ytb-dur-quick` fade and drops the growth.
 - **View switch:** Settings replaces the normal Room Home content without resizing the shell.
 - **Switches:** the knob glides between states without bounce. Settings rebuilds its
   rows on every change, so the glide replays as a keyframe animation on the new node.

@@ -81,6 +81,7 @@
 	--ytb-dur-slow: 300ms;
 	--ytb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 	--ytb-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+	--ytb-ease-yt: cubic-bezier(0.05, 0, 0, 1);
 }
 @media (prefers-color-scheme: dark) {
 	:root {

@@ -1525,13 +1525,14 @@
       /* isolate makes the card a stacking context so the ::before wash (z-index -1) stays behind its own content. */
       #${SECTION_ID} .ytb-hs-card { position: relative; isolation: isolate; flex: 0 0 132px; width: 132px; }
       /* Card hover wash (#200) bleeds within the 12px row gap so adjacent washes never collide; keyboard focus uses rings. */
+      /* Grows in from 90% while fading, timed like YouTube's own card hover highlight. */
       #${SECTION_ID} .ytb-hs-card::before {
         content: ''; position: absolute; z-index: -1; inset: -6px -4px;
         border-radius: var(--ytb-r-lg); background: var(--ytb-accent-050);
-        opacity: 0; pointer-events: none;
-        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        opacity: 0; transform: scale(0.9); pointer-events: none;
+        transition: opacity var(--ytb-dur-slow) var(--ytb-ease-yt), transform var(--ytb-dur-slow) var(--ytb-ease-yt);
       }
-      #${SECTION_ID} .ytb-hs-card:hover::before { opacity: 1; }
+      #${SECTION_ID} .ytb-hs-card:hover::before { opacity: 1; transform: scale(1); }
       #${SECTION_ID} .ytb-hs-thumb { display: block; border-radius: 12px; overflow: hidden; }
       #${SECTION_ID} .ytb-hs-thumb:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); }
       #${SECTION_ID} .ytb-hs-thumb img { display: block; width: 132px; height: 74px; object-fit: cover; }
@@ -1799,6 +1800,10 @@
         #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch, #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch > span,
         #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { animation: none; }
         #${SECTION_ID} .ytb-hs-copy-feedback { animation-name: ytb-hs-copied-fade; }
+        #${SECTION_ID} .ytb-hs-card::before, #${SECTION_ID} .ytb-hs-card:hover::before {
+          transform: none;
+          transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        }
         #${OVERLAY_ID} .ytb-hs-hovercard { transition: none; }
       }
     `;
