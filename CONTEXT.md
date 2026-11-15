@@ -188,7 +188,7 @@ An @-reference inside a Note or Reply that targets a specific Room member. Becau
 _Avoid_: tag, ping, at-name (as the stored form)
 
 **Mention Picker**:
-The @-mention autocomplete popover shown beneath the Note Composer or a Reply field — a fuzzy-searchable roster of current Room members. Picking one inserts "@<Display Name>" in the text and records the target's Client ID in the mentions list (see Mention, ADR-0006); it resolves identity by Client ID, never by name text.
+The @-mention autocomplete popover shown beneath the Note Composer or a Reply field — a fuzzy-searchable roster of current Room members. Picking one inserts "@<Display Name>" in the text and records the target's Client ID in the mentions list (see Mention, ADR-0006); it resolves identity by Client ID, never by name text. A pick that would push the field past its 100-character limit is refused whole, never cut to fit: the draft stays as typed and the field plays its over-limit nudge (DESIGN.md 2).
 _Avoid_: mention popup, tag menu, autocomplete (alone)
 
 **Unseen**:
