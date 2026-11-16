@@ -413,7 +413,7 @@
       /* Over-limit nudge (theme.js); after :focus so it outranks the accent ring. */
       .ytb-panel-reply-input.ytb-over-limit {
         border-color: var(--ytb-danger-text);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 30%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 55%, transparent);
         animation: ytb-limit-shake var(--ytb-dur-slow) var(--ytb-ease-out);
       }
       /* Paper-plane send: springs in once the field is non-empty. */

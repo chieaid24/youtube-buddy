@@ -3102,7 +3102,8 @@ test('past the Note limit the composer flags the field instead of showing a coun
 		const composer = page.locator('#ytb-note-composer');
 		const textarea = composer.locator('textarea');
 		const flagged = /ytb-over-limit/;
-		const style = (property: 'borderColor' | 'animationName') => textarea.evaluate((t, key) => getComputedStyle(t)[key], property);
+		const style = (property: 'borderColor' | 'boxShadow' | 'animationName') =>
+			textarea.evaluate((t, key) => getComputedStyle(t)[key], property);
 		// Each blocked key re-arms the hold, so the outline outlasts its own transition.
 		const settledBorder = () =>
 			expect.poll(
@@ -3124,14 +3125,17 @@ test('past the Note limit the composer flags the field instead of showing a coun
 		await page.keyboard.type('h');
 		expect(await textarea.evaluate((t: HTMLTextAreaElement) => t.offsetHeight)).toBe(restHeight);
 
-		const danger = await page.evaluate(() => {
-			const probe = document.createElement('i');
-			probe.style.color = 'var(--ytb-danger-text)';
-			document.body.append(probe);
-			const color = getComputedStyle(probe).color;
-			probe.remove();
-			return color;
-		});
+		// The danger border, and its ring at the focus ring's strength.
+		const [danger, dangerRing] = await page.evaluate(() =>
+			['var(--ytb-danger-text)', 'color-mix(in srgb, var(--ytb-danger-text) 55%, transparent)'].map((value) => {
+				const probe = document.createElement('i');
+				probe.style.color = value;
+				document.body.append(probe);
+				const color = getComputedStyle(probe).color;
+				probe.remove();
+				return color;
+			}),
+		);
 		await textarea.evaluate((t: HTMLTextAreaElement) => {
 			t.addEventListener('animationstart', (event) => {
 				if (event.animationName === 'ytb-limit-shake') t.dataset.shakes = String(Number(t.dataset.shakes ?? 0) + 1);
@@ -3145,18 +3149,15 @@ test('past the Note limit the composer flags the field instead of showing a coun
 		await expect(textarea).toHaveValue(full);
 		await expect(textarea).not.toHaveClass(flagged);
 
-		// A burst of blocked keys: nothing lands, the outline turns danger, and
-		// the field shakes once. The flag clears itself; the next attempt shakes again.
-		await page.keyboard.type('ccc');
+		// Every blocked key replays the shake, even while the outline is still up,
+		// and nothing lands. Danger replaces the accent border and ring, then clears.
+		await page.keyboard.type('ccc', { delay: 80 });
+		await expect(textarea).toHaveAttribute('data-shakes', '3');
 		await expect(textarea).toHaveClass(flagged);
 		await expect(textarea).toHaveValue(full);
 		expect(await style('animationName')).toBe('ytb-limit-shake');
 		await settledBorder().toBe(danger);
-		await expect(textarea).not.toHaveClass(flagged);
-		await expect(textarea).toHaveAttribute('data-shakes', '1');
-		await page.keyboard.press('c');
-		await expect(textarea).toHaveClass(flagged);
-		await expect(textarea).toHaveAttribute('data-shakes', '2');
+		expect(await style('boxShadow')).toBe(`${dangerRing} 0px 0px 0px 3px`);
 		await expect(textarea).not.toHaveClass(flagged);
 
 		// Typing over a selection frees its room first.

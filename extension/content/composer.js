@@ -133,7 +133,7 @@
       /* Over-limit nudge (theme.js); after :focus so it outranks the accent ring. */
       #${COMPOSER_ID} textarea.ytb-over-limit {
         border-color: var(--ytb-danger-text);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 30%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ytb-danger-text) 55%, transparent);
         animation: ytb-limit-shake var(--ytb-dur-slow) var(--ytb-ease-out);
       }
       #${COMPOSER_ID} .ytb-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
