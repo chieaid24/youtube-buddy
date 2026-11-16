@@ -165,11 +165,7 @@ test('On-video rows keep their order, toggle only from the pill, and explain Spo
 		const panel = page.locator('#ytb-home-section');
 		await panel.getByRole('button', { name: 'Settings', exact: true }).click();
 		const group = panel.locator('.ytb-hs-set-group', { hasText: 'On-video' });
-		await expect(group.locator('.ytb-hs-row > span:first-child')).toHaveText([
-			'Show Notes',
-			'Spoiler Default',
-			'Popup position',
-		]);
+		await expect(group.locator('.ytb-hs-row > span:first-child')).toHaveText(['Show Notes', 'Spoiler Default', 'Popup position']);
 		await expect(group.getByRole('radiogroup', { name: 'Popup position' })).toBeVisible();
 
 		// The label is plain text: only the pill toggles.
