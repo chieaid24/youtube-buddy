@@ -107,19 +107,18 @@ const YTB = {
 
 	// clientId is "" until ensureClientId() mints one.
 	async getConfig() {
-		const stored = await YTB._storageGet(['name', 'code', 'clientId', 'sharing']);
+		const stored = await YTB._storageGet(['name', 'code', 'clientId']);
 		return {
 			name: stored.name ?? '',
 			code: stored.code ?? '',
 			clientId: stored.clientId ?? '',
-			sharing: stored.sharing ?? true,
 		};
 	},
 
-	// Merge-write { name?, code?, sharing? }; clientId is owned by ensureClientId.
+	// Merge-write { name?, code? }; clientId is owned by ensureClientId.
 	async setConfig(partial) {
 		const next = {};
-		for (const key of ['name', 'code', 'sharing']) {
+		for (const key of ['name', 'code']) {
 			if (key in partial) next[key] = partial[key];
 		}
 		await YTB._storageSet(next);
@@ -177,13 +176,12 @@ const YTB = {
 
 	// Read every Settings key, coercing unset/junk values to defaults.
 	async getSettings() {
-		const stored = await YTB._storageGet(['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden']);
+		const stored = await YTB._storageGet(['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden']);
 		return {
 			theme: YTB.THEMES.includes(stored.theme) ? stored.theme : 'system',
 			spoilerDefault: stored.spoilerDefault === true,
 			notificationPosition: YTB.NOTIFICATION_EDGES.includes(stored.notificationPosition) ? stored.notificationPosition : 'bottom',
 			notesHidden: stored.notesHidden === true,
-			buddyProgressHidden: stored.buddyProgressHidden === true,
 		};
 	},
 
@@ -195,7 +193,7 @@ const YTB = {
 		if ('notificationPosition' in partial && YTB.NOTIFICATION_EDGES.includes(partial.notificationPosition)) {
 			next.notificationPosition = partial.notificationPosition;
 		}
-		for (const key of ['spoilerDefault', 'notesHidden', 'buddyProgressHidden']) {
+		for (const key of ['spoilerDefault', 'notesHidden']) {
 			if (key in partial) next[key] = partial[key] === true;
 		}
 		return await YTB._storageSet(next);

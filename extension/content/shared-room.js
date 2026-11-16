@@ -41,14 +41,14 @@
 					byId.set(clientId, entry);
 				}
 				if (t > entry.at) entry.at = t;
-				// Only a record that carries a name can update it; Events are
-				// nameless and must never blank out a known Display Name.
+				// Only a record that carries a name can update it; Watch Records and
+				// Events are nameless and must never blank out a known Display Name.
 				if (typeof name === 'string' && name.trim() !== '' && t > entry.nameAt) {
 					entry.name = name.trim();
 					entry.nameAt = t;
 				}
 			};
-			for (const r of (records && records.progress) || []) consider(r.clientId, r.name, r.updatedAt);
+			for (const w of (records && records.watched) || []) consider(w.clientId, undefined, w.watchedAt);
 			for (const p of (records && records.presence) || []) consider(p.clientId, p.name, p.updatedAt);
 			for (const n of (records && records.notes) || []) consider(n.clientId, n.name, n.createdAt);
 			for (const reply of (records && records.replies) || []) consider(reply.clientId, reply.name, reply.createdAt);
@@ -203,22 +203,15 @@
 
 		// "Watched by" attribution for one video: "You" first, then up to two
 		// Buddy names most-recent first, then "and N other(s)"; '' if nobody has
-		// a record. `buddiesOnly` (the Watched-By Dots tooltip) drops "You" -
-		// that's YouTube's own red Watched Bar's to tell.
-		watchedByLabel(progress, videoId, myClientId, roster, { buddiesOnly = false } = {}) {
-			const latest = new Map(); // clientId -> latest record (for its name)
-			for (const r of progress || []) {
-				if (!r || !r.clientId || r.videoId !== videoId) continue;
-				const prev = latest.get(r.clientId);
-				if (!prev || r.updatedAt > prev.updatedAt) latest.set(r.clientId, r);
+		// a Watch Record.
+		watchedByLabel(watched, videoId, myClientId, roster) {
+			const byMember = new Map(); // clientId -> Watch Record
+			for (const w of watched || []) {
+				if (w && w.clientId && w.videoId === videoId) byMember.set(w.clientId, w);
 			}
-			const parts = [];
-			if (latest.has(myClientId)) {
-				if (!buddiesOnly) parts.push('You');
-				latest.delete(myClientId);
-			}
-			const buddies = [...latest.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-			for (const record of buddies.slice(0, 2)) parts.push(YTB.buddyName(record.clientId, record.name, roster));
+			const parts = byMember.delete(myClientId) ? ['You'] : [];
+			const buddies = [...byMember.values()].sort((a, b) => b.watchedAt - a.watchedAt);
+			for (const record of buddies.slice(0, 2)) parts.push(YTB.mentionName(roster, record.clientId));
 			const rest = buddies.length - Math.min(buddies.length, 2);
 			if (rest > 0) parts.push(`and ${rest} other${rest === 1 ? '' : 's'}`);
 			if (parts.length === 0) return '';
@@ -227,43 +220,6 @@
 			// Three or more: Oxford-comma list; the collapsed tail already says "and".
 			const last = parts[parts.length - 1];
 			return parts.slice(0, -1).join(', ') + ', ' + (last.startsWith('and ') ? last : 'and ' + last);
-		},
-
-		// Watch Status (CONTEXT.md): nearest 5%, "Watched" at 80%+, floored at 5%;
-		// null with no usable duration (never renders "NaN%").
-		watchStatus(timestamp, duration) {
-			const t = Number(timestamp);
-			const d = Number(duration);
-			if (!Number.isFinite(t) || !Number.isFinite(d) || d <= 0) return null;
-			const rounded = Math.round((t / d) * 20) * 5;
-			if (rounded >= 80) return 'Watched';
-			return Math.max(rounded, 5) + '%';
-		},
-
-		// The Watched-By Dots tooltip's rows: one per Buddy with a Progress Record
-		// (viewer excluded), newest first - same order the dots render in; the
-		// Room cap bounds this at four rows.
-		watchedByRows(progress, videoId, myClientId, roster) {
-			const latest = new Map(); // clientId -> latest record for this video
-			for (const r of progress || []) {
-				if (!r || !r.clientId || r.videoId !== videoId || r.clientId === myClientId) continue;
-				const prev = latest.get(r.clientId);
-				if (!prev || r.updatedAt > prev.updatedAt) latest.set(r.clientId, r);
-			}
-			return [...latest.values()]
-				.sort((a, b) => b.updatedAt - a.updatedAt || (a.clientId < b.clientId ? -1 : 1))
-				.map((r) => ({
-					clientId: r.clientId,
-					name: YTB.buddyName(r.clientId, r.name, roster),
-					status: YTB.watchStatus(r.timestamp, r.duration),
-				}));
-		},
-
-		// Accessible name for the Watched-By Dots cluster: flat equivalent of the
-		// visual rows.
-		watchedByAriaLabel(rows) {
-			if (!rows || rows.length === 0) return '';
-			return 'Watched by ' + rows.map((r) => (r.status ? `${r.name} ${r.status}` : r.name)).join(', ');
 		},
 
 		// "Recommended to you" (ADR-0007): items not added by the viewer, minus
@@ -415,15 +371,15 @@
 		// noteAddressesMe/replyAddressesMe rule, so Feed and Timeline never
 		// drift) and the rest typed 'note'; Reactions never appear. Plus
 		// recommend System Messages (with `removed` when superseded or
-		// un-recommended) and Watch Notices (recommender-only, one per
-		// Buddy+video). Sorted oldest -> newest, grouped under day dividers; no
+		// un-recommended) and Watch Notices (one per member+video, for the
+		// whole Room). Sorted oldest -> newest, grouped under day dividers; no
 		// read/unread state.
 		buildFeed(records, myClientId) {
 			const notes = (records && records.notes) || [];
 			const replies = (records && records.replies) || [];
 			const events = (records && records.events) || [];
 			const playlist = (records && records.playlist) || [];
-			const progress = (records && records.progress) || [];
+			const watched = (records && records.watched) || [];
 			const noteById = new Map(notes.map((note) => [note.id, note]));
 
 			const items = [];
@@ -449,9 +405,9 @@
 			// (ADR-0007) is per-event: a newer `added` for the same videoId
 			// supersedes it, and a dead videoId strikes it - so a re-recommend
 			// revives only its own fresh line.
-			const liveRecommendationIds = new Set();
+			const liveRecommendations = new Map(); // videoId -> Playlist Item
 			for (const item of playlist) {
-				if (item && item.videoId) liveRecommendationIds.add(item.videoId);
+				if (item && item.videoId) liveRecommendations.set(item.videoId, item);
 			}
 			const newestAddedAt = new Map(); // videoId -> max(at) among `added` Events
 			for (const event of events) {
@@ -478,25 +434,22 @@
 					at,
 					event,
 					own: event.actorClientId === myClientId,
-					removed: at < newestAddedAt.get(event.videoId) || !liveRecommendationIds.has(event.videoId),
+					removed: at < newestAddedAt.get(event.videoId) || !liveRecommendations.has(event.videoId),
 				});
 			}
-			// Watch Notices: one per Buddy with a Progress Record for a video the
-			// viewer recommended; title from the Playlist Item, not the Progress Record.
-			const myRecTitles = new Map();
-			for (const item of playlist) {
-				if (item && item.videoId && item.addedBy === myClientId) myRecTitles.set(item.videoId, item.title);
-			}
-			for (const record of progress) {
-				if (!record || !record.clientId || record.clientId === myClientId) continue;
-				if (!myRecTitles.has(record.videoId)) continue;
+			// Watch Notices: one per Watch Record on a live Recommendation, title
+			// from the Playlist Item; the recommender's own watch is not news.
+			for (const record of watched) {
+				if (!record || !record.clientId) continue;
+				const item = liveRecommendations.get(record.videoId);
+				if (!item || item.addedBy === record.clientId) continue;
 				items.push({
 					type: 'watch',
-					at: Number(record.updatedAt) || 0,
+					at: Number(record.watchedAt) || 0,
 					videoId: record.videoId,
-					title: myRecTitles.get(record.videoId),
+					title: item.title,
 					clientId: record.clientId,
-					name: record.name,
+					own: record.clientId === myClientId,
 				});
 			}
 			items.sort((a, b) => a.at - b.at);

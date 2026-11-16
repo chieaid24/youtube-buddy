@@ -4,20 +4,13 @@ import worker from '../src/index';
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
-// A full, valid Progress Record body. Tests override fields as needed.
-function body(overrides: Record<string, unknown> = {}) {
-	return {
-		clientId: 'a1b2c3d4',
-		name: 'aidan',
-		videoId: 'abc123',
-		timestamp: 412,
-		duration: 1300,
-		...overrides,
-	};
+// A full, valid Watch Record body. Tests override fields as needed.
+function watchedBody(overrides: Record<string, unknown> = {}) {
+	return { clientId: 'a1b2c3d4', videoId: 'abc123', ...overrides };
 }
 
-function post(code: string, payload: unknown) {
-	return SELF.fetch(`https://example.com/?code=${code}`, {
+function postWatched(code: string, payload: unknown) {
+	return SELF.fetch(`https://example.com/watched?code=${code}`, {
 		method: 'POST',
 		body: JSON.stringify(payload),
 	});
@@ -80,88 +73,85 @@ async function createNote(code: string, overrides: Record<string, unknown> = {})
 	return ((await res.json()) as { note: { id: string; clientId: string } }).note;
 }
 
-describe('POST /?code=', () => {
-	it('stores a Progress Record and returns ok', async () => {
-		const code = 'post-stores';
-		const res = await post(code, body());
+describe('POST /watched?code=', () => {
+	it('stores a Watch Record of who, which video, and when - nothing else', async () => {
+		const code = 'watched-stores';
+		const before = Date.now();
+		const res = await postWatched(code, watchedBody());
+		const after = Date.now();
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ ok: true });
 
-		const raw = await env.PROGRESS.get(`${code}:a1b2c3d4:abc123`);
-		expect(raw).not.toBeNull();
-		const record = JSON.parse(raw!);
-		expect(record).toMatchObject({
-			clientId: 'a1b2c3d4',
-			name: 'aidan',
-			videoId: 'abc123',
-			timestamp: 412,
-			duration: 1300,
-		});
+		const record = JSON.parse((await env.PROGRESS.get(`${code}:watched:a1b2c3d4:abc123`))!);
+		expect(record).toEqual({ clientId: 'a1b2c3d4', videoId: 'abc123', watchedAt: expect.any(Number) });
+		expect(record.watchedAt).toBeGreaterThanOrEqual(before);
+		expect(record.watchedAt).toBeLessThanOrEqual(after);
 	});
 
-	it("sets updatedAt server-side, ignoring the client's value", async () => {
-		const code = 'post-updatedat';
-		const before = Date.now();
-		// Client attempts to forge updatedAt; the server must overwrite it.
-		await post(code, body({ updatedAt: 1 }));
-		const after = Date.now();
+	it('never stores a position, a name, or a client-supplied watchedAt', async () => {
+		const code = 'watched-minimal';
+		await postWatched(code, watchedBody({ name: 'aidan', timestamp: 412, duration: 1300, watchedAt: 1 }));
 
-		const record = JSON.parse((await env.PROGRESS.get(`${code}:a1b2c3d4:abc123`))!);
-		expect(record.updatedAt).toBeGreaterThanOrEqual(before);
-		expect(record.updatedAt).toBeLessThanOrEqual(after);
+		const record = JSON.parse((await env.PROGRESS.get(`${code}:watched:a1b2c3d4:abc123`))!);
+		expect(Object.keys(record).sort()).toEqual(['clientId', 'videoId', 'watchedAt']);
+		expect(record.watchedAt).toBeGreaterThan(1);
+	});
+
+	it('is written once: a repeat is a no-op that keeps the first watchedAt', async () => {
+		const code = 'watched-once';
+		const key = `${code}:watched:a1b2c3d4:abc123`;
+		await env.PROGRESS.put(key, JSON.stringify({ clientId: 'a1b2c3d4', videoId: 'abc123', watchedAt: 1000 }));
+
+		const res = await postWatched(code, watchedBody());
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+		expect(JSON.parse((await env.PROGRESS.get(key))!).watchedAt).toBe(1000);
 	});
 
 	it('keys per video, so one client can have many records under a code', async () => {
-		const code = 'post-multivideo';
-		await post(code, body({ videoId: 'vid-one' }));
-		await post(code, body({ videoId: 'vid-two' }));
+		const code = 'watched-multivideo';
+		await postWatched(code, watchedBody({ videoId: 'vid-one' }));
+		await postWatched(code, watchedBody({ videoId: 'vid-two' }));
 
-		expect(await env.PROGRESS.get(`${code}:a1b2c3d4:vid-one`)).not.toBeNull();
-		expect(await env.PROGRESS.get(`${code}:a1b2c3d4:vid-two`)).not.toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:a1b2c3d4:vid-one`)).not.toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:a1b2c3d4:vid-two`)).not.toBeNull();
+	});
+
+	it('carries the 14-day TTL', async () => {
+		const code = 'watched-ttl';
+		const before = Math.floor(Date.now() / 1000);
+		await postWatched(code, watchedBody());
+		const listing = await env.PROGRESS.list({ prefix: `${code}:watched:` });
+		expect(listing.keys).toHaveLength(1);
+		const expiration = listing.keys[0].expiration!;
+		expect(expiration).toBeGreaterThanOrEqual(before + 14 * 24 * 3600 - 5);
+		expect(expiration).toBeLessThanOrEqual(before + 14 * 24 * 3600 + 60);
 	});
 
 	it('rejects a body missing a required field with 400', async () => {
-		const code = 'post-missing-field';
-		const { duration, ...withoutDuration } = body();
-		const res = await post(code, withoutDuration);
+		const code = 'watched-missing-field';
+		const res = await postWatched(code, { clientId: 'a1b2c3d4' });
 		expect(res.status).toBe(400);
-		expect(((await res.json()) as { error: string }).error).toMatch(/duration/);
-	});
-
-	it('accepts an empty name, storing it as "" (Display Name is optional)', async () => {
-		const code = 'post-empty-name';
-		const res = await post(code, body({ name: '' }));
-		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ ok: true });
-
-		const record = JSON.parse((await env.PROGRESS.get(`${code}:a1b2c3d4:abc123`))!);
-		expect(record.name).toBe('');
-	});
-
-	it('accepts a missing name, coercing it to "" on store', async () => {
-		const code = 'post-missing-name';
-		const { name, ...withoutName } = body();
-		const res = await post(code, withoutName);
-		expect(res.status).toBe(200);
-
-		const record = JSON.parse((await env.PROGRESS.get(`${code}:a1b2c3d4:abc123`))!);
-		expect(record.name).toBe('');
-	});
-
-	it('rejects a body with a non-numeric timestamp with 400', async () => {
-		const code = 'post-bad-timestamp';
-		const res = await post(code, body({ timestamp: 'nope' }));
-		expect(res.status).toBe(400);
-		expect(((await res.json()) as { error: string }).error).toMatch(/timestamp/);
+		expect(await res.json()).toEqual({ error: 'missing or invalid field: videoId', category: 'validation' });
 	});
 
 	it('rejects a missing code with 400', async () => {
-		const res = await SELF.fetch('https://example.com/', {
+		const res = await SELF.fetch('https://example.com/watched', {
 			method: 'POST',
-			body: JSON.stringify(body()),
+			body: JSON.stringify(watchedBody()),
 		});
 		expect(res.status).toBe(400);
 		expect(await res.json()).toEqual({ error: 'missing code', category: 'validation' });
+	});
+
+	it('no longer accepts position reports on POST /', async () => {
+		const code = 'watched-no-progress-route';
+		const res = await SELF.fetch(`https://example.com/?code=${code}`, {
+			method: 'POST',
+			body: JSON.stringify(watchedBody({ timestamp: 412, duration: 1300 })),
+		});
+		expect(res.status).toBe(405);
+		expect((await env.PROGRESS.list({ prefix: `${code}:` })).keys).toHaveLength(0);
 	});
 });
 
@@ -171,7 +161,7 @@ describe('Room cap (POST)', () => {
 	it('admits up to 5 distinct Client IDs under one code', async () => {
 		const code = 'cap-five';
 		for (const clientId of members) {
-			const res = await post(code, body({ clientId, videoId: 'v' }));
+			const res = await postWatched(code, watchedBody({ clientId, videoId: 'v' }));
 			expect(res.status).toBe(200);
 		}
 	});
@@ -179,24 +169,24 @@ describe('Room cap (POST)', () => {
 	it('rejects a 6th distinct Client ID with 409 room full', async () => {
 		const code = 'cap-sixth';
 		for (const clientId of members) {
-			await post(code, body({ clientId, videoId: 'v' }));
+			await postWatched(code, watchedBody({ clientId, videoId: 'v' }));
 		}
-		const res = await post(code, body({ clientId: 'm6', videoId: 'v' }));
+		const res = await postWatched(code, watchedBody({ clientId: 'm6', videoId: 'v' }));
 		expect(res.status).toBe(409);
 		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
 		// The rejected member left no record behind.
-		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:m6:v`)).toBeNull();
 	});
 
 	it("still accepts a returning member's new video when the room is full", async () => {
 		const code = 'cap-returning';
 		for (const clientId of members) {
-			await post(code, body({ clientId, videoId: 'v1' }));
+			await postWatched(code, watchedBody({ clientId, videoId: 'v1' }));
 		}
 		// m1 is already a member; a new video must go through even at capacity.
-		const res = await post(code, body({ clientId: 'm1', videoId: 'v2' }));
+		const res = await postWatched(code, watchedBody({ clientId: 'm1', videoId: 'v2' }));
 		expect(res.status).toBe(200);
-		expect(await env.PROGRESS.get(`${code}:m1:v2`)).not.toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:m1:v2`)).not.toBeNull();
 	});
 });
 
@@ -267,19 +257,19 @@ describe('POST /presence?code=', () => {
 });
 
 describe('DELETE /member?code=', () => {
-	it('deletes presence and every Progress Record for the member', async () => {
+	it('deletes presence and every Watch Record for the member', async () => {
 		const code = 'member-delete';
 		await postPresence(code, { clientId: 'p1', name: 'x' });
-		await post(code, body({ clientId: 'p1', videoId: 'v1' }));
-		await post(code, body({ clientId: 'p1', videoId: 'v2' }));
+		await postWatched(code, watchedBody({ clientId: 'p1', videoId: 'v1' }));
+		await postWatched(code, watchedBody({ clientId: 'p1', videoId: 'v2' }));
 		expect(await env.PROGRESS.get(`${code}:presence:p1`)).not.toBeNull();
 
 		const res = await deleteMember(code, 'p1');
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ ok: true });
 		expect(await env.PROGRESS.get(`${code}:presence:p1`)).toBeNull();
-		expect(await env.PROGRESS.get(`${code}:p1:v1`)).toBeNull();
-		expect(await env.PROGRESS.get(`${code}:p1:v2`)).toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:p1:v1`)).toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:p1:v2`)).toBeNull();
 	});
 
 	it('is idempotent: deleting an absent member still returns ok', async () => {
@@ -301,26 +291,29 @@ describe('DELETE /member?code=', () => {
 		await postPresence(code, { clientId: 'p1' });
 		await Promise.all(
 			Array.from({ length: 501 }, (_, i) =>
-				env.PROGRESS.put(`${code}:p1:video-${String(i).padStart(4, '0')}`, JSON.stringify(body({ clientId: 'p1', videoId: `video-${i}` }))),
+				env.PROGRESS.put(
+					`${code}:watched:p1:video-${String(i).padStart(4, '0')}`,
+					JSON.stringify(watchedBody({ clientId: 'p1', videoId: `video-${i}` })),
+				),
 			),
 		);
 
 		const res = await deleteMember(code, 'p1');
 		expect(res.status).toBe(200);
-		const remaining = await env.PROGRESS.list({ prefix: `${code}:p1:` });
+		const remaining = await env.PROGRESS.list({ prefix: `${code}:watched:p1:` });
 		expect(remaining.keys).toHaveLength(0);
 		expect(await env.PROGRESS.get(`${code}:presence:p1`)).toBeNull();
 	}, 30_000);
 
 	it('preserves other members and other Rooms', async () => {
 		const code = 'member-delete-scoped';
-		await post(code, body({ clientId: 'p1', videoId: 'mine' }));
-		await post(code, body({ clientId: 'p2', videoId: 'theirs' }));
-		await post('other-room', body({ clientId: 'p1', videoId: 'elsewhere' }));
+		await postWatched(code, watchedBody({ clientId: 'p1', videoId: 'mine' }));
+		await postWatched(code, watchedBody({ clientId: 'p2', videoId: 'theirs' }));
+		await postWatched('other-room', watchedBody({ clientId: 'p1', videoId: 'elsewhere' }));
 
 		await deleteMember(code, 'p1');
-		expect(await env.PROGRESS.get(`${code}:p2:theirs`)).not.toBeNull();
-		expect(await env.PROGRESS.get('other-room:p1:elsewhere')).not.toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:p2:theirs`)).not.toBeNull();
+		expect(await env.PROGRESS.get('other-room:watched:p1:elsewhere')).not.toBeNull();
 	});
 
 	it('immediately frees a full Room slot', async () => {
@@ -357,25 +350,26 @@ describe('DELETE /member?code=', () => {
 describe('KV key-segment validation', () => {
 	it('rejects a nested Room Code instead of making it readable through its parent prefix', async () => {
 		const nestedCode = 'parent-room:child-room';
-		const res = await post(nestedCode, body());
+		const res = await postWatched(nestedCode, watchedBody());
 		expect(res.status).toBe(400);
 		expect(await res.json()).toEqual({ error: 'missing or invalid field: code', category: 'validation' });
 
-		const parent = (await (await SELF.fetch('https://example.com/?code=parent-room')).json()) as { progress: unknown[] };
-		expect(parent.progress).toEqual([]);
+		const parent = (await (await SELF.fetch('https://example.com/?code=parent-room')).json()) as { watched: unknown[] };
+		expect(parent.watched).toEqual([]);
 	});
 
 	it('rejects delimiters and reserved names in caller-controlled KV key components', async () => {
 		expect((await postPresence('key-components', { clientId: 'presence' })).status).toBe(400);
-		expect((await post('key-components', body({ clientId: 'note' }))).status).toBe(400);
-		expect((await post('key-components', body({ clientId: 'member:other' }))).status).toBe(400);
-		expect((await post('key-components', body({ videoId: 'video:other' }))).status).toBe(400);
+		expect((await postPresence('key-components', { clientId: 'watched' })).status).toBe(400);
+		expect((await postWatched('key-components', watchedBody({ clientId: 'note' }))).status).toBe(400);
+		expect((await postWatched('key-components', watchedBody({ clientId: 'member:other' }))).status).toBe(400);
+		expect((await postWatched('key-components', watchedBody({ videoId: 'video:other' }))).status).toBe(400);
 		expect((await postNote('key-components', noteBody({ clientId: 'note:other' }))).status).toBe(400);
 		expect((await postReply('key-components', replyBody('note:other'))).status).toBe(400);
 		expect((await postPlaylist('key-components', playlistBody({ videoId: 'video:other' }))).status).toBe(400);
 		expect((await deletePlaylist('key-components', 'a1b2c3d4', 'video:other')).status).toBe(400);
 		expect((await getConversation('key-components', 'note:other')).status).toBe(400);
-		expect((await post('key-components', body({ videoId: 'x'.repeat(129) }))).status).toBe(400);
+		expect((await postWatched('key-components', watchedBody({ videoId: 'x'.repeat(129) }))).status).toBe(400);
 	});
 });
 
@@ -493,15 +487,15 @@ describe('Room cap counts presence rows', () => {
 		expect(await env.PROGRESS.get(`${code}:presence:m6`)).toBeNull();
 	});
 
-	it('rejects a 6th progress member when 5 presence members fill the cap', async () => {
-		const code = 'cap-presence-then-progress';
+	it('rejects a 6th member marking a video watched when 5 presence members fill the cap', async () => {
+		const code = 'cap-presence-then-watched';
 		for (const clientId of members) {
 			await postPresence(code, { clientId });
 		}
-		const res = await post(code, body({ clientId: 'm6', videoId: 'v' }));
+		const res = await postWatched(code, watchedBody({ clientId: 'm6', videoId: 'v' }));
 		expect(res.status).toBe(409);
 		expect(await res.json()).toEqual({ error: 'room full', category: 'room_full' });
-		expect(await env.PROGRESS.get(`${code}:m6:v`)).toBeNull();
+		expect(await env.PROGRESS.get(`${code}:watched:m6:v`)).toBeNull();
 	});
 
 	it('admits a returning presence member at capacity', async () => {
@@ -515,95 +509,89 @@ describe('Room cap counts presence rows', () => {
 });
 
 describe('GET /?code=', () => {
-	it('returns { progress, presence, notes } for the code, and nothing from other codes', async () => {
+	it('returns { watched, presence, notes } for the code, and nothing from other codes', async () => {
 		const codeA = 'get-code-a';
 		const codeB = 'get-code-b';
-		await post(codeA, body({ clientId: 'c1', videoId: 'v1' }));
-		await post(codeA, body({ clientId: 'c2', videoId: 'v2' }));
-		await post(codeB, body({ clientId: 'c3', videoId: 'v3' }));
+		await postWatched(codeA, watchedBody({ clientId: 'c1', videoId: 'v1' }));
+		await postWatched(codeA, watchedBody({ clientId: 'c2', videoId: 'v2' }));
+		await postWatched(codeB, watchedBody({ clientId: 'c3', videoId: 'v3' }));
 
 		const res = await SELF.fetch(`https://example.com/?code=${codeA}`);
 		expect(res.status).toBe(200);
 		const data = (await res.json()) as {
-			progress: { clientId: string }[];
+			watched: { clientId: string }[];
 			presence: { clientId: string }[];
 			notes: unknown[];
 		};
 		// No presence rows were written for this code.
 		expect(data.presence).toEqual([]);
-		expect(data.progress).toHaveLength(2);
+		expect(data.watched).toHaveLength(2);
 		expect(data.notes).toEqual([]);
 
-		const clientIds = data.progress.map((r) => r.clientId).sort();
+		const clientIds = data.watched.map((r) => r.clientId).sort();
 		expect(clientIds).toEqual(['c1', 'c2']);
 	});
 
-	// Regression guard for #50 (silent Buddy blackout). The renderer reads
-	// `{ progress, presence, notes }` from this response; if the GET ever drops a
-	// field or answers non-2xx, `getRecords` swallows it into empty arrays and BOTH
-	// surfaces (timeline markers + thumbnail bars) go blank with no error. Pin the
-	// exact shape/status for the two Rooms most likely to expose an omission: one
-	// with progress but no Notes, and a wholly empty Room.
-	it('always answers 200 with progress/presence/notes as arrays (progress-but-no-notes Room)', async () => {
-		const code = 'get-shape-progress-only';
-		await post(code, body({ clientId: 'p1', videoId: 'v1' }));
+	// Regression guard for #50 (silent Buddy blackout): getRecords swallows a dropped field or a non-2xx into
+	// empty arrays, blanking every surface with no error. Pin the shape for a watched-only and an empty Room.
+	it('always answers 200 with watched/presence/notes as arrays (watched-but-no-notes Room)', async () => {
+		const code = 'get-shape-watched-only';
+		await postWatched(code, watchedBody({ clientId: 'p1', videoId: 'v1' }));
 
 		const res = await SELF.fetch(`https://example.com/?code=${code}`);
 		expect(res.status).toBe(200);
-		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[] };
-		expect(Array.isArray(data.progress)).toBe(true);
+		const data = (await res.json()) as { watched: unknown[]; presence: unknown[]; notes: unknown[] };
+		expect(Array.isArray(data.watched)).toBe(true);
 		expect(Array.isArray(data.presence)).toBe(true);
 		expect(Array.isArray(data.notes)).toBe(true);
-		expect(data.progress).toHaveLength(1);
+		expect(data.watched).toHaveLength(1);
 		expect(data.presence).toEqual([]);
 		expect(data.notes).toEqual([]);
 	});
 
-	it('always answers 200 with empty progress/presence/notes/replies/playlist/events arrays for a Room with no records', async () => {
+	it('always answers 200 with empty watched/presence/notes/replies/playlist/events arrays for a Room with no records', async () => {
 		const res = await SELF.fetch('https://example.com/?code=get-shape-empty-room');
 		expect(res.status).toBe(200);
-		const data = (await res.json()) as { progress: unknown[]; presence: unknown[]; notes: unknown[]; replies: unknown[] };
-		expect(data).toEqual({ progress: [], presence: [], notes: [], replies: [], playlist: [], events: [] });
+		expect(await res.json()).toEqual({ watched: [], presence: [], notes: [], replies: [], playlist: [], events: [] });
 	});
 
-	it('includes Notes without mixing them into progress', async () => {
+	it('includes Notes without mixing them into watched', async () => {
 		const code = 'get-notes';
-		await post(code, body());
+		await postWatched(code, watchedBody());
 		await postNote(code, noteBody({ body: 'hello' }));
 		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
-			progress: unknown[];
+			watched: unknown[];
 			notes: { body: string }[];
 		};
-		expect(data.progress).toHaveLength(1);
+		expect(data.watched).toHaveLength(1);
 		expect(data.notes.map((note) => note.body)).toEqual(['hello']);
 	});
 
-	it('returns both progress and presence rows for a code that has each', async () => {
+	it('returns both watched and presence rows for a code that has each', async () => {
 		const code = 'get-both';
-		await post(code, body({ clientId: 'c1', videoId: 'v1' }));
+		await postWatched(code, watchedBody({ clientId: 'c1', videoId: 'v1' }));
 		await postPresence(code, { clientId: 'c2', name: 'buddy' });
 
 		const res = await SELF.fetch(`https://example.com/?code=${code}`);
 		expect(res.status).toBe(200);
 		const data = (await res.json()) as {
-			progress: { clientId: string }[];
+			watched: { clientId: string }[];
 			presence: { clientId: string }[];
 		};
-		expect(data.progress.map((r) => r.clientId)).toEqual(['c1']);
+		expect(data.watched.map((r) => r.clientId)).toEqual(['c1']);
 		expect(data.presence.map((r) => r.clientId)).toEqual(['c2']);
 	});
 
-	it('partitions a Progress Record whose clientId matches an Object.prototype property name into progress', async () => {
-		// A clientId such as "toString" passes validation (it is not a reserved
-		// record kind) and must be treated as an ordinary progress key. The GET /
-		// partition selects a bucket by the key's first segment, so it must not
-		// resolve inherited Object.prototype members for such a clientId.
-		const code = 'get-proto-clientid';
-		expect((await post(code, body({ clientId: 'toString', videoId: 'v1' }))).status).toBe(200);
+	it('ignores a key of an unknown kind, even one named like an Object.prototype property', async () => {
+		// The partition selects a bucket by the key's kind segment, so it must not resolve inherited
+		// Object.prototype members; such a key also holds no Room slot.
+		const code = 'get-unknown-kind';
+		await env.PROGRESS.put(`${code}:toString:v1`, JSON.stringify({ clientId: 'toString', videoId: 'v1' }));
 		const res = await SELF.fetch(`https://example.com/?code=${code}`);
 		expect(res.status).toBe(200);
-		const data = (await res.json()) as { progress: { clientId: string }[] };
-		expect(data.progress.map((r) => r.clientId)).toEqual(['toString']);
+		expect(await res.json()).toEqual({ watched: [], presence: [], notes: [], replies: [], playlist: [], events: [] });
+
+		for (const clientId of ['m1', 'm2', 'm3', 'm4', 'm5']) expect((await postPresence(code, { clientId })).status).toBe(200);
 	});
 
 	it('rejects a missing code with 400', async () => {
@@ -980,17 +968,17 @@ describe('Playlist Events', () => {
 
 	it('GET / returns playlist and events in their own buckets', async () => {
 		const code = 'get-playlist-events';
-		await post(code, body());
+		await postWatched(code, watchedBody());
 		await postPlaylist(code, playlistBody({ videoId: 'keep' }));
 		await postPlaylist(code, playlistBody({ videoId: 'gone' }));
 		await deletePlaylist(code, 'a1b2c3d4', 'gone');
 
 		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
-			progress: unknown[];
+			watched: unknown[];
 			playlist: { videoId: string }[];
 			events: { type: string; videoId: string; title: string }[];
 		};
-		expect(data.progress).toHaveLength(1);
+		expect(data.watched).toHaveLength(1);
 		expect(data.playlist.map((item) => item.videoId)).toEqual(['keep']);
 		// Only the two adds — the removal emitted nothing — and each carries
 		// the title captured at recommend time (ADR-0007).
@@ -1148,18 +1136,18 @@ describe('GET /conversation?code=', () => {
 });
 
 describe('Reply lifecycles', () => {
-	it('GET / returns replies separately from notes and progress', async () => {
+	it('GET / returns replies separately from notes and watched', async () => {
 		const code = 'get-replies';
-		await post(code, body());
+		await postWatched(code, watchedBody());
 		const note = await createNote(code);
 		await postReply(code, replyBody(note.id, { clientId: 'buddy222' }));
 
 		const data = (await (await SELF.fetch(`https://example.com/?code=${code}`)).json()) as {
-			progress: unknown[];
+			watched: unknown[];
 			notes: unknown[];
 			replies: { noteId: string; clientId: string }[];
 		};
-		expect(data.progress).toHaveLength(1);
+		expect(data.watched).toHaveLength(1);
 		expect(data.notes).toHaveLength(1);
 		expect(data.replies).toHaveLength(1);
 		expect(data.replies[0]).toMatchObject({ noteId: note.id, clientId: 'buddy222' });

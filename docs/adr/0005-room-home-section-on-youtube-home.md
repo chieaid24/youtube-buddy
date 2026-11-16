@@ -11,11 +11,11 @@ The Room Home Panel is the complete product hub. It has two mutually exclusive v
 - The normal view stacks the Room Feed above Recommendations.
 - The Settings view replaces the normal content and shows four visible sections in one scroll: Profile, Room, On-video, and Appearance. A gear opens Settings and Back restores the normal view.
 
-Profile owns Nickname. Room owns Room state, Room Code, Create or Join, the Buddy roster, Buddy Color Swatches, and Leave Room. On-video owns Buddy Progress Visibility, Share video progress, Notes Visibility, Spoiler Default, and Notification Position. Appearance owns Theme Preference. Stop sharing and Leave Room retain confirmation dialogs, and Escape dismisses a confirmation before it can close the panel.
+Profile owns Nickname. Room owns Room state, Room Code, Create or Join, the Buddy roster, Buddy Color Swatches, and Leave Room. On-video owns Notes Visibility, Spoiler Default, and Notification Position. Appearance owns Theme Preference. Leave Room retains its confirmation dialog, and Escape dismisses a confirmation before it can close the panel.
 
 Waiting and In room viewers open into the normal view. Unpaired and Room full viewers open directly into Settings because neither can use the Feed. Room full receives no forced focus, scroll, or highlight. Closing and reopening the panel resets it to the state-appropriate initial view; Settings visibility is never persisted.
 
-The panel remains ephemeral. The Room Home Toggle opens or closes it. The header close control, a scrim click, Escape, or a single-page navigation closes it. Closing hides the surface and never changes Room membership, Sharing, or Recommendations. While the panel is open, the document cannot scroll and internal scroll areas contain overscroll. Removing the overlay releases the scroll lock, including on navigation or extension context invalidation; the page's own overflow styles remain intact.
+The panel remains ephemeral. The Room Home Toggle opens or closes it. The header close control, a scrim click, Escape, or a single-page navigation closes it. Closing hides the surface and never changes Room membership or Recommendations. While the panel is open, the document cannot scroll and internal scroll areas contain overscroll. Removing the overlay releases the scroll lock, including on navigation or extension context invalidation; the page's own overflow styles remain intact.
 
 The panel stays outside YouTube's layout flow. It appends to the page body, reads no home-grid layout DOM, and coordinates with the toggle through in-page events. ADR-0001 still applies: the content script owns the in-page experience, and the extension adds no background service worker.
 
@@ -25,5 +25,5 @@ The panel stays outside YouTube's layout flow. It appends to the page body, read
 - The Extension Popup can shrink to read-only status and navigation without duplicating management behavior.
 - The old sidebar Control Panel Launcher and its hidden relay frame are removed. The Room Home Toggle row performs one job again.
 - The panel keeps its current portrait geometry and blocking scrim. The Settings view scrolls inside that shell instead of adding accordions or nested pages.
-- All moved controls must preserve live storage propagation and the existing Room, Sharing, and Connection Lost semantics.
+- All moved controls must preserve live storage propagation and the existing Room and Connection Lost semantics.
 - Every Settings flow now renders on live YouTube and must pass the repository's live UI verification gate.

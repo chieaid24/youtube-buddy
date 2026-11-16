@@ -4,10 +4,8 @@ Design system for **YouTube Buddy's own surfaces**: the read-only Extension Popu
 the Room Home Panel and its Settings view, and the whole on-video Note UI - Video
 Timeline Note Previews, the Expanded Note, the Add Note composer, the @-mention
 popover, and Playback Notification cards - delivered via the namespaced injected
-tokens in `extension/theme.js` (see 1.5). The on-video
-progress-bar markers and feed thumbnail Watched-By Dots (`renderer.js`) remain
-**out of scope** and keep their player-native look (flat Buddy-colored dots, dark
-tooltip), as does the Add Note button sitting inside YouTube's own control bar.
+tokens in `extension/theme.js` (see 1.5). The Add Note button sitting inside
+YouTube's own control bar remains **out of scope** and keeps its player-native look.
 
 Personality: **soft, warm, friendly** without being childish. Cozy over corporate.
 Warmth comes from color, rounded shape, gentle-but-slightly-springy motion, and a
@@ -51,11 +49,9 @@ lifting. No second saturated color competes.
 	--ytb-ink-faint: oklch(64% 0.025 54); /* #A08A78  placeholders, disabled */
 
 	/* --- Semantic (all kept warm so nothing clashes with the orange) --- */
-	--ytb-success: oklch(68% 0.14 150); /* #3FA860  paired / "sharing on" */
+	--ytb-success: oklch(68% 0.14 150); /* #3FA860  paired / In room */
 	--ytb-danger: oklch(55% 0.16 30); /* #C0392B  leave room, warm red */
 	--ytb-danger-hover: oklch(49% 0.155 30); /* #A5312A */
-	--ytb-neutral: oklch(40% 0.02 52); /* #5A4B40  "stop sharing" confirm */
-	--ytb-neutral-hover: oklch(34% 0.02 52); /* #473A31 */
 
 	/* --- Focus + elevation (tinted, never gray) --- */
 	--ytb-ring: oklch(76% 0.115 55 / 0.55); /* apricot focus ring */
@@ -70,8 +66,8 @@ lifting. No second saturated color competes.
 - `--ytb-ink-muted` on `--ytb-surface`: pass for text >= 11px (>= 4.5:1).
 - **Filled primary button = apricot `--ytb-accent-500` fill with `--ytb-ink` text.**
   Pastel apricot is too light for white text; dark warm ink on apricot passes AA and
-  is the intended cozy look. White text only ever appears on `--ytb-danger` /
-  `--ytb-neutral` (the confirm buttons), never on the accent.
+  is the intended cozy look. White text only ever appears on `--ytb-danger`
+  (the Leave confirm button), never on the accent.
 - The paired-green and danger-red are used for small meaning cues (status, leave),
   never as large fields.
 
@@ -121,7 +117,7 @@ Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch her
 	--ytb-r-sm: 8px; /* inputs, small controls */
 	--ytb-r-md: 12px; /* buttons, chips, roster rows */
 	--ytb-r-lg: 16px; /* sub-panels, confirm dialog */
-	--ytb-r-pill: 999px; /* status indicator, sharing pill */
+	--ytb-r-pill: 999px; /* status indicator */
 }
 ```
 
@@ -129,8 +125,7 @@ Body line length is a non-issue at 300px; never let a paragraph exceed ~40ch her
 - Use **rhythmic**, not uniform, spacing: tighter within a group (label -> control =
   `--ytb-sp-1`), looser between groups (`--ytb-sp-4`/`--ytb-sp-5`). Same-padding-everywhere is a ban.
 - Generous radius everywhere is the friendliness lever, with **one exception**: the
-  buddy **color swatches stay 2px-radius squares** because they are the legend for the
-  square on-video markers drawn by `renderer.js`. Do not round them into circles.
+  buddy **color swatches stay 2px-radius squares**. Do not round them into circles.
 - Keep every pointer target at least 24px. A control may draw smaller than its
   target: Buddy Color Swatches paint a 14px square centered in a 24px button.
 
@@ -287,7 +282,7 @@ Profile contains one Nickname input. Persist edits to local storage and reassert
 
 Room shows Room state and Room Code first. Room state carries a 6px status dot: success for In room, accent for Waiting, faint for Unpaired, danger for Room full. The Room Code copy control is a borderless accent icon button. Unpaired and Room full show Create and Join. Waiting and In room show the Buddy roster, a Buddy Color Swatch for each Buddy, and Leave Room. Use the eight fixed Buddy Colors, disable colors assigned to another Buddy, and mark the selected color with the focus-ring token. Leave Room is a quiet outlined button with danger text; the danger fill belongs to its confirmation.
 
-On-video contains four switches in this order: Show Buddy progress (Buddy Progress Visibility), Share video progress, Show Notes (Notes Visibility), and Spoiler Default. Switches are 36x20px pills with a 16px light knob inside a 24px-tall target. Only the pill toggles; the label is plain text. Spoiler Default carries an info icon beside its label whose native tooltip explains Spoilers. Put the Notification Position picker, labelled "Popup position", below them: a miniature player frame with one bar per edge. Keep Stop sharing behind a confirmation.
+On-video contains two switches in this order: Show Notes (Notes Visibility) and Spoiler Default. Switches are 36x20px pills with a 16px light knob inside a 24px-tall target. Only the pill toggles; the label is plain text. Spoiler Default carries an info icon beside its label whose native tooltip explains Spoilers. Put the Notification Position picker, labelled "Popup position", below them: a miniature player frame with one bar per edge.
 
 Appearance contains the segmented Theme Preference control: Light, Dark, and Auto on one sunk track.
 
@@ -299,7 +294,7 @@ With Notes Visibility off, keep the card and grey its note form (title, Reaction
 
 ### Confirmation dialog
 
-Render confirmations inside Room Home, never with `window.confirm`. Use the surface token, large radius, and dialog shadow over a warm translucent backdrop. Focus Cancel when the dialog opens. Leave Room uses the danger fill; Stop sharing uses the neutral action style.
+Render confirmations inside Room Home, never with `window.confirm`. Use the surface token, large radius, and dialog shadow over a warm translucent backdrop. Focus Cancel when the dialog opens. Leave Room uses the danger fill.
 
 ### Your Room launch
 

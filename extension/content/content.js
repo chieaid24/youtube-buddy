@@ -1,5 +1,5 @@
 // extension/content.js
-// The ONLY navigation/DOM-churn observer (Contract C); reporter.js and renderer.js are pure consumers, never detecting navigation themselves.
+// The ONLY navigation/DOM-churn observer (Contract C); reporter.js and room-poller.js are pure consumers, never detecting navigation themselves.
 // Loaded LAST so their ytb:* listeners exist before the initial ytb:navigate fires. Emits on document: ytb:navigate {url, videoId} (load + each SPA nav),
 // ytb:mutation (throttled <=1/500ms on DOM churn), ytb:yt-theme {dark} (on each YouTube <html dark> flip, ADR-0009; theme.js restamps).
 
@@ -100,6 +100,6 @@
 		urlPollTimer = null;
 	});
 
-	// Initial navigate, synchronous on load; reporter/renderer registered their listeners earlier in the `js` array, so they receive this.
+	// Initial navigate, synchronous on load; reporter/room-poller registered their listeners earlier in the `js` array, so they receive this.
 	emitNavigate();
 })();

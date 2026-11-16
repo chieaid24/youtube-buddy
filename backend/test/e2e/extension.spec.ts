@@ -95,7 +95,7 @@ const CORS = {
  */
 function stubRoomBackend(
 	context: BrowserContext,
-	read: { notes?: object[]; replies?: object[]; playlist?: object[]; progress?: object[]; events?: object[] },
+	read: { notes?: object[]; replies?: object[]; playlist?: object[]; watched?: object[]; presence?: object[]; events?: object[] },
 	calls: string[] = [],
 ) {
 	let posted = 0;
@@ -110,8 +110,8 @@ function stubRoomBackend(
 				contentType: 'application/json',
 				headers: CORS,
 				body: JSON.stringify({
-					progress: read.progress ?? [],
-					presence: [],
+					watched: read.watched ?? [],
+					presence: read.presence ?? [],
 					notes: read.notes ?? [],
 					replies: read.replies ?? [],
 					playlist: read.playlist ?? [],
@@ -143,7 +143,7 @@ async function seedPairedRoom(context: BrowserContext) {
 	const extensionId = await (await extensionItem(extensions)).getAttribute('id');
 	const popup = await context.newPage();
 	await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-	await popup.evaluate(() => chrome.storage.local.set({ code: 'roome2e', clientId: 'viewer-e2e', name: 'Viewer', sharing: false }));
+	await popup.evaluate(() => chrome.storage.local.set({ code: 'roome2e', clientId: 'viewer-e2e', name: 'Viewer' }));
 	return popup;
 }
 
@@ -181,298 +181,14 @@ test('loads the unpacked extension and runs every content script', async () => {
 		// Unpaired, so it never mounts — though composer.js still ran (styles below).
 		await expect(page.locator('#ytb-note-button')).toHaveCount(0);
 		await expect(page.locator('#ytb-theme')).toHaveCount(1);
-		await expect(page.locator('#ytb-renderer-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-notes-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-composer-styles')).toHaveCount(1);
 		await expect(page.locator('#ytb-home-toggle-style')).toHaveCount(1);
 		await expect(page.locator('#ytb-home-toggle')).toHaveCount(0); // guide row is home-route only
-		await expect(page.locator('.ytb-thumb-dots')).toHaveCount(0);
 		await page.waitForTimeout(750);
 		const extensions = await context.newPage();
 		const item = await extensionItem(extensions);
 		await expect(item.locator('#errors-button')).toHaveCount(0);
-
-		expect(errors, errors.join('\n')).toEqual([]);
-	} finally {
-		await context.close();
-	}
-});
-
-// The feed thumbnail generations the Watched-By Dots must stay inside: a
-// lockup tile whose /watch anchor is WIDER AND TALLER than its real thumbnail
-// box (today's home/channel grids), a lockup tile carrying a simulated Watched
-// Bar (the dots are top-left — fully decoupled from the bottom Watched Bar),
-// and a classic tile whose anchor IS the thumbnail box (search). Plus a
-// document-level ytd-video-preview host (hidden until the test reveals it)
-// standing in for YouTube's hover-autoplay inline preview, with a high
-// z-index player pane the dots must beat.
-const watchedByDotsFixture = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8"><title>YouTube watched-by-dots fixture</title>
-    <style>
-      body { margin: 0; padding: 24px; }
-      ytd-rich-item-renderer, yt-lockup-view-model, yt-thumbnail-view-model,
-      yt-thumbnail-bottom-overlay-view-model, ytd-video-preview { display: block; }
-    </style>
-  </head>
-  <body>
-    <ytd-rich-item-renderer>
-      <yt-lockup-view-model>
-        <a id="lockup-anchor" class="ytLockupViewModelContentImage" href="/watch?v=vid-lockup" style="display: block; width: 347px; height: 207px">
-          <yt-thumbnail-view-model id="lockup-thumb" style="position: relative; overflow: hidden; width: 331px; height: 195px; border-radius: 12px; background: #222">
-            <img alt="" style="display: block; width: 100%; height: 100%">
-            <yt-thumbnail-bottom-overlay-view-model style="position: absolute; left: 0; right: 0; bottom: 0">
-              <div id="lockup-badge" style="position: absolute; right: 8px; bottom: 8px; width: 34px; height: 18px; background: #000; border-radius: 4px"></div>
-            </yt-thumbnail-bottom-overlay-view-model>
-          </yt-thumbnail-view-model>
-        </a>
-      </yt-lockup-view-model>
-    </ytd-rich-item-renderer>
-    <ytd-rich-item-renderer>
-      <yt-lockup-view-model>
-        <a id="watched-anchor" href="/watch?v=vid-watched" style="display: block; width: 347px; height: 207px">
-          <yt-thumbnail-view-model id="watched-thumb" style="position: relative; overflow: hidden; width: 331px; height: 195px; border-radius: 12px; background: #222">
-            <img alt="" style="display: block; width: 100%; height: 100%">
-            <yt-thumbnail-bottom-overlay-view-model style="position: absolute; left: 0; right: 0; bottom: 0">
-              <div id="watched-bar" class="ytThumbnailOverlayProgressBarHostWatchedProgressBar" style="height: 4px; margin: 0 4px 4px 8px; border-radius: 2px; background: #f03"></div>
-            </yt-thumbnail-bottom-overlay-view-model>
-          </yt-thumbnail-view-model>
-        </a>
-      </yt-lockup-view-model>
-    </ytd-rich-item-renderer>
-    <a id="classic-anchor" href="/watch?v=vid-classic" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
-      <img alt="" style="display: block; width: 100%; height: 100%">
-    </a>
-    <a id="dup-anchor" href="/watch?v=vid-lockup" style="display: block; width: 320px; height: 180px; background: #222; margin-top: 16px">
-      <img alt="" style="display: block; width: 100%; height: 100%">
-    </a>
-    <ytd-video-preview id="preview-host" style="display: none; position: fixed; left: 24px; top: 340px; width: 480px; height: 270px; z-index: 2200; background: #000">
-      <a id="preview-anchor" href="/watch?v=vid-lockup" style="display: block; width: 100%; height: 100%">
-        <img alt="" style="display: block; width: 100%; height: 100%">
-      </a>
-      <div id="preview-player" style="position: absolute; inset: 0; z-index: 50; background: #111"></div>
-    </ytd-video-preview>
-  </body>
-</html>`;
-
-test('the Watched-By Dots sit top-left inside the thumbnail box, label their Buddies, and survive the inline preview', async () => {
-	const context = await launchExtension();
-	const errors = collectErrors(context);
-
-	try {
-		await stubRoomBackend(context, {
-			progress: [
-				// Two branches of the Watch Status table on one tooltip: Sam floors
-				// up to "5%" (a record never reads "0%"), Kim rounds past 80 to "Watched".
-				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-lockup', timestamp: 2, duration: 100, updatedAt: 1 },
-				{ clientId: 'buddy-2', name: 'Kim', videoId: 'vid-lockup', timestamp: 95, duration: 100, updatedAt: 2 },
-				// The viewer's own record must never grow a dot (YouTube's red
-				// Watched Bar already tells the viewer's state).
-				{ clientId: 'viewer-e2e', name: 'Viewer', videoId: 'vid-lockup', timestamp: 90, duration: 100, updatedAt: 9 },
-				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-watched', timestamp: 40, duration: 100, updatedAt: 3 },
-				{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-classic', timestamp: 55, duration: 100, updatedAt: 4 },
-			],
-		});
-		await context.route('https://www.youtube.com/**', (route) =>
-			route.fulfill({ status: 200, contentType: 'text/html', body: watchedByDotsFixture }),
-		);
-		const popup = await seedPairedRoom(context);
-
-		const page = await context.newPage();
-		await page.goto('https://www.youtube.com/');
-		const clusters = page.locator('.ytb-thumb-dots');
-		await nudgeUntil(page, () => expect(clusters).toHaveCount(4, { timeout: 700 }));
-
-		// The retired Progress Bar renders nowhere.
-		await expect(page.locator('.ytb-thumb-bar')).toHaveCount(0);
-
-		const rect = (selector: string) =>
-			page.evaluate((sel) => {
-				const r = document.querySelector(sel)!.getBoundingClientRect();
-				return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
-			}, selector);
-
-		// Keyboard focus shows the tooltip (asserted before any pointer input so
-		// :focus-visible matches). The cluster is a focusable labelled image whose
-		// tooltip is one row per dot: a Buddy Color swatch, Display Name, Watch Status.
-		const classicTip = page.locator('#classic-anchor .ytb-thumb-dots > .ytb-watch-tooltip');
-		const classicRows = classicTip.locator('.ytb-thumb-row');
-		await page.evaluate(() => document.querySelector<HTMLElement>('#classic-anchor .ytb-thumb-dots')!.focus());
-		await expect(classicRows).toHaveCount(1);
-		await expect(classicRows.nth(0).locator('.ytb-thumb-name')).toHaveText('Sam');
-		await expect(classicRows.nth(0).locator('.ytb-thumb-status')).toHaveText('55%'); // 55/100 rounds to 55%
-		// The accessible name mirrors the rows (name + status), for a screen reader.
-		await expect(page.locator('#classic-anchor .ytb-thumb-dots')).toHaveAttribute('aria-label', 'Watched by Sam 55%');
-		await expect.poll(() => classicTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
-		// Focus settles the dots up (~1.25x) — a transform, not a layout change.
-		expect(await page.evaluate(() => getComputedStyle(document.querySelector('#classic-anchor .ytb-thumb-dot')!).transform)).not.toBe(
-			'none',
-		);
-		await page.evaluate(() => document.querySelector<HTMLElement>('#classic-anchor .ytb-thumb-dots')!.blur());
-
-		// Lockup tile: the cluster lives inside the REAL thumbnail box — never
-		// the larger anchor — its dots inset 8px from the box's top-left, one
-		// flat dot per Buddy (the viewer excluded), newest watcher first.
-		const lockupThumb = await rect('#lockup-thumb');
-		const lockupDots = page.locator('#lockup-thumb .ytb-thumb-dot');
-		await expect(lockupDots).toHaveCount(2);
-		await expect(page.locator('#lockup-anchor > .ytb-thumb-dots')).toHaveCount(0);
-		expect(await lockupDots.evaluateAll((dots) => dots.map((d) => (d as HTMLElement).dataset.ytbCid))).toEqual(['buddy-2', 'buddy-1']);
-		const firstDot = await rect('#lockup-thumb .ytb-thumb-dot');
-		expect(firstDot.left).toBeCloseTo(lockupThumb.left + 8, 1);
-		expect(firstDot.top).toBeCloseTo(lockupThumb.top + 8, 1);
-		expect(firstDot.width).toBeCloseTo(8, 1);
-		expect(await page.evaluate(() => getComputedStyle(document.querySelector('#lockup-thumb .ytb-thumb-dot')!).borderRadius)).toBe('50%');
-		// The box already establishes a positioning context, so no YouTube element
-		// is mutated to position: relative.
-		expect(await page.evaluate(() => document.querySelector<HTMLElement>('#lockup-anchor')!.style.position)).toBe('');
-
-		// The whole cluster (its padded hover target included) never overhangs
-		// the image box.
-		const lockupCluster = await rect('#lockup-thumb .ytb-thumb-dots');
-		expect(lockupCluster.left).toBeGreaterThanOrEqual(lockupThumb.left);
-		expect(lockupCluster.top).toBeGreaterThanOrEqual(lockupThumb.top);
-		expect(lockupCluster.right).toBeLessThanOrEqual(lockupThumb.right);
-		expect(lockupCluster.bottom).toBeLessThanOrEqual(lockupThumb.bottom);
-
-		// Hover shows the dark tooltip's rows — one per dot, most recent watcher
-		// first, no "You" for the viewer's own record — each with its Watch Status,
-		// fully inside the box.
-		await page.locator('#lockup-thumb .ytb-thumb-dots').hover();
-		const tip = page.locator('#lockup-thumb .ytb-thumb-dots > .ytb-watch-tooltip');
-		const lockupRows = tip.locator('.ytb-thumb-row');
-		await expect(lockupRows).toHaveCount(2);
-		await expect(lockupRows.nth(0).locator('.ytb-thumb-name')).toHaveText('Kim');
-		await expect(lockupRows.nth(0).locator('.ytb-thumb-status')).toHaveText('Watched'); // 95/100 rounds past 80
-		await expect(lockupRows.nth(1).locator('.ytb-thumb-name')).toHaveText('Sam');
-		await expect(lockupRows.nth(1).locator('.ytb-thumb-status')).toHaveText('5%'); // 2/100 floors up
-		await expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveAttribute('aria-label', 'Watched by Kim Watched, Sam 5%');
-		await expect.poll(() => tip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
-		const tipRect = await rect('#lockup-thumb .ytb-thumb-dots > .ytb-watch-tooltip');
-		expect(tipRect.left).toBeGreaterThanOrEqual(lockupThumb.left);
-		expect(tipRect.right).toBeLessThanOrEqual(lockupThumb.right);
-		await page.mouse.move(0, 0);
-
-		// Watched tile: the dots are decoupled from the bottom Watched Bar —
-		// top-left, nowhere near it, and the Watched Bar itself is untouched.
-		const watchedThumb = await rect('#watched-thumb');
-		const watchedDot = await rect('#watched-thumb .ytb-thumb-dot');
-		expect(watchedDot.left).toBeCloseTo(watchedThumb.left + 8, 1);
-		expect(watchedDot.top).toBeCloseTo(watchedThumb.top + 8, 1);
-		await expect(page.locator('#watched-thumb .ytb-thumb-dot')).toHaveCount(1);
-
-		// Classic tile (the anchor IS the thumbnail box — search): same corner.
-		const classic = await rect('#classic-anchor');
-		const classicDot = await rect('#classic-anchor .ytb-thumb-dot');
-		expect(classicDot.left).toBeCloseTo(classic.left + 8, 1);
-		expect(classicDot.top).toBeCloseTo(classic.top + 8, 1);
-
-		// Autoplay survival, in-box flavor: a high z-index pane covering the
-		// whole box (an inline preview player mounting inside the tile) must not
-		// bury the dots — they stay on top and stay hoverable.
-		await page.evaluate(() => {
-			const cover = document.createElement('div');
-			cover.id = 'inline-cover';
-			cover.style.cssText = 'position: absolute; inset: 0; z-index: 500; background: rgba(0, 0, 0, 0.4)';
-			document.querySelector('#lockup-thumb')!.appendChild(cover);
-		});
-		expect(
-			await page.evaluate(() => {
-				const cluster = document.querySelector('#lockup-thumb .ytb-thumb-dots')!;
-				const r = cluster.getBoundingClientRect();
-				const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-				return cluster === hit || cluster.contains(hit);
-			}),
-		).toBe(true);
-		await page.locator('#lockup-thumb .ytb-thumb-dots').hover();
-		await expect.poll(() => tip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
-		await page.mouse.move(0, 0);
-		await page.evaluate(() => document.querySelector('#inline-cover')!.remove());
-
-		// Autoplay survival, overlay flavor: a document-level ytd-video-preview
-		// host covering the tile gets the cluster mirrored INTO it, above its
-		// player pane, tooltip intact; it disappears with the preview.
-		await page.evaluate(() => {
-			document.querySelector<HTMLElement>('#preview-host')!.style.display = 'block';
-		});
-		const previewCluster = page.locator('#preview-host .ytb-thumb-dots');
-		await nudgeUntil(page, () => expect(previewCluster).toHaveCount(1, { timeout: 700 }));
-		await expect(page.locator('#preview-host .ytb-thumb-dot')).toHaveCount(2);
-		expect(
-			await page.evaluate(() => {
-				const cluster = document.querySelector('#preview-host .ytb-thumb-dots')!;
-				const r = cluster.getBoundingClientRect();
-				const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-				return cluster === hit || cluster.contains(hit);
-			}),
-		).toBe(true);
-		await previewCluster.hover();
-		const previewTip = page.locator('#preview-host .ytb-thumb-dots > .ytb-watch-tooltip');
-		const previewRows = previewTip.locator('.ytb-thumb-row');
-		await expect(previewRows).toHaveCount(2);
-		await expect(previewRows.nth(0).locator('.ytb-thumb-name')).toHaveText('Kim');
-		await expect(previewRows.nth(0).locator('.ytb-thumb-status')).toHaveText('Watched');
-		await expect(previewRows.nth(1).locator('.ytb-thumb-name')).toHaveText('Sam');
-		await expect(previewRows.nth(1).locator('.ytb-thumb-status')).toHaveText('5%');
-		await expect.poll(() => previewTip.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
-		await page.mouse.move(0, 0);
-
-		// Ownership (#174), pairing half: the host at its fixture spot shares
-		// vid-lockup with two tiles but geometrically covers NEITHER, so both
-		// keep their own dots — same videoId alone never cedes a cluster.
-		await expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveCount(1);
-		await expect(page.locator('#dup-anchor .ytb-thumb-dots')).toHaveCount(1);
-
-		// Ownership (#174), covering half: sat over the lockup tile, the mirror
-		// OWNS that video's cluster — the covered tile's own dots are REMOVED
-		// (not merely buried), while the duplicate of the same videoId elsewhere
-		// in the feed keeps its own.
-		await page.evaluate(() => {
-			const host = document.querySelector<HTMLElement>('#preview-host')!;
-			const tile = document.querySelector('#lockup-thumb')!.getBoundingClientRect();
-			host.style.left = `${tile.left - 74}px`;
-			host.style.top = `${tile.top - 37}px`;
-		});
-		await nudgeUntil(page, () => expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveCount(0, { timeout: 700 }));
-		await expect(previewCluster).toHaveCount(1);
-		await expect(page.locator('#dup-anchor .ytb-thumb-dots')).toHaveCount(1);
-
-		// The preview going away sweeps the mirror and hands the cluster back to
-		// the tile.
-		await page.evaluate(() => {
-			document.querySelector<HTMLElement>('#preview-host')!.style.display = 'none';
-		});
-		await nudgeUntil(page, () => expect(previewCluster).toHaveCount(0, { timeout: 700 }));
-		await nudgeUntil(page, () => expect(page.locator('#lockup-thumb .ytb-thumb-dots')).toHaveCount(1, { timeout: 700 }));
-
-		// Recycle safety: a mutation pass over unchanged data must not rebuild
-		// the cluster (the signature guard) — a probe property survives the nudge.
-		await page.evaluate(() => {
-			(document.querySelector('#lockup-thumb .ytb-thumb-dots') as HTMLElement & { __ytbProbe?: boolean }).__ytbProbe = true;
-		});
-		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
-		await page.waitForTimeout(400);
-		expect(
-			await page.evaluate(
-				() => (document.querySelector('#lockup-thumb .ytb-thumb-dots') as HTMLElement & { __ytbProbe?: boolean }).__ytbProbe,
-			),
-		).toBe(true);
-
-		// A Buddy Color re-assignment repaints the dots live — no rebuild, no
-		// reload (the color write triggers shared.js's storage listener, which
-		// rebroadcasts ytb:buddy-colors).
-		await popup.evaluate(() => chrome.storage.local.set({ buddyColors: { roome2e: { 'buddy-1': '#e85d04', 'buddy-2': '#00a86b' } } }));
-		await expect
-			.poll(() => page.evaluate(() => getComputedStyle(document.querySelector('#lockup-thumb .ytb-thumb-dot')!).backgroundColor))
-			.toBe('rgb(0, 168, 107)');
-
-		// Buddy Progress Visibility off removes every cluster, live; back on
-		// restores them.
-		await popup.evaluate(() => chrome.storage.local.set({ buddyProgressHidden: true }));
-		await expect(clusters).toHaveCount(0);
-		await popup.evaluate(() => chrome.storage.local.set({ buddyProgressHidden: false }));
-		await nudgeUntil(page, () => expect(clusters).toHaveCount(4, { timeout: 700 }));
 
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
@@ -520,7 +236,7 @@ test('Note Dots float above the bar at their true timestamps and swallow hover f
 		// (the events YouTube's storyboard/time-pill logic runs on) in a dataset
 		// slot both worlds can read. CustomEvent detail crosses worlds via
 		// structured clone in Chromium, so dispatching the Room read the way
-		// renderer.js rebroadcasts one works.
+		// room-poller.js rebroadcasts one works.
 		await page.evaluate(async (wavDataUri) => {
 			const video = document.querySelector('video') as HTMLVideoElement;
 			const loaded = new Promise((resolve) => video.addEventListener('loadedmetadata', resolve, { once: true }));
@@ -538,6 +254,7 @@ test('Note Dots float above the bar at their true timestamps and swallow hover f
 					detail: {
 						myClientId: 'me-client',
 						roomCode: 'silly-otters',
+						ok: true,
 						notes: [
 							{
 								id: 'note-1',
@@ -623,12 +340,12 @@ const roomyBarFixture = `<!doctype html>
   </body>
 </html>`;
 
-/** Push one Room read into the page, exactly as renderer.js rebroadcasts one. */
+/** Push one Room read into the page, exactly as room-poller.js rebroadcasts one. */
 async function pushNotes(page: Page, notes: unknown[]) {
 	await page.evaluate((payload) => {
 		document.dispatchEvent(
 			new CustomEvent('ytb:room-data', {
-				detail: { myClientId: 'me-client', roomCode: 'silly-otters', notes: payload, replies: [] },
+				detail: { myClientId: 'me-client', roomCode: 'silly-otters', ok: true, notes: payload, replies: [] },
 			}),
 		);
 	}, notes);
@@ -1431,7 +1148,7 @@ test('a Room Home opened before the first Room read settles on the state-appropr
 				status: 200,
 				contentType: 'application/json',
 				headers: CORS,
-				body: JSON.stringify({ progress: [], presence: [], notes: [], replies: [], playlist: [], events: [] }),
+				body: JSON.stringify({ watched: [], presence: [], notes: [], replies: [], playlist: [], events: [] }),
 			});
 		});
 		await context.route('https://www.youtube.com/**', (route) =>
@@ -1482,7 +1199,7 @@ test('Room Home Settings owns Profile, Create, Join, Leave, and Buddy Colors', a
 				status: 200,
 				contentType: 'application/json',
 				headers: CORS,
-				body: JSON.stringify({ progress: [], presence, notes: [], replies: [], playlist: [], events: [] }),
+				body: JSON.stringify({ watched: [], presence, notes: [], replies: [], playlist: [], events: [] }),
 			});
 		});
 		await context.route('https://www.youtube.com/**', (route) =>
@@ -1542,12 +1259,9 @@ test('Room full opens Settings without moving focus or scrolling', async () => {
 
 	try {
 		await stubRoomBackend(context, {
-			progress: Array.from({ length: 5 }, (_, index) => ({
+			presence: Array.from({ length: 5 }, (_, index) => ({
 				clientId: `buddy-${index}`,
 				name: `Buddy ${index}`,
-				videoId: 'fixture-video',
-				timestamp: index,
-				duration: 20,
 				updatedAt: Date.now(),
 			})),
 		});
@@ -1573,7 +1287,7 @@ test('Room full opens Settings without moving focus or scrolling', async () => {
 	}
 });
 
-test('Video Timeline retains its markers through Connection Lost and clears connectionLost on recovery', async () => {
+test('Video Timeline retains its Note Dots through Connection Lost and clears connectionLost on recovery', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 	let backendUp = true;
@@ -1591,22 +1305,36 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 				contentType: 'application/json',
 				headers: CORS,
 				body: JSON.stringify({
-					progress: [{ clientId: 'buddy-1', name: 'Bob', videoId: 'fixture-video', timestamp: 30, duration: 100, updatedAt: Date.now() }],
+					watched: [],
 					presence: [],
-					notes: [],
+					notes: [
+						{
+							id: 'note-1',
+							clientId: 'buddy-1',
+							name: 'Bob',
+							videoId: 'fixture-video',
+							timestamp: 12,
+							kind: 'text',
+							body: 'still here',
+							createdAt: 1,
+						},
+					],
 					replies: [],
 					playlist: [],
 					events: [],
 				}),
 			});
 		});
-		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: fixture }));
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: sizedBarFixture }),
+		);
 
 		const popup = await seedPairedRoom(context);
 		await popup.close(); // its own polling must not muddy the error ledger below
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await loadMedia(page, silentWavDataUri(40));
 
 		// Record the flags of every ytb:room-data broadcast from here on (the
 		// initial on-load read may predate this listener; the test drives its own
@@ -1621,36 +1349,40 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		const broadcasts = () => page.evaluate(() => (window as any).__broadcasts as { ok: boolean; connectionLost: boolean }[]);
 		const driveRead = () => page.evaluate(() => document.dispatchEvent(new Event('yt-navigate-finish')));
 
-		// A successful read draws Bob's marker at 30/100 through the bar's chapter
-		// geometry (#159). This fixture bar is unchaptered — one segment — so that
-		// is exactly 30% of its measured width, written in px.
-		const marker = page.locator('.ytb-watch-marker');
+		// A successful read draws Bob's Note Dot at 12s of the 40s video: 30% along the bar.
+		const dot = page.locator('.ytb-note-dot');
 		await nudgeUntil(page, async () => {
-			await expect(marker).toHaveCount(1);
+			await expect(dot).toHaveCount(1);
 		});
-		const barWidth = await page.locator('.ytp-progress-bar').evaluate((el) => el.getBoundingClientRect().width);
-		expect(barWidth).toBeGreaterThan(0); // a zero-width bar would make every assertion below vacuous
-		const markerLeft = () => marker.evaluate((el) => parseFloat((el as HTMLElement).style.left));
-		await expect.poll(markerLeft).toBeCloseTo(0.3 * barWidth, 1);
+		const dotFraction = () =>
+			page.evaluate(() => {
+				const bar = document.querySelector('.ytp-progress-bar')!.getBoundingClientRect();
+				const rect = document.querySelector('.ytb-note-dot')!.getBoundingClientRect();
+				return (rect.left + rect.width / 2 - bar.left) / bar.width;
+			});
+		await expect.poll(dotFraction).toBeCloseTo(0.3, 2);
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => b.ok).length).toBeGreaterThanOrEqual(1);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
 
-		// Two consecutive failed reads: the marker is retained as last seen (no
+		// Two consecutive failed reads: the dot is retained as last seen (no
 		// blanking, no on-video indicator), and connectionLost turns true only on
 		// the second failure (the shared two-failure threshold).
 		backendUp = false;
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(1);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: false });
-		await expect(marker).toHaveCount(1);
-		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
+		await expect(dot).toHaveCount(1);
+		expect(await dotFraction()).toBeCloseTo(0.3, 2);
 
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).filter((b) => !b.ok).length).toBe(2);
 		expect((await broadcasts()).at(-1)).toEqual({ ok: false, connectionLost: true });
-		await expect(marker).toHaveCount(1);
-		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
+		// A mutation pass re-renders from the retained Notes, never from the failed read.
+		await page.evaluate(() => document.body.appendChild(document.createComment('nudge')));
+		await page.waitForTimeout(700);
+		await expect(dot).toHaveCount(1);
+		expect(await dotFraction()).toBeCloseTo(0.3, 2);
 
 		// Only the aborted GETs may have errored; nothing else.
 		expect(
@@ -1659,13 +1391,13 @@ test('Video Timeline retains its markers through Connection Lost and clears conn
 		).toBe(true);
 		errors.length = 0;
 
-		// Recovery: the first successful read rebuilds the marker and clears
-		// connectionLost on that same broadcast.
+		// Recovery: the first successful read clears connectionLost on that same
+		// broadcast, and the dot is still there.
 		backendUp = true;
 		await driveRead();
 		await expect.poll(async () => (await broadcasts()).at(-1)).toEqual({ ok: true, connectionLost: false });
-		await expect(marker).toHaveCount(1);
-		expect(await markerLeft()).toBeCloseTo(0.3 * barWidth, 1);
+		await expect(dot).toHaveCount(1);
+		expect(await dotFraction()).toBeCloseTo(0.3, 2);
 		expect(errors, errors.join('\n')).toEqual([]);
 	} finally {
 		await context.close();
@@ -1690,7 +1422,7 @@ test('Room Home Panel keeps its Feed and Recommendations through Connection Lost
 				contentType: 'application/json',
 				headers: CORS,
 				body: JSON.stringify({
-					progress: [],
+					watched: [],
 					presence: [],
 					notes: [],
 					replies: [],
@@ -1876,6 +1608,100 @@ const roomNotes = [
 	},
 ];
 
+test('a started video is marked watched with one call and no position; seeks, ads, and known videos send nothing', async () => {
+	test.setTimeout(60_000); // several real-time playback windows
+	const context = await launchExtension();
+	const errors = collectErrors(context);
+
+	try {
+		const calls: string[] = [];
+		// The Room already holds the viewer's Watch Record for fixture-known.
+		await stubRoomBackend(context, { watched: [{ clientId: 'viewer-e2e', videoId: 'fixture-known', watchedAt: 1 }] }, calls);
+		const mediaSrc = `data:audio/wav;base64,${silentWav(40).toString('base64')}`;
+		await context.route('https://www.youtube.com/**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
+		);
+		const popup = await seedPairedRoom(context);
+		await popup.close();
+
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/watch?v=fixture-video');
+		await page.waitForFunction(() => {
+			const v = document.querySelector('video');
+			return Boolean(v && Number.isFinite(v.duration) && v.duration > 0);
+		});
+		const watchedCalls = () => calls.filter((call) => call.startsWith('POST ') && new URL(call.split(' ')[1]).pathname === '/watched');
+		const mark = (videoId: string) => `POST http://localhost:8787/watched?code=roome2e {"clientId":"viewer-e2e","videoId":"${videoId}"}`;
+		// 3x playback: five played seconds pass in under two, in steps a seek can't be mistaken for.
+		const play = () =>
+			page.evaluate(() => {
+				const v = document.querySelector('video')!;
+				v.playbackRate = 3;
+				return v.play();
+			});
+		const rewind = () =>
+			page.evaluate(() => {
+				const v = document.querySelector('video')!;
+				v.pause();
+				v.currentTime = 0;
+			});
+		// An SPA navigation, as YouTube performs one.
+		const navigateTo = (videoId: string) =>
+			page.evaluate((id) => {
+				history.pushState({}, '', '/watch?v=' + id);
+				document.dispatchEvent(new Event('yt-navigate-finish'));
+			}, videoId);
+
+		// Seeking around a paused video plays nothing: no mark.
+		for (const time of [10, 25, 3]) {
+			await page.evaluate((t) => (document.querySelector('video')!.currentTime = t), time);
+			await page.waitForTimeout(150);
+		}
+		expect(watchedCalls()).toEqual([]);
+
+		// An ad plays on the ad's clock: no mark however long it runs.
+		await rewind();
+		await page.evaluate(() => document.querySelector('#movie_player')!.classList.add('ad-showing'));
+		await play();
+		await page.waitForTimeout(2200);
+		expect(watchedCalls()).toEqual([]);
+
+		// The video itself: one mark once about five seconds have played, carrying only who and which video.
+		await rewind();
+		await page.evaluate(() => document.querySelector('#movie_player')!.classList.remove('ad-showing'));
+		await play();
+		await expect.poll(watchedCalls).toEqual([mark('fixture-video')]);
+
+		// Nothing further for this video: not as it keeps playing, not on pause, seek, or resume.
+		await page.waitForTimeout(2200);
+		await rewind();
+		await play();
+		await page.waitForTimeout(2200);
+		expect(watchedCalls()).toEqual([mark('fixture-video')]);
+
+		// The next video gets its own single mark.
+		await rewind();
+		await navigateTo('fixture-second');
+		await play();
+		await expect.poll(watchedCalls).toEqual([mark('fixture-video'), mark('fixture-second')]);
+
+		// A video the Room read already shows as watched sends nothing at all.
+		await rewind();
+		await navigateTo('fixture-known');
+		await play();
+		await page.waitForTimeout(2200);
+		expect(watchedCalls()).toEqual([mark('fixture-video'), mark('fixture-second')]);
+
+		// No position report of any kind ever hit the wire.
+		expect(calls.filter((call) => /timestamp|duration|currentTime/.test(call))).toEqual([]);
+		expect(calls.filter((call) => call.startsWith('POST http://localhost:8787/?'))).toEqual([]);
+
+		expect(errors, errors.join('\n')).toEqual([]);
+	} finally {
+		await context.close();
+	}
+});
+
 test('foreground write failures distinguish an unreachable backend from server rejections', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
@@ -1891,7 +1717,7 @@ test('foreground write failures distinguish an unreachable backend from server r
 				const body =
 					url.pathname === '/conversation'
 						? { note: textNote, replies: [] }
-						: { progress: [], presence: [], notes: [textNote], replies: [], playlist: [], events: [] };
+						: { watched: [], presence: [], notes: [textNote], replies: [], playlist: [], events: [] };
 				return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(body) });
 			}
 
@@ -1913,7 +1739,6 @@ test('foreground write failures distinguish an unreachable backend from server r
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -1990,7 +1815,6 @@ test('the Note Composer and Expanded Note hold the chrome only while hovered, ne
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -2174,9 +1998,7 @@ test('every Note Dot opens its Expanded Note variant; the click never seeks or c
 		await expect(panel).toBeVisible();
 		await expect(panel.locator('.ytb-panel-body')).toContainText('hello');
 		await expect(panel.locator('.ytb-panel-time')).toHaveText('@0:04');
-		// Sharing is off (seedPairedRoom leaves it off), yet the Reply composer is
-		// present with no "Turn on Sharing" message — Sharing no longer gates Reply
-		// writing (#194); a Room is all it needs.
+		// The Reply composer needs only a Room (#194).
 		await expect(panel.locator('.ytb-panel-reply-input')).toHaveCount(1);
 		await expect(panel.locator('.ytb-panel-reply-note')).toHaveCount(0);
 		s = await state();
@@ -2218,7 +2040,6 @@ test('an open Expanded Note or Note Composer takes the Picture Click as the sing
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -2378,7 +2199,6 @@ test('Expanded Note prose selects, while overlay-origin drags leave both overlay
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: true }));
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -2834,7 +2654,6 @@ test("a Post Echo fires the author's own Playback Notification on posting — pa
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing does not gate Note posting.
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -2996,7 +2815,7 @@ test('Spoiler checkbox keyboard: Enter posts the draft once, Space stays native,
 			route.fulfill({ status: 200, contentType: 'text/html', body: playbackFixture(mediaSrc) }),
 		);
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: false, spoilerDefault: true })); // Exercise an explicit Spoiler preference.
+		await popup.evaluate(() => chrome.storage.local.set({ spoilerDefault: true })); // Exercise an explicit Spoiler preference.
 
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
@@ -3538,7 +3357,7 @@ test('the Recommend strip is optimistic: flips before the write lands, absorbs t
 					status: 200,
 					contentType: 'application/json',
 					headers: CORS,
-					body: JSON.stringify({ progress: [], presence: [], notes: [], replies: [], playlist: [], events: [] }),
+					body: JSON.stringify({ watched: [], presence: [], notes: [], replies: [], playlist: [], events: [] }),
 				});
 			}
 			if (request.method() === 'POST' && url.pathname === '/playlist') {
@@ -3819,6 +3638,11 @@ test('Recommended to you grid hides own items; Dismiss is local-only and survive
 					},
 					{ id: 'rec-dismiss', videoId: 'vid-dismiss', title: 'Buddy Dismissed', addedBy: 'buddy-1', addedByName: 'Buddy', addedAt: 3000 },
 				],
+				presence: [{ clientId: 'buddy-2', name: 'Kim', updatedAt: 2500 }],
+				watched: [
+					{ clientId: 'viewer-e2e', videoId: 'vid-keep', watchedAt: 2100 },
+					{ clientId: 'buddy-2', videoId: 'vid-keep', watchedAt: 2200 },
+				],
 			},
 			calls,
 		);
@@ -3859,6 +3683,9 @@ test('Recommended to you grid hides own items; Dismiss is local-only and survive
 		await expect(dismissed.locator('.ytb-hs-card-title')).toHaveAttribute('title', 'Buddy Dismissed\nby Looked Up Channel');
 		expect(oembedCalls).toHaveLength(1);
 		expect(oembedCalls[0]).toContain(encodeURIComponent('https://www.youtube.com/watch?v=vid-dismiss'));
+		// Each card names who has a Watch Record for it, and says so when nobody does.
+		await expect(keeper.locator('.ytb-hs-watched')).toHaveText('Watched by You and Kim');
+		await expect(dismissed.locator('.ytb-hs-watched')).toHaveText('New to the Room');
 		// No custom hover card on Recommended cards.
 		await keeper.locator('.ytb-hs-thumb').hover();
 		await page.waitForTimeout(300);
@@ -3997,10 +3824,18 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		// recommend whose videoId has since left the live list (un-recommended;
 		// removals emit NO event — ADR-0007), and one video recommended, then
 		// un-recommended, then re-recommended — two `added` Events, the older
-		// superseded (per-Event strike, issue #110). The Buddy also has a
-		// Progress Record for the viewer's pick, producing a Watch Notice.
+		// superseded (per-Event strike, issue #110). Watch Records on live
+		// Recommendations produce Watch Notices for the whole Room - a Buddy on
+		// the viewer's pick, the viewer and another Buddy on Sam's pick - but
+		// never for Sam on his own pick.
 		await stubRoomBackend(context, {
-			progress: [{ clientId: 'buddy-1', name: 'Sam', videoId: 'vid-own', timestamp: 30, duration: 100, updatedAt: 4000 }],
+			presence: [{ clientId: 'buddy-2', name: 'Kim', updatedAt: 4600 }],
+			watched: [
+				{ clientId: 'buddy-1', videoId: 'vid-own', watchedAt: 4000 },
+				{ clientId: 'buddy-1', videoId: 'vid-live', watchedAt: 900 },
+				{ clientId: 'viewer-e2e', videoId: 'vid-live', watchedAt: 4500 },
+				{ clientId: 'buddy-2', videoId: 'vid-live', watchedAt: 4600 },
+			],
 			playlist: [
 				{ videoId: 'vid-live', title: 'Buddy Pick', addedBy: 'buddy-1', addedByName: 'Sam', addedAt: 1000 },
 				{ videoId: 'vid-own', title: 'My Pick', channel: 'My Channel', addedBy: 'viewer-e2e', addedByName: 'Viewer', addedAt: 2000 },
@@ -4041,9 +3876,9 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		await page.goto('https://www.youtube.com/');
 		await openHomePanel(page);
 
-		// Five System Messages + one Watch Notice, all on the quiet system row.
+		// Five System Messages + three Watch Notices, all on the quiet system row.
 		const rows = page.locator('#ytb-home-section .ytb-hs-system');
-		await nudgeUntil(page, () => expect(rows).toHaveCount(6, { timeout: 700 }));
+		await nudgeUntil(page, () => expect(rows).toHaveCount(8, { timeout: 700 }));
 
 		// Recipient copy drops "you"; ONLY the title is a link, and it is unquoted.
 		const recipient = rows.filter({ hasText: 'Sam recommended Buddy Pick' });
@@ -4095,6 +3930,12 @@ test('recommend Feed lines: own "You recommended", recipient copy, title-only li
 		const watch = rows.filter({ hasText: 'Sam started watching My Pick' });
 		await expect(watch).toHaveCount(1);
 		await expect(watch.locator('a.ytb-hs-title-link')).toHaveAttribute('href', '/watch?v=vid-own');
+		// Watch Notices go to the whole Room: the viewer's own watch reads "You",
+		// a Buddy watching another Buddy's pick shows too, and a recommender
+		// watching their own pick is not news.
+		await expect(rows.filter({ hasText: 'You started watching Buddy Pick' })).toHaveCount(1);
+		await expect(rows.filter({ hasText: 'Kim started watching Buddy Pick' })).toHaveCount(1);
+		await expect(rows.filter({ hasText: 'Sam started watching Buddy Pick' })).toHaveCount(0);
 
 		// Hovering any Feed link shows the Video Hover Card near the cursor instead
 		// of a native tooltip: the video's thumbnail plus its title.
@@ -4531,7 +4372,6 @@ test('a posted Note captures the video title and the Feed keeps mention emphasis
 		const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 		await context.route('https://i.ytimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: pixel }));
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ sharing: false })); // Sharing does not gate Note posting.
 
 		// Posting: the composer freezes the watch page's title into the Note. The
 		// fixture has no metadata heading, so this also exercises the tab-title
@@ -4820,15 +4660,12 @@ test('Recommend to Buddies row appears in both kebab menu generations and recomm
 	}
 });
 
-test('Settings view: gear/back, live theme, visibility, sharing toggle, home-section sync', async () => {
+test('Settings view: gear/back, live theme, Notes visibility, confirmation, home-section sync', async () => {
 	const context = await launchExtension();
 	const errors = collectErrors(context);
 
 	try {
-		await stubRoomBackend(context, {
-			notes: roomNotes,
-			progress: [{ clientId: 'buddy-1', name: 'Buddy', videoId: 'fixture-video', timestamp: 5, duration: 20, updatedAt: Date.now() }],
-		});
+		await stubRoomBackend(context, { notes: roomNotes });
 		const mediaSrc = `data:audio/wav;base64,${silentWav(20).toString('base64')}`;
 		await context.route('https://www.youtube.com/**', (route) => {
 			const url = new URL(route.request().url());
@@ -4852,14 +4689,14 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await homePanel.getByRole('button', { name: 'Settings' }).click();
 		await expect(homePanel.locator('.ytb-hs-settings')).toBeVisible();
 		await expect(homePanel.locator('.ytb-hs-set-group > h3')).toHaveText(['Profile', 'Room', 'On-video', 'Appearance']);
-		const sharingToggle = homePanel.getByRole('switch', { name: 'Share video progress' });
-		await expect(sharingToggle).toHaveRole('switch');
-		await expect(sharingToggle).toHaveAttribute('aria-checked', 'false');
-		await expect(homePanel.getByRole('button', { name: 'Leave Room' })).toBeVisible();
-		await sharingToggle.click();
-		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
+		// On-video holds exactly two switches: nothing shares or shows watch progress.
+		await expect(homePanel.getByRole('switch')).toHaveCount(2);
+		await expect(homePanel.getByRole('switch', { name: 'Show Notes' })).toHaveAttribute('aria-checked', 'true');
+		await expect(homePanel.getByRole('switch', { name: 'Spoiler Default' })).toHaveAttribute('aria-checked', 'false');
+		const leaveRoom = homePanel.getByRole('button', { name: 'Leave Room' });
+		await expect(leaveRoom).toBeVisible();
 
-		// A watch page with three Note dots, a Buddy marker, and the + button.
+		// A watch page with three Note dots and the + button.
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/watch?v=fixture-video');
 		await page.waitForFunction(() => {
@@ -4869,7 +4706,6 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		const dots = page.locator('.ytb-note-dot');
 		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
-		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
 
 		// Theme Preference: forced Dark stamps data-theme on BOTH surfaces live.
 		await homePanel.locator('[data-theme-choice="dark"]').click();
@@ -4892,25 +4728,15 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		await expect(popup.evaluate(() => document.documentElement.hasAttribute('data-theme'))).resolves.toBe(false);
 
-		// Notes off: the dots leave the player, live, while the Buddy marker
-		// (independent setting) survives and the + button stays for the Recommend
-		// strip. Back on restores.
+		// Notes off: the dots leave the player, live, while the + button stays for
+		// the Recommend strip. Back on restores.
 		const notesToggle = homePanel.getByRole('switch', { name: 'Show Notes' });
 		await notesToggle.click();
 		await expect(dots).toHaveCount(0);
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
-		await expect(page.locator('.ytb-watch-marker')).toHaveCount(1);
 		await notesToggle.click();
 		await nudgeUntil(page, () => expect(dots).toHaveCount(3, { timeout: 700 }));
 		await expect(page.locator('#ytb-note-button')).toBeVisible();
-
-		// Buddy Progress off: the timeline marker disappears live; dots stay.
-		const progressToggle = homePanel.getByRole('switch', { name: 'Show Buddy progress' });
-		await progressToggle.click();
-		await expect(page.locator('.ytb-watch-marker')).toHaveCount(0);
-		await expect(dots).toHaveCount(3);
-		await progressToggle.click();
-		await nudgeUntil(page, () => expect(page.locator('.ytb-watch-marker')).toHaveCount(1, { timeout: 700 }));
 
 		// Notification Position + Spoiler Default persist under their keys.
 		await homePanel.locator('[data-edge="left"]').click();
@@ -4931,26 +4757,19 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await expect(spoilerBox).not.toBeChecked();
 		await page.keyboard.press('Escape');
 
-		// Turning off is guarded; cancel preserves on, confirm stores off.
-		await sharingToggle.click();
+		// Leaving is guarded; Cancel keeps the Room.
+		await leaveRoom.click();
 		await expect(homePanel.locator('.ytb-hs-confirm')).toBeVisible();
 		await homePanel.getByRole('button', { name: 'Cancel' }).click();
-		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
-		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
-		await sharingToggle.click();
-		await homePanel.getByRole('button', { name: 'Stop sharing' }).click();
-		await expect(sharingToggle).toHaveAttribute('aria-checked', 'false');
-		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: false });
-		await sharingToggle.click();
-		await expect(sharingToggle).toHaveAttribute('aria-checked', 'true');
-		await expect.poll(async () => popup.evaluate(() => chrome.storage.local.get('sharing'))).toEqual({ sharing: true });
+		await expect(homePanel.locator('.ytb-hs-confirm')).toHaveCount(0);
+		await expect(popup.evaluate(() => chrome.storage.local.get('code'))).resolves.toEqual({ code: 'roome2e' });
 
 		const guideToggle = home.locator('#ytb-home-toggle');
 		const homeOverlay = home.locator('#ytb-home-overlay');
 		await homePanel.getByRole('button', { name: 'Back' }).click();
 		await expect(homePanel.locator('.ytb-hs-feed')).toBeVisible();
 		await homePanel.getByRole('button', { name: 'Settings' }).click();
-		await sharingToggle.click();
+		await leaveRoom.click();
 		await expect(homePanel.locator('.ytb-hs-confirm')).toBeVisible();
 		await home.keyboard.press('Escape');
 		await expect(homePanel.locator('.ytb-hs-confirm')).toHaveCount(0);
@@ -4967,7 +4786,7 @@ test('Settings view: gear/back, live theme, visibility, sharing toggle, home-sec
 		await guideToggle.click();
 		await expect(homePanel.locator('.ytb-hs-settings')).toBeVisible();
 		await expect(homePanel.locator('.ytb-hs-room-status strong')).toHaveText('Unpaired');
-		await expect(homePanel.getByRole('switch', { name: 'Share video progress' })).toBeVisible();
+		await expect(homePanel.getByRole('switch', { name: 'Show Notes' })).toBeVisible();
 		await expect(homePanel.getByRole('button', { name: 'Create a room' })).toBeVisible();
 
 		expect(errors, errors.join('\n')).toEqual([]);
@@ -5012,7 +4831,7 @@ test('@live shows a shared join message on real YouTube', async ({}, testInfo) =
 			await route.fulfill({ response });
 		});
 		const popup = await seedPairedRoom(context);
-		await popup.evaluate(() => chrome.storage.local.set({ code: '', sharing: true }));
+		await popup.evaluate(() => chrome.storage.local.set({ code: '' }));
 		const page = await context.newPage();
 		await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });
 		await openHomePanel(page);
@@ -5058,8 +4877,6 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 		await expect(panel.locator('.ytb-hs-settings')).toBeVisible();
 		await panel.locator('#ytb-hs-name').fill('Live Reviewer');
 		await panel.locator('#ytb-hs-name').blur();
-		const sharing = panel.getByRole('switch', { name: 'Share video progress' });
-		if ((await sharing.getAttribute('aria-checked')) === 'false') await sharing.click();
 		await panel.getByRole('button', { name: 'Create a room' }).click();
 		await expect(panel.locator('.ytb-hs-code-row strong')).toBeVisible({ timeout: 20_000 });
 
@@ -5067,7 +4884,7 @@ test('@live manages a Room on YouTube without content-script errors', async ({},
 		await page.screenshot({ path: settingsShot });
 		await testInfo.attach('Room Home Settings on YouTube', { path: settingsShot, contentType: 'image/png' });
 
-		await sharing.click();
+		await panel.getByRole('button', { name: 'Leave Room' }).click();
 		await expect(panel.getByRole('alertdialog')).toBeVisible();
 		const confirmShot = testInfo.outputPath('live-room-home-confirmation.png');
 		await page.screenshot({ path: confirmShot });

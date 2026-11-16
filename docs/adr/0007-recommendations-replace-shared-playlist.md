@@ -39,11 +39,11 @@ We chose **(b)**, with a client-local dismiss layer.
   survives an un-recommend instead of decaying to "a video". Only "added" (recommend)
   events feed the Room Feed; **removals emit no event**.
 
-- **The "a Buddy watched a video you recommended" Feed item is derived**, not stored. It
-  is computed client-side from the Room read (a Buddy's Progress Record for one of your
-  recommendations), timestamped by that record's `updatedAt`. Best-effort: it can reorder
-  as the Buddy keeps watching, and it cannot distinguish watched-before vs watched-after
-  the recommendation.
+- **The "a member started watching a recommended video" Feed item is derived**, not stored.
+  It is computed client-side from the Room read (a Watch Record on a live Recommendation,
+  other than the recommender's own), timestamped by that record's `watchedAt`, and shown to
+  the whole Room. A Watch Record is written once per video, so the line never reorders.
+  Best-effort: it cannot distinguish watched-before vs watched-after the recommendation.
 
 ## Rationale
 
@@ -54,8 +54,8 @@ We chose **(b)**, with a client-local dismiss layer.
   videoId dedup with zero added read fan-out.
 - Client-local dismiss keeps the backend's **"nothing stored per-recipient"** invariant
   (ADR-0005) intact — dismissal is a private local preference, exactly like Buddy Colors.
-- Deriving the watch notice avoids adding a new event type and a dedup step on the hot
-  Progress POST path; the best-effort weakness is accepted, consistent with the rest of
+- Deriving the watch notice avoids adding a new event type and a second write on the
+  Watch POST path; the best-effort weakness is accepted, consistent with the rest of
   the Room read.
 
 ## Consequences

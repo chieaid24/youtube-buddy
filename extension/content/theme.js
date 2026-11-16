@@ -52,9 +52,7 @@
 	--ytb-danger: oklch(55% 0.16 30);
 	--ytb-danger-hover: oklch(49% 0.155 30);
 	--ytb-danger-text: oklch(53% 0.16 30);
-	--ytb-neutral: oklch(40% 0.02 52);
-	--ytb-neutral-hover: oklch(34% 0.02 52);
-	/* Text on filled buttons: warm near-white on danger/neutral fills, and a
+	/* Text on filled buttons: warm near-white on danger fills, and a
 	   FIXED dark warm ink on apricot fills in BOTH themes (pastel apricot is
 	   too light for white text) - same contract as the popup. */
 	--ytb-on-fill: oklch(99% 0.005 62);

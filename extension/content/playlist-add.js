@@ -1,6 +1,6 @@
 // Both Recommend Controls (ADR-0007): the watch-page Recommend strip the Note Composer mounts (optimistic Recommend Intent) and the
 // thumbnail kebab-menu row (YouTube-menu DOM fragility deliberately accepted, #56/ADR-0005); the grid renders in home-section.js.
-// Pure consumer per ADR-0001; needs a Room Code; adding is NOT gated by Sharing or Notes Visibility.
+// Pure consumer per ADR-0001; needs a Room Code; adding is NOT gated by Notes Visibility.
 
 (function () {
 	'use strict';

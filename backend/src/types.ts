@@ -2,12 +2,9 @@ export interface Env {
 	PROGRESS: KVNamespace;
 }
 
-export interface ProgressBody {
+export interface WatchedBody {
 	clientId: string;
-	name: string;
 	videoId: string;
-	timestamp: number;
-	duration: number;
 }
 
 export interface PresenceBody {

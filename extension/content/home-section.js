@@ -24,7 +24,6 @@
 	let activeView = 'normal';
 	let viewSettled = true; // false while an open awaits its first Room read to pick the initial view
 	let currentSettings = null;
-	let currentSharing = true;
 	let currentName = '';
 	let pendingConfirm = null;
 	let selectedBuddyId = '';
@@ -592,12 +591,13 @@
 		return row;
 	}
 
-	// Watch Notice (recommender only): a Buddy started one of your Recommendations; title is the only link.
+	// Watch Notice: a member started a video someone else recommended; title is the only link.
 	function buildWatchRow(item, roster) {
 		const row = document.createElement('div');
 		row.className = 'ytb-hs-item ytb-hs-system';
 		const text = document.createElement('span');
-		text.append(YTB.buddyName(item.clientId, item.name, roster) + ' started watching ', buildTitleLink(item.videoId, item.title));
+		const who = item.own ? 'You' : YTB.mentionName(roster, item.clientId);
+		text.append(who + ' started watching ', buildTitleLink(item.videoId, item.title));
 		const when = buildWhen(item.at);
 		row.append(text, when);
 		return row;
@@ -671,7 +671,7 @@
 
 		const watched = document.createElement('div');
 		watched.className = 'ytb-hs-watched';
-		const label = YTB.watchedByLabel(detail.progress, item.videoId, myClientId, roster);
+		const label = YTB.watchedByLabel(detail.watched, item.videoId, myClientId, roster);
 		watched.textContent = label ? 'Watched by ' + label : 'New to the Room';
 
 		const setTooltip = (channel) => {
@@ -694,7 +694,6 @@
 	async function hydrateSettings() {
 		const [settings, config, clientId] = await Promise.all([YTB.getSettings(), YTB.getConfig(), YTB.ensureClientId()]);
 		currentSettings = settings;
-		currentSharing = config.sharing;
 		currentName = config.name || '';
 		myClientId = clientId;
 		if (open && activeView === 'settings') render();
@@ -845,13 +844,13 @@
 			swatch.type = 'button';
 			swatch.className = 'ytb-hs-swatch';
 			swatch.style.setProperty('--ytb-hs-fill', YTB.buddyColor(buddy.clientId));
-			swatch.setAttribute('aria-label', `Change color for ${YTB.buddyName(buddy.clientId, buddy.name, roster)}`);
+			swatch.setAttribute('aria-label', `Change color for ${YTB.mentionName(roster, buddy.clientId)}`);
 			swatch.addEventListener('click', () => {
 				selectedBuddyId = selectedBuddyId === buddy.clientId ? '' : buddy.clientId;
 				render();
 			});
 			const name = document.createElement('span');
-			name.textContent = YTB.buddyName(buddy.clientId, buddy.name, roster);
+			name.textContent = YTB.mentionName(roster, buddy.clientId);
 			const seen = document.createElement('span');
 			seen.className = 'ytb-hs-seen';
 			seen.textContent = formatLastSeen(buddy.updatedAt);
@@ -899,15 +898,6 @@
 			return group;
 		}
 		group.append(
-			buildSwitch('Show Buddy progress', !currentSettings.buddyProgressHidden, () =>
-				saveSettings({
-					buddyProgressHidden: !currentSettings.buddyProgressHidden,
-				}),
-			),
-			buildSwitch('Share video progress', currentSharing, () => {
-				if (currentSharing) confirmStopSharing();
-				else setSharing(true);
-			}),
 			buildSwitch('Show Notes', !currentSettings.notesHidden, () => saveSettings({ notesHidden: !currentSettings.notesHidden })),
 			buildSwitch(
 				'Spoiler Default',
@@ -1023,33 +1013,15 @@
 		render();
 	}
 
-	async function setSharing(next) {
-		currentSharing = next;
-		await YTB.setConfig({ sharing: next });
-		render();
-	}
-
-	function confirmStopSharing() {
-		pendingConfirm = {
-			title: 'Stop sharing?',
-			body: "Your Buddies won't see your progress until you start again.",
-			label: 'Stop sharing',
-			danger: false,
-			action: () => setSharing(false),
-		};
-		render();
-	}
-
 	async function confirmLeaveRoom() {
 		const code = lastDetail && lastDetail.roomCode;
 		const state = roomState();
 		const roster = YTB.roomRoster(lastDetail);
-		const names = state.buddies.map((buddy) => YTB.buddyName(buddy.clientId, buddy.name, roster));
+		const names = state.buddies.map((buddy) => YTB.mentionName(roster, buddy.clientId));
 		pendingConfirm = {
 			title: names.length ? 'Are you sure you want to go?' : 'Leave this Room?',
 			body: names.length ? `This will remove you from the Room, away from: ${names.join(', ')}.` : 'No Buddy has joined the Room yet.',
 			label: 'Leave',
-			danger: true,
 			action: () => leaveRoom(code),
 		};
 		render();
@@ -1084,7 +1056,7 @@
 		});
 		const confirm = document.createElement('button');
 		confirm.type = 'button';
-		confirm.className = `ytb-hs-btn ${pendingConfirm.danger ? 'ytb-hs-danger' : 'ytb-hs-neutral'}`;
+		confirm.className = 'ytb-hs-btn ytb-hs-danger';
 		confirm.textContent = pendingConfirm.label;
 		confirm.addEventListener('click', () => {
 			const action = pendingConfirm.action;
@@ -1127,7 +1099,7 @@
 
 		const pitch = document.createElement('p');
 		pitch.className = 'ytb-hs-pitch';
-		pitch.textContent = 'Watch together, apart. Share progress, notes, and recommendations with up to four friends.';
+		pitch.textContent = 'Watch together, apart. Share notes and recommendations with up to four friends.';
 
 		const actions = document.createElement('div');
 		actions.className = 'ytb-hs-pair-actions';
@@ -1316,11 +1288,7 @@
 		if (area !== 'local') return;
 		let shouldRender = false;
 		if ('name' in changes) currentName = changes.name.newValue || '';
-		if ('sharing' in changes) {
-			currentSharing = changes.sharing.newValue !== false;
-			shouldRender = true;
-		}
-		if (['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden', 'buddyProgressHidden'].some((key) => key in changes)) {
+		if (['theme', 'spoilerDefault', 'notificationPosition', 'notesHidden'].some((key) => key in changes)) {
 			currentSettings = await YTB.getSettings();
 			shouldRender = true;
 		}
@@ -1718,7 +1686,6 @@
       #${SECTION_ID} .ytb-hs-color:disabled { cursor: default; }
       #${SECTION_ID} .ytb-hs-color:disabled::before { opacity: 0.25; }
 		#${SECTION_ID} .ytb-hs-danger { border-color: transparent; background: var(--ytb-danger); color: var(--ytb-on-fill); }
-		#${SECTION_ID} .ytb-hs-neutral { border-color: transparent; background: var(--ytb-neutral); color: var(--ytb-on-fill); }
       /* Leave Room stays quiet here; its confirmation carries the danger fill. */
       #${SECTION_ID} .ytb-hs-leave { padding: 6px 12px; background: transparent; color: var(--ytb-danger-text); }
       #${SECTION_ID} .ytb-hs-leave:hover { border-color: var(--ytb-danger-text); }

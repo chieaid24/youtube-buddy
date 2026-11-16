@@ -10,7 +10,7 @@ ADR-0005 makes the Room Home Panel the complete in-page hub. The toolbar still n
 
 Keep the Chrome toolbar surface as the **Extension Popup**, with one destination action.
 
-The Extension Popup shows the logo and **Youtube Buddy** heading above a button labelled **Check out your room!**. Room state, Room Code, Buddy count, Sharing, and Connection Lost belong in Room Home. Pressing the button immediately shows **Opening your room...** and marks it busy. Tab-creation failures show inline feedback and allow retry.
+The Extension Popup shows the logo and **Youtube Buddy** heading above a button labelled **Check out your room!**. Room state, Room Code, Buddy count, and Connection Lost belong in Room Home. Pressing the button immediately shows **Opening your room...** and marks it busy. Tab-creation failures show inline feedback and allow retry.
 
 Your Room follows an exact tab rule:
 
