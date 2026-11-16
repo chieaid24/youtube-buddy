@@ -212,7 +212,7 @@ The backend event-log record behind System Messages: join rows (`{ type: 'joined
 _Avoid_: log entry, activity record
 
 **Settings view**:
-The one-scroll management view opened by the gear in the Room Home Panel header. It replaces the normal Room Feed and Recommendations content until Back is pressed. Its four visible sections are **Profile** (Nickname), **Room** (Room state, Room Code, Create or Join, Buddy roster, Buddy Color Swatches, and Leave Room), **On-video** (Share video progress, Show Notes, Show Buddy Progress, Spoiler Default, and Notification Position), and **Appearance** (Theme Preference). Stop sharing and Leave Room keep confirmation dialogs; Escape dismisses the confirmation before it can close the panel. Unpaired and Room full viewers open directly into this view.
+The one-scroll management view opened by the gear in the Room Home Panel header. It replaces the normal Room Feed and Recommendations content until Back is pressed. Its four visible sections are **Profile** (Nickname), **Room** (Room state, Room Code, Create or Join, Buddy roster, Buddy Color Swatches, and Leave Room), **On-video** (Show Buddy progress, Share video progress, Show Notes, Spoiler Default, and Notification Position), and **Appearance** (Theme Preference). Stop sharing and Leave Room keep confirmation dialogs; Escape dismisses the confirmation before it can close the panel. Unpaired and Room full viewers open directly into this view.
 _Avoid_: Control Panel, options page, preferences page, config panel
 
 **Theme Preference**:
@@ -220,11 +220,11 @@ The viewer's chosen color theme - **Light**, **Dark**, or **Auto** (the default;
 _Avoid_: dark mode toggle, skin, appearance, system theme
 
 **Spoiler Default**:
-The per-install default state of the Add Note composer's Spoiler checkbox - off by default. It only seeds each opening's checkbox; the author can still flip it per Note, and Reactions are never Spoilers regardless.
+The per-install default state of the Add Note composer's Spoiler checkbox - off by default. It only seeds each opening's checkbox; the author can still flip it per Note, and Reactions are never Spoilers regardless. Its Settings switch carries an info icon whose tooltip explains what a Spoiler is.
 _Avoid_: auto spoiler, spoiler mode
 
 **Notification Position**:
-The player edge where Playback Notifications appear, chosen from four edges — **top**, **bottom**, **left**, **right** — through a visual picker in Settings; the default is bottom. The chosen edge also drives the alerts' main axis: **top** and **bottom** lay concurrent notifications out as a centered horizontal row (Teams/Zoom reaction style) that wraps to another line — away from the edge — when the run outgrows the player, while **left** and **right** stack them as a vertically centered column. It affects only Playback Notifications — the Note Preview, Expanded Note, and Add Note composer stay anchored to their own dot or button.
+The player edge where Playback Notifications appear, chosen from four edges — **top**, **bottom**, **left**, **right** — through a visual picker in Settings; the default is bottom. The chosen edge also drives the alerts' main axis: **top** and **bottom** lay concurrent notifications out as a centered horizontal row (Teams/Zoom reaction style) that wraps to another line — away from the edge — when the run outgrows the player, while **left** and **right** stack them as a vertically centered column. It affects only Playback Notifications — the Note Preview, Expanded Note, and Add Note composer stay anchored to their own dot or button. The Settings view labels its picker "Popup position"; the term itself stays Notification Position in code and docs.
 _Avoid_: popup location, toast position, alert corner, zone, corner
 
 **Notes Visibility** (aka "Notes off"):
@@ -232,5 +232,5 @@ A per-install switch that hides the ENTIRE on-video Note layer at once — every
 _Avoid_: mute notes, hide comments, disable notes
 
 **Buddy Progress Visibility**:
-A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the Progress Markers on the Video Timeline and the Watched-By Dots on feed/home thumbnails (the fractional thumbnail Progress Bar it used to hide is retired). Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the Room Home roster or presence. The Settings view switch label reads "Show Buddy Progress"; the term itself stays Buddy Progress Visibility in code and docs.
+A per-install switch that hides Buddies' watch-position rendering on BOTH surfaces together — the Progress Markers on the Video Timeline and the Watched-By Dots on feed/home thumbnails (the fractional thumbnail Progress Bar it used to hide is retired). Default is on (progress shown). Independent of Notes Visibility; hiding progress never stops the Room Home roster or presence. The Settings view switch label reads "Show Buddy progress"; the term itself stays Buddy Progress Visibility in code and docs.
 _Avoid_: hide markers (alone), hide buddies, hide bars

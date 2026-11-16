@@ -11,7 +11,7 @@ The Room Home Panel is the complete product hub. It has two mutually exclusive v
 - The normal view stacks the Room Feed above Recommendations.
 - The Settings view replaces the normal content and shows four visible sections in one scroll: Profile, Room, On-video, and Appearance. A gear opens Settings and Back restores the normal view.
 
-Profile owns Nickname. Room owns Room state, Room Code, Create or Join, the Buddy roster, Buddy Color Swatches, and Leave Room. On-video owns Share video progress, Notes Visibility, Buddy Progress Visibility, Spoiler Default, and Notification Position. Appearance owns Theme Preference. Stop sharing and Leave Room retain confirmation dialogs, and Escape dismisses a confirmation before it can close the panel.
+Profile owns Nickname. Room owns Room state, Room Code, Create or Join, the Buddy roster, Buddy Color Swatches, and Leave Room. On-video owns Buddy Progress Visibility, Share video progress, Notes Visibility, Spoiler Default, and Notification Position. Appearance owns Theme Preference. Stop sharing and Leave Room retain confirmation dialogs, and Escape dismisses a confirmation before it can close the panel.
 
 Waiting and In room viewers open into the normal view. Unpaired and Room full viewers open directly into Settings because neither can use the Feed. Room full receives no forced focus, scroll, or highlight. Closing and reopening the panel resets it to the state-appropriate initial view; Settings visibility is never persisted.
 

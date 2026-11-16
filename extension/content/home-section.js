@@ -899,59 +899,80 @@
 			return group;
 		}
 		group.append(
+			buildSwitch('Show Buddy progress', !currentSettings.buddyProgressHidden, () =>
+				saveSettings({
+					buddyProgressHidden: !currentSettings.buddyProgressHidden,
+				}),
+			),
 			buildSwitch('Share video progress', currentSharing, () => {
 				if (currentSharing) confirmStopSharing();
 				else setSharing(true);
 			}),
 			buildSwitch('Show Notes', !currentSettings.notesHidden, () => saveSettings({ notesHidden: !currentSettings.notesHidden })),
-			buildSwitch('Show Buddy Progress', !currentSettings.buddyProgressHidden, () =>
-				saveSettings({
-					buddyProgressHidden: !currentSettings.buddyProgressHidden,
-				}),
-			),
-			buildSwitch('Spoiler Default', currentSettings.spoilerDefault, () =>
-				saveSettings({ spoilerDefault: !currentSettings.spoilerDefault }),
+			buildSwitch(
+				'Spoiler Default',
+				currentSettings.spoilerDefault,
+				() => saveSettings({ spoilerDefault: !currentSettings.spoilerDefault }),
+				"New Notes start marked as Spoilers. Buddies can't read a Spoiler until they pass that moment in the video.",
 			),
 			buildNotificationPicker(),
 		);
 		return group;
 	}
 
-	function buildSwitch(label, checked, onClick) {
-		const button = document.createElement('button');
-		button.type = 'button';
-		button.className = 'ytb-hs-row ytb-hs-switch-row';
-		button.setAttribute('role', 'switch');
-		button.setAttribute('aria-checked', String(checked));
+	// Only the pill toggles; a hint adds an info icon beside the label.
+	function buildSwitch(label, checked, onClick, hint) {
+		const row = document.createElement('div');
+		row.className = 'ytb-hs-row ytb-hs-switch-row';
+		const text = document.createElement('span');
+		text.textContent = label;
+		const toggle = document.createElement('button');
+		toggle.type = 'button';
+		toggle.className = 'ytb-hs-switch';
+		toggle.setAttribute('role', 'switch');
+		toggle.setAttribute('aria-label', label);
+		toggle.setAttribute('aria-checked', String(checked));
+		if (hint) {
+			const info = buildInfo(hint);
+			info.id = `ytb-hs-hint-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+			toggle.setAttribute('aria-describedby', info.id);
+			text.append(info);
+		}
 		// A render replaces this node, so a changed state replays the glide as an animation.
 		const now = performance.now();
 		if (switchShown.has(label) && switchShown.get(label) !== checked) switchFlippedAt.set(label, now);
 		switchShown.set(label, checked);
 		const elapsed = now - (switchFlippedAt.has(label) ? switchFlippedAt.get(label) : -Infinity);
 		if (elapsed < SWITCH_GLIDE_MS) {
-			button.classList.add('ytb-hs-flip');
-			button.style.setProperty('--ytb-hs-flip-delay', `${-Math.round(elapsed)}ms`);
+			toggle.classList.add('ytb-hs-flip');
+			toggle.style.setProperty('--ytb-hs-flip-delay', `${-Math.round(elapsed)}ms`);
 		}
-		const text = document.createElement('span');
-		text.textContent = label;
-		const toggle = document.createElement('span');
-		toggle.className = 'ytb-hs-switch';
-		toggle.setAttribute('aria-hidden', 'true');
 		toggle.append(document.createElement('span'));
-		button.append(text, toggle);
-		button.addEventListener('click', onClick);
-		return button;
+		toggle.addEventListener('click', onClick);
+		row.append(text, toggle);
+		return row;
+	}
+
+	// Native title= tooltip, matching the panel's other hover hints.
+	function buildInfo(hint) {
+		const info = document.createElement('span');
+		info.className = 'ytb-hs-info';
+		info.setAttribute('role', 'img');
+		info.setAttribute('aria-label', hint);
+		info.title = hint;
+		info.append(YTBTheme.icon('info'));
+		return info;
 	}
 
 	function buildNotificationPicker() {
 		const wrap = document.createElement('div');
 		wrap.className = 'ytb-hs-row ytb-hs-notifications';
 		const label = document.createElement('span');
-		label.textContent = 'Notification Position';
+		label.textContent = 'Popup position';
 		const picker = document.createElement('div');
 		picker.className = 'ytb-hs-edges';
 		picker.setAttribute('role', 'radiogroup');
-		picker.setAttribute('aria-label', 'Notification Position');
+		picker.setAttribute('aria-label', 'Popup position');
 		for (const edge of ['top', 'left', 'right', 'bottom']) {
 			const button = document.createElement('button');
 			button.type = 'button';
@@ -1627,7 +1648,7 @@
       /* Negative margin lines the 16px glyph up with the controls' right edge. */
       #${SECTION_ID} .ytb-hs-copy-anchor { position: relative; flex: none; display: inline-flex; margin-right: -6px; }
       #${SECTION_ID} .ytb-hs-copy {
-        display: inline-flex; align-items: center; justify-content: center;
+        display: inline-grid; place-items: center;
         width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ytb-r-sm);
         background: transparent; color: var(--ytb-accent-700); cursor: pointer;
         transition:
@@ -1635,35 +1656,42 @@
           color var(--ytb-dur-quick) var(--ytb-ease-out),
           transform var(--ytb-dur-quick) var(--ytb-ease-spring);
       }
-      #${SECTION_ID} .ytb-hs-copy svg { width: 16px; height: 16px; }
-      #${SECTION_ID} .ytb-hs-copy .ytb-hs-copy-check,
-      #${SECTION_ID} .ytb-hs-copy.is-copied > svg { display: none; }
-      #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { display: block; animation: ytb-hs-copied-pop var(--ytb-dur-base) var(--ytb-ease-spring); }
+      /* Copy and check share one cell: the outgoing glyph shrinks away, then the incoming one springs up. */
+      #${SECTION_ID} .ytb-hs-copy svg {
+        grid-area: 1 / 1; width: 16px; height: 16px;
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out) 60ms, transform var(--ytb-dur-base) var(--ytb-ease-spring) 60ms;
+      }
+      #${SECTION_ID} .ytb-hs-copy:not(.is-copied) > .ytb-hs-copy-check,
+      #${SECTION_ID} .ytb-hs-copy.is-copied > svg:not(.ytb-hs-copy-check) {
+        opacity: 0; transform: scale(0.4);
+        transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out), transform var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
       #${SECTION_ID} .ytb-hs-copy:hover,
       #${SECTION_ID} .ytb-hs-copy.is-copied { background: var(--ytb-accent-100); color: var(--ytb-accent-800); }
       #${SECTION_ID} .ytb-hs-copy:active { transform: scale(0.92); }
-      /* Copy feedback: a chip that floats up from the button and fades; stays put if animations are off. */
+      /* Copy feedback chip; stays put if animations are off. Auto margins center it: a transform would blur the text. */
       #${SECTION_ID} .ytb-hs-copy-feedback {
-        position: absolute; right: 0; bottom: calc(100% + 2px); z-index: 1;
-        padding: 2px 8px; border-radius: var(--ytb-r-pill);
-        background: var(--ytb-accent-500); color: var(--ytb-on-accent);
+        position: absolute; left: -40px; right: -40px; bottom: calc(100% + 2px); z-index: 1;
+        width: max-content; margin: 0 auto; padding: 1px 6px; border-radius: var(--ytb-r-pill);
+        background: color-mix(in oklch, var(--ytb-accent-500) 40%, transparent); color: var(--ytb-ink);
         font-size: 11px; font-weight: 700; line-height: 1.3; white-space: nowrap;
         pointer-events: none;
         animation: ytb-hs-copied-float 1200ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
       }
       #${SECTION_ID} .ytb-hs-copy-feedback:empty { display: none; }
-      #${SECTION_ID} .ytb-hs-copy-feedback.is-error { background: var(--ytb-danger); color: var(--ytb-on-fill); }
+      /* The longer failure message stays right-aligned so it cannot leave the card. */
+      #${SECTION_ID} .ytb-hs-copy-feedback.is-error { left: auto; right: 0; background: color-mix(in oklch, var(--ytb-danger) 25%, transparent); }
+      /* It rests in the gap under the Room state text, which would show through the chip. */
       @keyframes ytb-hs-copied-float {
-        0% { opacity: 0; transform: translateY(6px); }
-        12% { opacity: 1; }
-        60% { opacity: 1; animation-timing-function: ease-in; }
-        100% { opacity: 0; transform: translateY(-14px); }
+        0% { opacity: 0; transform: translateY(5px); }
+        15% { opacity: 1; transform: none; }
+        65% { opacity: 1; animation-timing-function: ease-in; }
+        100% { opacity: 0; }
       }
       @keyframes ytb-hs-copied-fade {
         0%, 100% { opacity: 0; }
-        12%, 60% { opacity: 1; }
+        15%, 65% { opacity: 1; }
       }
-      @keyframes ytb-hs-copied-pop { from { transform: scale(0.6); } }
       #${SECTION_ID} .ytb-hs-copy:focus-visible,
       #${SECTION_ID} .ytb-hs-swatch:focus-visible,
       #${SECTION_ID} .ytb-hs-color:focus-visible,
@@ -1696,22 +1724,34 @@
       #${SECTION_ID} .ytb-hs-leave:hover { border-color: var(--ytb-danger-text); }
       #${SECTION_ID} .ytb-hs-set-hint { margin: 4px 0; color: var(--ytb-ink-muted); font-size: 11px; }
       #${SECTION_ID} .ytb-hs-set-group > .ytb-hs-pair { padding: 12px 0 0; }
-      #${SECTION_ID} .ytb-hs-switch-row { background: transparent; text-align: left; cursor: pointer; }
-      #${SECTION_ID} .ytb-hs-switch-row:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ytb-ring); border-radius: 8px; }
+      #${SECTION_ID} .ytb-hs-switch-row > span { display: inline-flex; align-items: center; }
+      /* Info icon: a 24px hover target around a 14px glyph. */
+      #${SECTION_ID} .ytb-hs-info {
+        display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px;
+        color: var(--ytb-ink-faint); transition: color var(--ytb-dur-quick) var(--ytb-ease-out);
+      }
+      #${SECTION_ID} .ytb-hs-info:hover { color: var(--ytb-ink); }
+      #${SECTION_ID} .ytb-hs-info svg { width: 14px; height: 14px; }
+      /* The switch is a 24px-tall target; ::before draws the 20px track. */
       #${SECTION_ID} .ytb-hs-switch {
-        flex: none; box-sizing: border-box; width: 36px; height: 20px; padding: 2px;
-        border-radius: var(--ytb-r-pill); background: var(--ytb-line-strong);
+        flex: none; position: relative; box-sizing: border-box; width: 36px; height: 24px; padding: 4px 2px;
+        border: 0; background: transparent; cursor: pointer;
+      }
+      #${SECTION_ID} .ytb-hs-switch::before {
+        content: ''; position: absolute; inset: 2px 0; border-radius: var(--ytb-r-pill); background: var(--ytb-line-strong);
       }
       #${SECTION_ID} .ytb-hs-switch > span {
-        display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ytb-on-fill);
+        position: relative; display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ytb-on-fill);
         box-shadow: 0 1px 2px oklch(45% 0.06 52 / 0.3);
       }
-      #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch { background: var(--ytb-accent-500); }
-      #${SECTION_ID} .ytb-hs-switch-row[aria-checked='true'] .ytb-hs-switch > span { transform: translateX(16px); }
-      #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch { animation: ytb-hs-track-off ${SWITCH_GLIDE_MS}ms var(--ytb-ease-out) var(--ytb-hs-flip-delay, 0ms) backwards; }
-      #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch > span { animation: ytb-hs-knob-off ${SWITCH_GLIDE_MS}ms var(--ytb-ease-out) var(--ytb-hs-flip-delay, 0ms) backwards; }
-      #${SECTION_ID} .ytb-hs-flip[aria-checked='true'] .ytb-hs-switch { animation-name: ytb-hs-track-on; }
-      #${SECTION_ID} .ytb-hs-flip[aria-checked='true'] .ytb-hs-switch > span { animation-name: ytb-hs-knob-on; }
+      #${SECTION_ID} .ytb-hs-switch:focus-visible { outline: none; }
+      #${SECTION_ID} .ytb-hs-switch:focus-visible::before { box-shadow: 0 0 0 3px var(--ytb-ring); }
+      #${SECTION_ID} .ytb-hs-switch[aria-checked='true']::before { background: var(--ytb-accent-500); }
+      #${SECTION_ID} .ytb-hs-switch[aria-checked='true'] > span { transform: translateX(16px); }
+      #${SECTION_ID} .ytb-hs-flip::before { animation: ytb-hs-track-off ${SWITCH_GLIDE_MS}ms var(--ytb-ease-out) var(--ytb-hs-flip-delay, 0ms) backwards; }
+      #${SECTION_ID} .ytb-hs-flip > span { animation: ytb-hs-knob-off ${SWITCH_GLIDE_MS}ms var(--ytb-ease-out) var(--ytb-hs-flip-delay, 0ms) backwards; }
+      #${SECTION_ID} .ytb-hs-flip[aria-checked='true']::before { animation-name: ytb-hs-track-on; }
+      #${SECTION_ID} .ytb-hs-flip[aria-checked='true'] > span { animation-name: ytb-hs-knob-on; }
       @keyframes ytb-hs-knob-on { from { transform: translateX(0); } }
       @keyframes ytb-hs-knob-off { from { transform: translateX(16px); } }
       @keyframes ytb-hs-track-on { from { background: var(--ytb-line-strong); } }
@@ -1796,9 +1836,12 @@
       #${OVERLAY_ID} .ytb-hs-hovercard-detail:empty { display: none; }
       @media (prefers-reduced-motion: reduce) {
 		#${SECTION_ID} .ytb-hs-btn, #${SECTION_ID} .ytb-hs-remove, #${SECTION_ID} .ytb-hs-close, #${SECTION_ID} .ytb-hs-icon, #${SECTION_ID} .ytb-hs-more,
-        #${SECTION_ID} .ytb-hs-copy, #${SECTION_ID} .ytb-hs-swatch::before, #${SECTION_ID} .ytb-hs-color::before { transition: none; }
-        #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch, #${SECTION_ID} .ytb-hs-flip .ytb-hs-switch > span,
-        #${SECTION_ID} .ytb-hs-copy.is-copied > .ytb-hs-copy-check { animation: none; }
+        #${SECTION_ID} .ytb-hs-copy, #${SECTION_ID} .ytb-hs-info, #${SECTION_ID} .ytb-hs-swatch::before, #${SECTION_ID} .ytb-hs-color::before { transition: none; }
+        #${SECTION_ID} .ytb-hs-flip::before, #${SECTION_ID} .ytb-hs-flip > span { animation: none; }
+        #${SECTION_ID} .ytb-hs-copy svg, #${SECTION_ID} .ytb-hs-copy:not(.is-copied) > .ytb-hs-copy-check,
+        #${SECTION_ID} .ytb-hs-copy.is-copied > svg:not(.ytb-hs-copy-check) {
+          transform: none; transition: opacity var(--ytb-dur-quick) var(--ytb-ease-out);
+        }
         #${SECTION_ID} .ytb-hs-copy-feedback { animation-name: ytb-hs-copied-fade; }
         #${SECTION_ID} .ytb-hs-card::before, #${SECTION_ID} .ytb-hs-card:hover::before {
           transform: none;

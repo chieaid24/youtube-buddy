@@ -85,7 +85,32 @@ for (const theme of ['light', 'dark']) {
 					await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 				}
 				await panel.getByRole('button', { name: 'Copy Room Code' }).click();
-				await expect(panel.getByRole('status')).toHaveText('Copied');
+				await expect(panel.getByRole('status')).toHaveText('Copied!');
+				// The chip sits centered over the button, inside the card, between the Room state text and the button.
+				const chip = await page.evaluate(() => {
+					const copy = document.querySelector('.ytb-hs-copy')!;
+					const feedback = document.querySelector('.ytb-hs-copy-feedback')!.getBoundingClientRect();
+					const button = copy.getBoundingClientRect();
+					// Lowest ink the Room state text can reach: its baseline plus a descender ("Waiting").
+					const status = document.querySelector('.ytb-hs-room-status strong')!;
+					const text = document.createRange();
+					text.selectNodeContents(status);
+					const font = getComputedStyle(status);
+					const pen = document.createElement('canvas').getContext('2d')!;
+					pen.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+					const glyph = pen.measureText('g');
+					const inkBottom = text.getBoundingClientRect().bottom - glyph.fontBoundingBoxDescent + glyph.actualBoundingBoxDescent;
+					return {
+						offCenter: Math.abs((feedback.left + feedback.right) / 2 - (button.left + button.right) / 2),
+						pastCard: feedback.right - copy.closest('.ytb-hs-set-group')!.getBoundingClientRect().right,
+						overButton: feedback.bottom - button.top,
+						overStatus: inkBottom - feedback.top,
+					};
+				});
+				expect(chip.offCenter).toBeLessThanOrEqual(0.5);
+				expect(chip.pastCard).toBeLessThanOrEqual(0.5);
+				expect(chip.overButton).toBeLessThanOrEqual(0);
+				expect(chip.overStatus).toBeLessThanOrEqual(0);
 				await capture('copied-code');
 				await panel.getByRole('button', { name: 'Close', exact: true }).click();
 				await page.mouse.move(10, 550);
@@ -133,6 +158,44 @@ for (const theme of ['light', 'dark']) {
 		});
 	}
 }
+
+test('On-video rows keep their order, toggle only from the pill, and explain Spoiler Default', async () => {
+	const context = await launchExtension();
+	try {
+		await routeBackend(context, { down: false, read: () => makeData(Date.now()) });
+		await context.route('https://www.youtube.com/**', (route) => route.fulfill({ contentType: 'text/html', body: homeFixture }));
+		await seedPaired(context);
+		const page = await context.newPage();
+		await page.goto('https://www.youtube.com/');
+		await openHomePanel(page);
+		const panel = page.locator('#ytb-home-section');
+		await panel.getByRole('button', { name: 'Settings', exact: true }).click();
+		const group = panel.locator('.ytb-hs-set-group', { hasText: 'On-video' });
+		await expect(group.locator('.ytb-hs-row > span:first-child')).toHaveText([
+			'Show Buddy progress',
+			'Share video progress',
+			'Show Notes',
+			'Spoiler Default',
+			'Popup position',
+		]);
+		await expect(group.getByRole('radiogroup', { name: 'Popup position' })).toBeVisible();
+
+		// The label is plain text: only the pill toggles.
+		const notes = group.getByRole('switch', { name: 'Show Notes' });
+		await expect(notes).toHaveAttribute('aria-checked', 'true');
+		await group.getByText('Show Notes', { exact: true }).click();
+		await expect(notes).toHaveAttribute('aria-checked', 'true');
+		await notes.click();
+		await expect(notes).toHaveAttribute('aria-checked', 'false');
+
+		const hint = /Buddies can't read a Spoiler until they pass that moment/;
+		await expect(group.locator('.ytb-hs-info')).toHaveCount(1);
+		await expect(group.locator('.ytb-hs-info')).toHaveAttribute('title', hint);
+		await expect(group.getByRole('switch', { name: 'Spoiler Default' })).toHaveAccessibleDescription(hint);
+	} finally {
+		await context.close();
+	}
+});
 
 test('Room Home blocks background scrolling until every close path releases it', async () => {
 	const context = await launchExtension();
